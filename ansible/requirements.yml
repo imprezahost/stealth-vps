@@ -1,0 +1,15 @@
+---
+# Ansible Galaxy dependencies for stealth-vps.
+#
+# Install with:
+#   ansible-galaxy collection install -r ansible/requirements.yml
+#
+# We intentionally pin to versions that still support ansible-core 2.14
+# (Debian 12's stock release). Bump these together with min_ansible_version
+# in each role's meta/main.yml when we move off Debian 12.
+
+collections:
+  - name: ansible.posix
+    # 1.6.x is the last line that supports ansible-core 2.14; ansible.posix
+    # 2.x requires 2.16+. Pin the minor so renewals stay predictable.
+    version: ">=1.6.0,<2.0.0"

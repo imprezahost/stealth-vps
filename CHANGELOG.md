@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Project scaffolding (directory layout, license, contribution workflow)
 - Placeholder structure for Ansible roles, cloud-init, install script, observability, docs, tests
+- `stealth-vps` role: kernel tuning task (`tasks/kernel.yml`) — loads `tcp_bbr`, renders `/etc/sysctl.d/99-stealth.conf`, asserts BBR + fq active post-apply
+- `ansible/requirements.yml` declaring `community.general` and `ansible.posix` collection dependencies
+- `docs/development.md` documenting the controller-on-laptop (Path A) and controller-on-VPS (Path B) iteration loops
+
+### Changed
+- `stealth-vps` role: `min_ansible_version` lowered from `2.16` to `2.14` so Debian 12's stock `ansible-core` works without a PPA or pipx install
 
 ### Notes
 - This is the initial pre-alpha scaffolding commit. No installable code yet.

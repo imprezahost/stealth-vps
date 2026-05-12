@@ -1,9 +1,9 @@
 ---
 # stealth-vps role — main task entry.
 #
-# Implementation is split into focused task files so each step is auditable.
-# These are placeholders for v0.1.0-dev — they will be populated as the role
-# is fleshed out, tracked in CHANGELOG.md.
+# Each block is split into a focused task file so every step is auditable.
+# Files that are not yet implemented are commented out; uncomment them as
+# they land in the respective sprint.
 
 - name: Assert supported distribution
   ansible.builtin.assert:
@@ -15,17 +15,19 @@
   ansible.builtin.include_tasks: kernel.yml
   tags: [kernel, sysctl]
 
-- name: Install and configure Xray-core (Reality)
-  ansible.builtin.include_tasks: xray.yml
-  when: stealth_vps_reality_enabled | bool
-  tags: [xray, reality]
-
-- name: Install and configure Hysteria2
-  ansible.builtin.include_tasks: hysteria.yml
-  when: stealth_vps_hysteria_enabled | bool
-  tags: [hysteria, hysteria2]
-
-- name: Install and configure 3X-UI panel
-  ansible.builtin.include_tasks: panel.yml
-  when: stealth_vps_panel_enabled | bool
-  tags: [panel, 3xui]
+# Sprint 1 follow-ups — uncomment each as the file is added:
+#
+# - name: Install and configure Xray-core (Reality)
+#   ansible.builtin.include_tasks: xray.yml
+#   when: stealth_vps_reality_enabled | bool
+#   tags: [xray, reality]
+#
+# - name: Install and configure Hysteria2
+#   ansible.builtin.include_tasks: hysteria.yml
+#   when: stealth_vps_hysteria_enabled | bool
+#   tags: [hysteria, hysteria2]
+#
+# - name: Install and configure 3X-UI panel
+#   ansible.builtin.include_tasks: panel.yml
+#   when: stealth_vps_panel_enabled | bool
+#   tags: [panel, 3xui]

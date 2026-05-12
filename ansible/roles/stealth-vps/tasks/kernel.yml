@@ -1,0 +1,76 @@
+---
+# Kernel tuning for stealth-vps.
+#
+# Implements docs/internal/expansion-plan.md §2.2:
+#   * BBR congestion control + fq qdisc
+#   * TCP Fast Open (client + server)
+#   * Enlarged TCP socket buffers
+#   * Path MTU probing + notsent_lowat (latency under hostile networks)
+#   * Raised file-max
+#
+# The task asserts BBR/fq are actually active post-apply so a silently
+# missing kernel module surfaces immediately, not later under traffic.
+#
+# Uses only ansible.builtin so it works on Debian 12's stock ansible-core
+# (2.14) without pulling community.general (12.x requires ansible-core 2.16).
+
+- name: Persist tcp_bbr load on boot
+  ansible.builtin.copy:
+    content: "tcp_bbr\n"
+    dest: /etc/modules-load.d/tcp_bbr.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_kernel_bbr | bool
+  tags: [kernel, sysctl]
+
+- name: Ensure tcp_bbr module is loaded right now
+  ansible.builtin.command:
+    cmd: modprobe tcp_bbr
+  changed_when: false
+  when: stealth_vps_kernel_bbr | bool
+  tags: [kernel, sysctl]
+
+- name: Render /etc/sysctl.d/99-stealth.conf
+  ansible.builtin.template:
+    src: 99-stealth.conf.j2
+    dest: /etc/sysctl.d/99-stealth.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_vps_sysctl_file
+  tags: [kernel, sysctl]
+
+- name: Reload sysctl when the stealth config changed
+  ansible.builtin.command: sysctl --system
+  when: stealth_vps_sysctl_file.changed
+  changed_when: stealth_vps_sysctl_file.changed
+  tags: [kernel, sysctl]
+
+- name: Read effective congestion control
+  ansible.builtin.command: sysctl -n net.ipv4.tcp_congestion_control
+  register: stealth_vps_cc
+  changed_when: false
+  check_mode: false
+  tags: [kernel, sysctl]
+
+- name: Read effective default qdisc
+  ansible.builtin.command: sysctl -n net.core.default_qdisc
+  register: stealth_vps_qdisc
+  changed_when: false
+  check_mode: false
+  tags: [kernel, sysctl]
+
+- name: Assert BBR + fq are active
+  ansible.builtin.assert:
+    that:
+      - stealth_vps_cc.stdout == 'bbr'
+      - stealth_vps_qdisc.stdout == 'fq'
+    fail_msg: >-
+      Kernel tuning rendered but sysctl values did not switch to BBR/fq
+      (tcp_congestion_control={{ stealth_vps_cc.stdout }},
+      default_qdisc={{ stealth_vps_qdisc.stdout }}).
+      Verify the kernel exposes tcp_bbr and the module loaded successfully.
+    success_msg: "BBR + fq active."
+  when: stealth_vps_kernel_bbr | bool
+  tags: [kernel, sysctl]

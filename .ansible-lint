@@ -1,0 +1,13 @@
+---
+# ansible-lint config for stealth-vps.
+
+# Galaxy collections live under ansible/collections/ when installed locally
+# (collections_path in ansible.cfg). They're third-party code — don't lint.
+exclude_paths:
+  - ansible/collections/
+  - .cache/
+  - .ansible/
+
+# Default profile is "production" since 24.x — bump up gradually. For now
+# "basic" is enough; revisit when we add Molecule integration tests.
+profile: basic

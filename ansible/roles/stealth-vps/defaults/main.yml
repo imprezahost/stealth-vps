@@ -27,8 +27,22 @@ stealth_vps_panel_port: null   # null = randomize
 stealth_vps_panel_path: null   # null = randomize
 
 # ---- Kernel tuning ----
+# Enable BBR congestion control + fq qdisc. Disable only when the kernel
+# does not support BBR (rare on Debian 12+ / Ubuntu 22.04+; impossible on
+# OpenVZ/LXC containers that share the host kernel).
 stealth_vps_kernel_bbr: true
+# Enable TCP Fast Open (value 3 = client + server). Set false to disable.
 stealth_vps_kernel_fastopen: true
+# Advanced — TCP socket buffer ceilings (bytes) and per-connection ranges.
+# Defaults match docs/internal/expansion-plan.md §2.2; most users should
+# leave these alone.
+stealth_vps_kernel_rmem_max: 67108864
+stealth_vps_kernel_wmem_max: 67108864
+stealth_vps_kernel_tcp_rmem: "4096 87380 67108864"
+stealth_vps_kernel_tcp_wmem: "4096 65536 67108864"
+stealth_vps_kernel_mtu_probing: 1
+stealth_vps_kernel_notsent_lowat: 16384
+stealth_vps_kernel_file_max: 1048576
 
 # ---- IPv6 ----
 stealth_vps_ipv6_enabled: true

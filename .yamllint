@@ -1,0 +1,46 @@
+---
+# yamllint config for stealth-vps.
+#
+# Run with: yamllint -s .
+#
+# Rules below mirror what ansible-lint expects (otherwise it warns about
+# "incompatible custom yamllint configuration") plus our own line-length
+# relaxation.
+
+extends: default
+
+rules:
+  # 80 is too tight for Ansible task descriptions, fail_msg, and inline
+  # documentation. 120 leaves room without encouraging dense lines.
+  line-length:
+    max: 120
+    level: error
+
+  # GitHub Actions uses bare `on:` as the trigger block — yamllint's
+  # default truthy rule treats that as a string-vs-boolean ambiguity.
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+    check-keys: false
+
+  # ansible-lint required adjustments (keep these in sync).
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+ignore: |
+  # cloud-init files require a literal `#cloud-config` header before
+  # the YAML document — that violates yamllint's comment-spacing and
+  # document-start rules. Lint these manually instead.
+  cloud-init/
+
+  # Ansible collections vendored locally by `ansible-galaxy collection
+  # install -r ansible/requirements.yml` — third-party, not our YAML.
+  ansible/collections/
+
+  # Local Ansible cache.
+  .ansible/
