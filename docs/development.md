@@ -45,9 +45,16 @@ echo 'export PATH="/root/.local/bin:$PATH"' >> ~/.bashrc
 pipx install ansible-lint
 pipx install yamllint
 
-# Clone via a GitLab deploy token (read_repository scope) so the VPS can
-# `git pull` without a personal credential. Replace the token below.
-git clone https://gitlab+deploy-token-<id>:<token>@git.imprezahost.com/impreza/stealth-vps.git /opt/stealth-vps
+# Clone via a GitLab deploy token (project → Settings → Repository →
+# Deploy tokens → Create, scope `read_repository`). The VPS can `git pull`
+# without a personal credential. Replace USER and TOKEN below — the
+# username is the literal string GitLab gives you (e.g. `gitlab+deploy-token-2`).
+DEPLOY_USER='gitlab+deploy-token-<id>'
+DEPLOY_TOKEN='gldt-<...>'
+git clone "https://${DEPLOY_USER}:${DEPLOY_TOKEN}@git.imprezahost.com/impreza/stealth-vps.git" /opt/stealth-vps
+
+# Restrict who can read the token (it ends up in .git/config).
+chmod 600 /opt/stealth-vps/.git/config
 
 cd /opt/stealth-vps
 ansible-galaxy collection install -r ansible/requirements.yml
