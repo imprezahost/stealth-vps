@@ -1,0 +1,45 @@
+#cloud-config
+# stealth-vps cloud-init bootstrap.
+#
+# Drop this as user-data when creating a VPS. The script installs Ansible
+# and runs the role from a pinned release tag of this repository.
+#
+# Customize:
+#   - replace `stealth_vps_version` with the desired release tag
+#   - optionally override role defaults via the `extra-vars` block
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ansible
+  - git
+  - python3-pip
+
+write_files:
+  - path: /etc/stealth-vps/extra-vars.yml
+    permissions: "0600"
+    content: |
+      ---
+      # Override any role defaults here. Empty by default — sane defaults
+      # apply. See ansible/inventory/example.yml for available variables.
+      stealth_vps_reality_dest: "www.microsoft.com:443"
+      stealth_vps_reality_servernames:
+        - www.microsoft.com
+
+runcmd:
+  - mkdir -p /var/log/stealth-vps
+  - |
+    ansible-pull \
+      -U https://github.com/imprezahost/stealth-vps.git \
+      -C v0.1.0 \
+      -i 'localhost,' \
+      -c local \
+      -e "@/etc/stealth-vps/extra-vars.yml" \
+      ansible/playbooks/site.yml \
+      2>&1 | tee /var/log/stealth-vps/bootstrap.log
+
+final_message: |
+  stealth-vps cloud-init bootstrap finished.
+  Logs: /var/log/stealth-vps/bootstrap.log
+  Panel and connection details: /root/stealth-vps-credentials.txt

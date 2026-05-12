@@ -1,0 +1,34 @@
+---
+# Example inventory. Copy to hosts.yml and edit.
+# hosts.yml is gitignored so credentials stay local.
+
+all:
+  hosts:
+    example-vps:
+      ansible_host: 198.51.100.10
+      ansible_user: root
+      ansible_port: 22
+      # ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+
+  vars:
+    # ---- stealth-vps role ----
+    # Real site whose TLS handshake Reality will steal. Must be reachable from
+    # China, TLS 1.3 + X25519 + HTTP/2. Avoid Cloudflare-fronted sites.
+    stealth_vps_reality_dest: "www.microsoft.com:443"
+    stealth_vps_reality_servernames:
+      - www.microsoft.com
+
+    # Hysteria2 masquerade target (a real site to proxy real-looking traffic to).
+    stealth_vps_hysteria_masquerade_url: "https://news.ycombinator.com/"
+
+    # Declared bandwidth for Hysteria2 brutal congestion control.
+    stealth_vps_hysteria_bandwidth_up: "200 mbps"
+    stealth_vps_hysteria_bandwidth_down: "1 gbps"
+
+    # ---- stealth-hardening role ----
+    stealth_hardening_ssh_port: 22550
+    stealth_hardening_fail2ban_bantime: 86400      # 24h
+    stealth_hardening_fail2ban_maxretry: 3
+    stealth_hardening_ufw_allow_ports:
+      - "{{ stealth_hardening_ssh_port }}"
+      # Reality + Hysteria2 ports are added automatically by the stealth-vps role

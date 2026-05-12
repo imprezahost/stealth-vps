@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: stealth_hardening
+  namespace: imprezahost
+  author: Impreza Host
+  description: >
+    Baseline VPS hardening — SSH on non-default port, key-only auth, fail2ban
+    with rules that actually work for the 3X-UI panel, UFW, unattended security
+    upgrades, Spamhaus DROP/EDROP via hosts.deny.
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Debian
+      versions: [bookworm]
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags:
+    - security
+    - hardening
+    - networking
+
+dependencies: []

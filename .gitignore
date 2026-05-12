@@ -1,0 +1,43 @@
+# Ansible
+*.retry
+.ansible/
+ansible/inventory/*.yml
+!ansible/inventory/example.yml
+ansible/vault_pass.txt
+*.vault
+
+# Molecule / testing
+.molecule/
+
+# Generated configs / runtime
+.tmp/
+.cache/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Secrets
+secrets/
+*.pem
+*.key
+*.crt
+!tests/fixtures/*.crt
+.env
+.env.local
+
+# Local build artifacts
+dist/
+build/

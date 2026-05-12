@@ -1,0 +1,22 @@
+---
+- name: Restart xray
+  ansible.builtin.systemd:
+    name: xray
+    state: restarted
+    daemon_reload: true
+
+- name: Restart hysteria-server
+  ansible.builtin.systemd:
+    name: hysteria-server
+    state: restarted
+    daemon_reload: true
+
+- name: Restart x-ui
+  ansible.builtin.systemd:
+    name: x-ui
+    state: restarted
+    daemon_reload: true
+
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false

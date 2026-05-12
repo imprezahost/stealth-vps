@@ -1,0 +1,23 @@
+---
+galaxy_info:
+  role_name: stealth_vps
+  namespace: imprezahost
+  author: Impreza Host
+  description: >
+    Installs and configures Xray-core with VLESS-Reality, Hysteria2, and 3X-UI
+    panel for privacy-focused VPS deployments in restrictive network environments.
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Debian
+      versions: [bookworm]
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags:
+    - networking
+    - privacy
+    - proxy
+    - vpn
+    - security
+
+dependencies: []

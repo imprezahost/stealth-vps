@@ -1,0 +1,35 @@
+---
+# Lightweight validation that runs on the public GitHub mirror.
+# Heavy CI (Molecule integration, full lint matrix) runs on the private GitLab.
+# This file exists so external contributors get fast feedback on their PRs.
+
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          find scripts -type f -name "*.sh" -print0 | xargs -0 -r shellcheck || true
+
+      - name: yamllint
+        run: |
+          pip install yamllint
+          yamllint -s . || true
+
+      - name: ansible-lint
+        run: |
+          pip install "ansible-core>=2.16" ansible-lint
+          ansible-lint ansible/ || true
+
+      # Linters report-only on the public mirror; canonical CI is on GitLab.
+      # External PRs will see the output and can iterate; merge gating happens internally.

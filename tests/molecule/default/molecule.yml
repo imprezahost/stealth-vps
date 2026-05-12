@@ -1,0 +1,32 @@
+---
+# Placeholder Molecule scenario. Will be expanded with real verify steps
+# once the Ansible roles have implementation content.
+
+dependency:
+  name: galaxy
+
+driver:
+  name: docker
+
+platforms:
+  - name: stealth-vps-debian12
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+
+provisioner:
+  name: ansible
+  playbooks:
+    converge: ../../../ansible/playbooks/site.yml
+  inventory:
+    host_vars:
+      stealth-vps-debian12:
+        stealth_hardening_ssh_port: 22550
+        stealth_vps_reality_dest: "www.microsoft.com:443"
+
+verifier:
+  name: ansible

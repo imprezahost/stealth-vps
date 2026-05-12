@@ -1,0 +1,32 @@
+---
+# Defaults for the stealth-hardening role.
+
+# ---- SSH ----
+stealth_hardening_ssh_port: 22550
+stealth_hardening_ssh_permit_root_login: "prohibit-password"   # key-only for root
+stealth_hardening_ssh_password_authentication: false
+stealth_hardening_ssh_max_auth_tries: 3
+
+# ---- fail2ban ----
+stealth_hardening_fail2ban_enabled: true
+stealth_hardening_fail2ban_bantime: 86400       # 24h
+stealth_hardening_fail2ban_findtime: 600        # 10min window
+stealth_hardening_fail2ban_maxretry: 3
+# Jails enabled by default. The "3xui" jail uses custom filter shipped with the role.
+stealth_hardening_fail2ban_jails:
+  - sshd
+  - 3xui
+
+# ---- UFW ----
+stealth_hardening_ufw_enabled: true
+stealth_hardening_ufw_default_incoming: deny
+stealth_hardening_ufw_default_outgoing: allow
+stealth_hardening_ufw_allow_ports:
+  - "{{ stealth_hardening_ssh_port }}"
+
+# ---- unattended-upgrades ----
+stealth_hardening_unattended_upgrades: true
+
+# ---- hosts.deny / Spamhaus ----
+stealth_hardening_spamhaus_drop: true
+stealth_hardening_spamhaus_edrop: true

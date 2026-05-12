@@ -1,0 +1,34 @@
+---
+# Defaults for the stealth-vps role.
+# Override in inventory or playbook vars.
+
+# ---- Reality (Xray-core) ----
+stealth_vps_reality_enabled: true
+stealth_vps_reality_dest: "www.microsoft.com:443"
+stealth_vps_reality_servernames:
+  - www.microsoft.com
+# Port range used to randomly pick the Reality inbound port.
+stealth_vps_reality_port_min: 40000
+stealth_vps_reality_port_max: 60000
+
+# ---- Hysteria2 ----
+stealth_vps_hysteria_enabled: true
+stealth_vps_hysteria_masquerade_url: "https://news.ycombinator.com/"
+stealth_vps_hysteria_bandwidth_up: "200 mbps"
+stealth_vps_hysteria_bandwidth_down: "1 gbps"
+stealth_vps_hysteria_port_min: 40000
+stealth_vps_hysteria_port_max: 60000
+stealth_vps_hysteria_port_hopping: true
+
+# ---- 3X-UI panel ----
+stealth_vps_panel_enabled: true
+# Panel port and path are randomized by default; pin them only if you must.
+stealth_vps_panel_port: null   # null = randomize
+stealth_vps_panel_path: null   # null = randomize
+
+# ---- Kernel tuning ----
+stealth_vps_kernel_bbr: true
+stealth_vps_kernel_fastopen: true
+
+# ---- IPv6 ----
+stealth_vps_ipv6_enabled: true

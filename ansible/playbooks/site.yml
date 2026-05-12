@@ -1,0 +1,10 @@
+---
+- name: Apply stealth-vps stack
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: stealth-hardening
+      tags: [hardening]
+    - role: stealth-vps
+      tags: [stealth]
