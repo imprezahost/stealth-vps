@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.4.1)
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 — needs iOS + macOS hardware in the QA rotation)
+- zh-CN README rewrite by a native speaker (deferred from v0.4.0 — needs reviewer)
+- Probe-resistance scripts: fill JA3/JA4 fingerprint body in `tls_fingerprint_compare.py`, fill VPS-side comparison body in `active_probe.py`. Contract is locked from v0.4.0.
+
+## [0.4.0] - 2026-05-13
+
+Fourth tagged release. Three new pieces of infrastructure for the project itself: external contributors get a real CI path via the **reverse-mirror automation**, the **probe-resistance test suite** lands in scaffolded form so the threat model is auditable and the script contracts are locked, and **arm64 hosts are first-class** — Oracle Ampere free tier, AWS Graviton, and Hetzner CAX all run the same playbook now. Two roadmap items (pen-tested iOS/macOS validation, zh-CN README rewrite) are deferred to v0.4.1 because they depend on externals (hardware in the QA rotation, native-speaker reviewer) that aren't ready.
+
 ### Added
 - **arm64 support** (`ansible_facts.architecture == 'aarch64'` is now accepted):
   - New `stealth_vps_arch_map` in `defaults/main.yml` maps `uname -m` → GOARCH-style suffix (`x86_64 → amd64`, `aarch64 → arm64`). Every upstream binary URL (`Xray-core` bundled in 3X-UI, Hysteria2, the in-panel xray binary path) now derives from this map via the new `stealth_vps_arch` fact set in `tasks/main.yml`.
@@ -31,11 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Two pre-existing `yamllint` line-length errors on `ansible/roles/stealth-vps/tasks/{hysteria,tls}.yml` that snuck in during v0.2/v0.3 — wrapped in `# yamllint disable rule:line-length` because the offending lines are single-token shell or iptables-restore directives that can't be split.
 
-### Planned (v0.4.0 remaining)
-- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs
-- zh-CN README rewrite by a native speaker
-- arm64 packaging for the panel + Hysteria2 (so amd64-only assert can be relaxed)
-- Probe-resistance test suite scaffolding (v1.0 roadmap, started here)
+### Deferred to v0.4.1
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (needs hardware in the QA rotation; walkthroughs themselves remain accurate to published app behaviour).
+- zh-CN README rewrite by a native speaker (English version is current; zh-CN landed as a placeholder in v0.2 and still needs a native review pass).
 
 ## [0.3.0] - 2026-05-13
 

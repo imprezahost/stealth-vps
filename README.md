@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.3.0 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules (cert expiry / scrape / fail2ban / traffic spikes). Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.4.0 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI; `stealth-vps/gitlab-ci` status reports back. Probe-resistance test suite scaffolded (5 scenarios, 2 runnable scripts) under `tests/probe-resistance/`. See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -95,8 +95,9 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 |---|---|---|
 | v0.1.0 | Ansible role (kernel + panel + Reality + Hysteria2), hardening role, cloud-init, `install.sh` | shipped 2026-05-13 |
 | v0.2.0 | Let's Encrypt automation, Spamhaus DROP, Hysteria2 port hopping, Android + Windows walkthroughs, `node_exporter` baseline, Molecule scenario | shipped 2026-05-13 |
-| **v0.3.0** | Per-protocol Prometheus metrics + Grafana dashboard + alert rules, multi-platform Molecule matrix (Debian 12 + Ubuntu 22.04/24.04), source-IP filter for `:9100`, iOS + macOS full walkthroughs | **shipped 2026-05-13** |
-| v0.4.0 | Pen-tested iOS + macOS validation pass, zh-CN README rewrite, arm64 packaging, reverse-mirror automation, probe-resistance test suite scaffolding | planned |
+| v0.3.0 | Per-protocol Prometheus metrics + Grafana dashboard + alert rules, multi-platform Molecule matrix (Debian 12 + Ubuntu 22.04/24.04), source-IP filter for `:9100`, iOS + macOS full walkthroughs | shipped 2026-05-13 |
+| **v0.4.0** | arm64 packaging (Oracle Ampere / Graviton / Hetzner CAX), reverse-mirror automation (GitHub PR → GitLab CI → GitHub commit status), probe-resistance test suite scaffolding (5 scenarios, 2 runnable scripts) | **shipped 2026-05-13** |
+| v0.4.1 | Pen-tested iOS + macOS validation pass, zh-CN README rewrite, probe-resistance script bodies (JA3/JA4 + VPS-side comparison) | planned |
 | v0.5.0 | Terraform module (provider-agnostic), Pulumi reference | planned |
 | v1.0.0 | Probe-resistance CI suite (full), signed releases, security audit | roadmap |
 
