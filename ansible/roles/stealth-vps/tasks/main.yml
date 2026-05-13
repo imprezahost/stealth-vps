@@ -20,12 +20,12 @@
   when: stealth_vps_panel_enabled | bool
   tags: [panel, 3xui]
 
-# Sprint 1 follow-ups — uncomment each as the file is added:
-#
-# - name: Install and configure Xray-core (Reality)
-#   ansible.builtin.include_tasks: xray.yml
-#   when: stealth_vps_reality_enabled | bool
-#   tags: [xray, reality]
+- name: Configure Reality inbound (VLESS-Reality via Xray)
+  ansible.builtin.include_tasks: xray.yml
+  when: stealth_vps_reality_enabled | bool
+  tags: [xray, reality]
+
+# Sprint 1 follow-up — uncomment when the file is added:
 #
 # - name: Install and configure Hysteria2
 #   ansible.builtin.include_tasks: hysteria.yml
