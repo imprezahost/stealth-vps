@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.1.0 (alpha).** Functional stack. SSH/UFW/fail2ban/unattended-upgrades hardening, VLESS-Reality, Hysteria2 server, 3X-UI panel, kernel tuning — all working end-to-end. TLS automation, port hopping, client walkthroughs, and observability bundles land in v0.2.0. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.2.0 (alpha).** Production-grade stack: SSH / UFW / fail2ban / unattended-upgrades hardening, VLESS-Reality, Hysteria2 (with port hopping), 3X-UI panel, kernel tuning, Let's Encrypt automation, Spamhaus DROP via ipset, `node_exporter` baseline. Android + Windows client walkthroughs included; iOS / macOS get a quick-start in v0.2.0 with pen-tested walkthroughs in v0.3.0. See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -26,14 +26,15 @@ If you'd rather paste a one-liner and move on, those other projects serve you be
 ## What it installs
 
 - **Xray-core** with VLESS-Reality (steals TLS handshake from a real site; resists active probing)
-- **Hysteria2** (QUIC-based, masquerades as HTTP/3 traffic to a real site; port-hopping arrives in v0.2.0)
+- **Hysteria2** (QUIC-based, masquerades as HTTP/3 traffic to a real site; **port-hopping over a configurable UDP range**)
 - **3X-UI** panel (multi-user, traffic limits, expiry, subscription links)
+- **TLS**: optional **Let's Encrypt** issuance via `acme.sh` (HTTP-01 standalone) when you set `stealth_vps_domain` — Hysteria2 + 3X-UI panel both use the real cert; falls back to self-signed if unset
 - **Kernel tuning**: BBR + fq qdisc, larger socket buffers, TCP Fast Open
 - **Hardening**: SSH on non-default port, key-only auth, fail2ban with a *working* 3X-UI filter, UFW (deny-incoming default)
+- **Reputation drop**: **Spamhaus DROP** loaded into an ipset, dropped at the top of UFW's INPUT chain, refreshed daily
 - **Patching**: `unattended-upgrades` with security-origin filter and Package-Blacklist hook
+- **Observability**: `prometheus-node-exporter` baseline (loopback only by default; expose / tunnel as needed)
 - **IPv6 dual-stack** by default
-- **Observability**: Prometheus / Grafana bundle planned for v0.2.0
-- **IP-blocklists**: Spamhaus DROP/EDROP via ipset + UFW planned for v0.2.0
 
 ---
 
@@ -92,9 +93,9 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 
 | Version | Scope | Status |
 |---|---|---|
-| **v0.1.0** | Ansible role (kernel + panel + Reality + Hysteria2), `stealth-hardening` role (SSH + UFW + fail2ban + unattended-upgrades), cloud-init, `install.sh`, EN README | **shipped 2026-05-13** |
-| v0.2.0 | Let's Encrypt automation (kills `insecure=1` on Hysteria2), Spamhaus DROP/EDROP via ipset+UFW, Hysteria2 port hopping, Android/Windows client walkthroughs, Prometheus exporter + Grafana dashboard, Molecule integration tests, zh-CN README rewrite | in development |
-| v0.3.0 | iOS/macOS client walkthroughs, more Grafana dashboards, Discord/Telegram alert webhooks | planned |
+| v0.1.0 | Ansible role (kernel + panel + Reality + Hysteria2), `stealth-hardening` role (SSH + UFW + fail2ban + unattended-upgrades), cloud-init, `install.sh`, EN README | shipped 2026-05-13 |
+| **v0.2.0** | Let's Encrypt automation (drops `insecure=1` on Hysteria2), Spamhaus DROP via ipset + UFW, Hysteria2 port hopping, Android + Windows client walkthroughs, `node_exporter` baseline observability, Molecule scenario | **shipped 2026-05-13** |
+| v0.3.0 | Pen-tested iOS / macOS client walkthroughs, Xray + Hysteria2 Prometheus endpoints, stealth-vps-specific Grafana dashboards, alert rules (cert expiry, login flood, bandwidth, fail2ban rate), zh-CN README rewrite, multi-platform Molecule matrix | planned |
 | v0.4.0 | Terraform module (provider-agnostic), Pulumi reference | planned |
 | v1.0.0 | Probe-resistance CI suite, signed releases, security audit | roadmap |
 

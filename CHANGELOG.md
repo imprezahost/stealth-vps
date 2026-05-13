@@ -7,40 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `stealth-vps` role: TLS / ACME task (`tasks/tls.yml`) — when `stealth_vps_domain` is set, issues a Let's Encrypt cert via `acme.sh --standalone --httpport 80`, persists it in `/etc/stealth-vps/tls/`, registers an auto-renewal `--reloadcmd` that restarts hysteria-server + x-ui. When the domain is unset, the role keeps the v0.1.0 self-signed cert path.
-- `stealth-vps` role: panel task now binds the Let's Encrypt cert to the 3X-UI panel via `x-ui cert -webCert -webCertKey` when a domain is configured (panel serves HTTPS).
-- `stealth-vps` role: hysteria task picks the right cert + SNI at apply time (Let's Encrypt fullchain when `stealth_vps_domain` is set; bing.com self-signed otherwise).
-- `stealth-hardening` role: ufw task gains the `stealth_hardening_ufw_acme_http_challenge` toggle that opens port 80/tcp for HTTP-01 challenges and renewals.
-- Operator credentials file now emits `https://` panel URLs and drops `insecure=1` from the Hysteria2 URI when TLS is real.
+### Planned (v0.3.0)
+- Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
+- zh-CN README rewrite by a native speaker
+- Xray / Hysteria2 Prometheus endpoints + stealth-vps-specific Grafana dashboards
+- Alert rules: cert expiry, login flood, bandwidth spike, fail2ban ban rate
+- Source-IP filter variant for `stealth_vps_observability_listen` exposure
+- Multi-platform Molecule matrix (Ubuntu 22.04 / 24.04 alongside Debian 12)
+
+## [0.2.0] - 2026-05-13
+
+Second tagged release. Real TLS, hardening with reputation-based dropping, port hopping, end-user client walkthroughs, baseline observability, and a Molecule scenario gating idempotency regressions in CI.
 
 ### Added
-- `stealth-hardening` role: Spamhaus DROP ipset task (`tasks/spamhaus.yml`) — installs ipset, drops a `stealth-vps-update-spamhaus.sh` script, a oneshot systemd service (runs `Before=ufw.service` so the set exists before UFW reloads), and a daily systemd timer with jitter. Injects a single `-A ufw-before-input -m set --match-set spamhaus-drop src -j DROP` rule into `/etc/ufw/before.rules` via blockinfile. Atomic swap pattern (build new ipset, swap, destroy old) keeps the firewall from ever observing an empty set. Spamhaus consolidated EDROP into DROP in early 2026, so we only consume the one URL.
-
-### Added
-- `stealth-vps` role: Hysteria2 port hopping (`tasks/hysteria.yml`) — opt-in via `stealth_vps_hysteria_port_hopping=true`. Injects a `*nat` block into `/etc/ufw/before.rules` with a `PREROUTING REDIRECT` rule that bounces UDP traffic in `[stealth_vps_hysteria_port_hopping_min, _max]` (defaults 20000-50000) to the actual Hysteria2 listener port. The client URI in `credentials.txt` gets the `,min-max` suffix the apernet/hysteria client understands.
+- **Let's Encrypt automation** (`stealth-vps` role, `tasks/tls.yml`) — when `stealth_vps_domain` is set, the role issues a cert via `acme.sh --standalone --httpport 80`, persists it under `/etc/stealth-vps/tls/`, and registers a renewal `--reloadcmd` that restarts hysteria-server + x-ui. Hysteria2 + 3X-UI panel both pick up the LE cert; the Hysteria2 URI in `credentials.txt` drops `insecure=1` and the panel URLs become `https://`. With `stealth_vps_domain` unset, v0.1.0 self-signed behaviour is preserved.
+- **`stealth-hardening` role: ufw task** gains the `stealth_hardening_ufw_acme_http_challenge` toggle that opens port 80/tcp for HTTP-01 issuance + renewals.
+- **Spamhaus DROP via ipset** (`stealth-hardening` role, `tasks/spamhaus.yml`) — installs ipset, ships `/usr/local/sbin/stealth-vps-update-spamhaus.sh` (atomic swap of the named set), a oneshot systemd service (`Before=ufw.service` so the set exists before UFW reloads), and a daily timer with `RandomizedDelaySec=4h`. Injects one `-A ufw-before-input -m set --match-set spamhaus-drop src -j DROP` line into `/etc/ufw/before.rules` via blockinfile. Spamhaus merged EDROP into DROP in early 2026; we only consume the one URL.
+- **Hysteria2 port hopping** (`stealth-vps` role, `tasks/hysteria.yml`) — opt-in via `stealth_vps_hysteria_port_hopping=true`. Injects a `*nat` block into `/etc/ufw/before.rules` with a `PREROUTING REDIRECT` rule that bounces UDP traffic in `[port_hopping_min, _max]` (defaults 20000-50000) to the actual Hysteria2 listener. The client URI in `credentials.txt` gains the `,min-max` suffix.
+- **Observability bootstrap** (`stealth-vps` role, `tasks/observability.yml`) — installs `prometheus-node-exporter`, overrides its systemd unit to bind to `stealth_vps_observability_listen` (default `127.0.0.1:9100`). Operators pull via SSH tunnel from a central Prometheus, or override the listen + UFW source filter when ready to expose. Smoke-tests `/metrics`.
+- **Client setup walkthroughs**: `docs/client-setup/android.md` (v2rayNG + NekoBox), `docs/client-setup/windows.md` (NekoBox + v2rayN, both proxy and TUN modes). `ios.md` and `macos.md` promoted from "placeholder" to working quick-start tables; pen-tested walkthrough for those lands in v0.3.0.
+- **Molecule scenario** (`tests/molecule/default/`) — Debian 12 + systemd container, converges `site.yml` with service-bound tasks toggled off, `verify.yml` asserts kernel sysctl + SSH drop-in artifacts, Molecule's built-in `idempotence` step gates regressions. `.gitlab-ci.yml` runs `molecule test` on every MR / `main` push (allow_failure during dind stabilisation).
 
 ### Changed
-- `stealth_hardening_spamhaus_drop` + `stealth_hardening_spamhaus_edrop` split is replaced by a single `stealth_hardening_spamhaus_enabled` toggle (default `true`).
+- `stealth_hardening_spamhaus_drop` + `_edrop` split replaced by a single `stealth_hardening_spamhaus_enabled` toggle.
+- `ansible-lint` CI job installs the role's collection requirements first; ansible-core pin lowered to `>=2.14,<2.18` to match the project's real support window.
+- Permission chain on `/etc/stealth-vps/`: parent dir is now `0711 root:root` (traverse-only) so `hysteria` can reach `tls/`; cert files are `0644 fullchain` + `0640 privkey`, with the private key chgrped to `hysteria`.
+- `panel.yml` cert binding now drives the restart explicitly (not via a flush_handlers + notify chain, which behaved unreliably under ansible-core 2.14 inside an `include_tasks`).
+- `xray.yml` 3X-UI API calls use `https://` when TLS is on, with `validate_certs: false` on loopback (cert CN won't match `127.0.0.1`).
 
-### Added
-- `docs/client-setup/android.md` — full walkthrough for v2rayNG (Reality) and NekoBox for Android (Reality + Hysteria2), including verification steps, port-hopping URI handling, and a troubleshooting section for the common breakages (Xiaomi VPN permission, DNS leaks, Hysteria2 on mobile data).
-- `docs/client-setup/windows.md` — full walkthrough for NekoBox (nekoray) and v2rayN, both proxy and TUN modes, with wintun handling and common error fixes.
-- `docs/client-setup/ios.md` and `docs/client-setup/macos.md` — promoted from "placeholder" to working quick-start tables of the recommended clients (Shadowrocket, Streisand, Hiddify on iOS; Hiddify, V2Box, NekoBox, Shadowrocket on macOS), with notes on TUN behaviour and App Store regional availability. Full pen-tested walkthrough lands in v0.3.0.
-
-### Added
-- `tests/molecule/default/` — working Molecule scenario. Boots a Debian 12 + systemd container, converges `site.yml` with the service-bound tasks toggled off (panel/xray/hysteria/UFW/fail2ban/spamhaus/unattended-upgrades — those need a real network stack), and `verify.yml` asserts the kernel sysctl drop-in + SSH hardening drop-in are in place. The `idempotence` step of `molecule test` gates regressions where a 2nd converge would mark anything changed.
-- `.gitlab-ci.yml` `molecule` job runs the scenario on every MR / `main` push. `allow_failure: true` for now because docker-in-docker self-hosted runners are flaky; the manual VPS validation in `docs/development.md` is still the authoritative gate.
-
-### Changed
-- `ansible-lint` CI job now installs the role's collection requirements first (so the role tree resolves) and lowers the pinned ansible-core to `>=2.14,<2.18` to match the project's actual support window.
-
-### Added
-- `stealth-vps` role: observability task (`tasks/observability.yml`) — installs `prometheus-node-exporter` and overrides its systemd unit to bind to `stealth_vps_observability_listen` (default `127.0.0.1:9100`, i.e. loopback only). Smoke-tests `/metrics`. Toggle via `stealth_vps_observability_enabled` (default `true`).
-- `observability/README.md` rewritten with the central-Prometheus pull pattern (SSH tunnel or UFW source filter), reference to Grafana.com dashboard `1860` (Node Exporter Full) for now, and what's deferred to v0.3.0 (Xray/Hysteria2 endpoints, alert rules, stealth-vps-specific dashboards).
-
-### Planned (still in v0.2.0)
-- zh-CN README rewrite by a native speaker (will likely slip to v0.3.0; freelance work)
+### Fixed
+- Idempotency cleanup (`tls.yml` + `hysteria.yml`): tls.yml owns *mode* on cert files (no owner/group), hysteria.yml owns *group=hysteria* only; install-cert gated on a per-domain marker file. Second apply now reports 0 changed across the full play.
 
 ## [0.1.0] - 2026-05-13
 
@@ -72,5 +68,6 @@ First tagged release. Working stealth-VPS stack with hardened SSH, firewall, aut
 - Client setup docs are placeholders; full walkthroughs land in v0.2.0.
 - `observability/` directory is scaffolded but empty; Prometheus/Grafana bundle lands in v0.2.0.
 
-[Unreleased]: https://github.com/imprezahost/stealth-vps/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/imprezahost/stealth-vps/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/imprezahost/stealth-vps/releases/tag/v0.2.0
 [0.1.0]: https://github.com/imprezahost/stealth-vps/releases/tag/v0.1.0
