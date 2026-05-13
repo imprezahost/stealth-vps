@@ -1,0 +1,14 @@
+# Normalize all text files to LF on commit. Lint tooling, sysctl, and
+# every Linux service we deploy to expects LF — CRLF leaking from a
+# Windows checkout breaks yamllint and shell shebangs.
+* text=auto eol=lf
+
+# Binary types (never normalize)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.tar.gz binary
+*.zip binary

@@ -1,0 +1,96 @@
+---
+# fail2ban — SSH + 3X-UI panel.
+#
+# UFW is already the firewall; fail2ban talks to UFW via banaction=ufw
+# so blocked IPs land in `ufw status` (single source of truth, easy to
+# audit).
+#
+# The 3X-UI filter ships with the role because the upstream example is
+# subtly broken (wrong datepattern + missing quote handling).
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name:
+      - fail2ban
+      - python3-systemd  # needed for backend=systemd to read journal
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [fail2ban, hardening]
+
+- name: Render 3X-UI fail2ban filter
+  ansible.builtin.template:
+    src: fail2ban-3xui.filter.j2
+    dest: /etc/fail2ban/filter.d/3xui.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_hardening_f2b_filter
+  tags: [fail2ban, hardening]
+
+- name: Render fail2ban jail.local (site overrides)
+  ansible.builtin.template:
+    src: fail2ban-jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_hardening_f2b_jail
+  tags: [fail2ban, hardening]
+
+- name: Enable + start fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: true
+  tags: [fail2ban, hardening]
+
+- name: Restart fail2ban when config changed
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted
+  when: stealth_hardening_f2b_filter.changed or stealth_hardening_f2b_jail.changed
+  tags: [fail2ban, hardening]
+
+- name: Wait for fail2ban-server socket to be ready
+  ansible.builtin.wait_for:
+    path: /var/run/fail2ban/fail2ban.sock
+    timeout: 15
+  tags: [fail2ban, hardening]
+
+# --- Smoke test ---------------------------------------------------------
+
+- name: List active fail2ban jails
+  ansible.builtin.command:
+    cmd: fail2ban-client status
+  register: stealth_hardening_f2b_status
+  changed_when: false
+  tags: [fail2ban, hardening]
+
+- name: Assert all configured jails are active
+  ansible.builtin.assert:
+    that:
+      - item in stealth_hardening_f2b_status.stdout
+    fail_msg: >-
+      jail {{ item }} not found in fail2ban-client status:
+      {{ stealth_hardening_f2b_status.stdout }}
+  loop: "{{ stealth_hardening_fail2ban_jails }}"
+  tags: [fail2ban, hardening]
+
+- name: Capture per-jail status (filter + currently banned)
+  ansible.builtin.command:
+    cmd: "fail2ban-client status {{ item }}"
+  register: stealth_hardening_f2b_jail_status
+  changed_when: false
+  loop: "{{ stealth_hardening_fail2ban_jails }}"
+  tags: [fail2ban, hardening]
+
+- name: Show fail2ban summary
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item }}:
+      {{ item.stdout_lines | select('search', '(Currently failed|Currently banned|Total)') | list }}
+  loop: "{{ stealth_hardening_f2b_jail_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  tags: [fail2ban, hardening]

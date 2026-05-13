@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+# stealth-vps — kernel tuning for restrictive-network VPS workloads.
+# Edit ansible/roles/stealth-vps/templates/99-stealth.conf.j2 instead of
+# this file. Local edits are overwritten on the next playbook run.
+
+{% if stealth_vps_kernel_bbr | bool %}
+# Congestion control: BBR + fq qdisc (Google BBR v1, kernel-native).
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+{% endif %}
+
+{% if stealth_vps_kernel_fastopen | bool %}
+# TCP Fast Open enabled for both outgoing and incoming connections.
+net.ipv4.tcp_fastopen = 3
+{% endif %}
+
+# Socket buffer ceilings.
+net.core.rmem_max = {{ stealth_vps_kernel_rmem_max }}
+net.core.wmem_max = {{ stealth_vps_kernel_wmem_max }}
+
+# Per-connection autotune ranges (min default max).
+net.ipv4.tcp_rmem = {{ stealth_vps_kernel_tcp_rmem }}
+net.ipv4.tcp_wmem = {{ stealth_vps_kernel_tcp_wmem }}
+
+# Path MTU probing — recover gracefully from ICMP black-hole links.
+net.ipv4.tcp_mtu_probing = {{ stealth_vps_kernel_mtu_probing }}
+
+# Defer sender wakeups until N bytes are queued (lower CPU under high RTT).
+net.ipv4.tcp_notsent_lowat = {{ stealth_vps_kernel_notsent_lowat }}
+
+# System-wide file descriptor ceiling.
+fs.file-max = {{ stealth_vps_kernel_file_max }}

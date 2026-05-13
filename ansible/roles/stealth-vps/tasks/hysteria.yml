@@ -1,0 +1,276 @@
+---
+# Hysteria2 server install + configuration.
+#
+# Why standalone (not via 3X-UI): the Xray-core bundled in 3X-UI v2.9.4
+# does NOT support the hysteria2 protocol — pushing such an inbound makes
+# Xray crash-loop on reload. We run apernet/hysteria as a separate
+# systemd service. 3X-UI keeps the Reality TCP side; the Hysteria2 UDP
+# side lives next to it without sharing process state.
+#
+# Per-host state (port, auth + obfs passwords) is generated once and
+# persisted to /etc/stealth-vps/hysteria.state.yml so the URI handed to
+# clients does not rotate on every apply.
+
+# --- Sanity ---------------------------------------------------------------
+
+- name: Assert supported CPU architecture (v0.1.0 ships amd64 only)
+  ansible.builtin.assert:
+    that: ansible_facts.architecture == 'x86_64'
+    fail_msg: >-
+      stealth-vps hysteria currently supports x86_64 only.
+      Architecture detected: {{ ansible_facts.architecture }}.
+  tags: [hysteria, hysteria2]
+
+- name: Install hysteria runtime dependencies
+  ansible.builtin.apt:
+    name:
+      - openssl
+      - ca-certificates
+      - iproute2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [hysteria, hysteria2]
+
+# --- User + directories ---------------------------------------------------
+
+- name: Create hysteria system user
+  ansible.builtin.user:
+    name: "{{ stealth_vps_hysteria_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ stealth_vps_hysteria_config_dir }}"
+    create_home: false
+  tags: [hysteria, hysteria2]
+
+- name: Create hysteria config directory
+  ansible.builtin.file:
+    path: "{{ stealth_vps_hysteria_config_dir }}"
+    state: directory
+    owner: "{{ stealth_vps_hysteria_user }}"
+    group: "{{ stealth_vps_hysteria_user }}"
+    mode: '0750'
+  tags: [hysteria, hysteria2]
+
+- name: Ensure stealth-vps state directory exists
+  ansible.builtin.file:
+    path: "{{ stealth_vps_panel_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [hysteria, hysteria2]
+
+# Load sibling-state files when present so the credentials.txt template
+# can render the panel + Reality sections too. Optional — only the
+# Hysteria2 section needs them mandatory.
+
+- name: Probe sibling state files
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/{{ item }}"
+  loop:
+    - panel.state.yml
+    - reality.state.yml
+  register: stealth_vps_sibling_state_stat
+  tags: [hysteria, hysteria2]
+
+- name: Load panel state for credentials.txt
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    name: stealth_vps_panel_state
+  when: stealth_vps_sibling_state_stat.results[0].stat.exists
+  tags: [hysteria, hysteria2]
+
+- name: Load reality state for credentials.txt
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+    name: stealth_vps_reality_state
+  when: stealth_vps_sibling_state_stat.results[1].stat.exists
+  tags: [hysteria, hysteria2]
+
+# --- State (generate once, reuse forever) ---------------------------------
+
+- name: Probe existing hysteria state file
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+  register: stealth_vps_hysteria_state_stat
+  tags: [hysteria, hysteria2]
+
+- name: Load existing hysteria state when present
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+    name: stealth_vps_hysteria_state
+  when: stealth_vps_hysteria_state_stat.stat.exists
+  tags: [hysteria, hysteria2]
+
+- name: Generate hysteria state (first run only)
+  when: not stealth_vps_hysteria_state_stat.stat.exists
+  tags: [hysteria, hysteria2]
+  block:
+
+    - name: Generate auth + obfs passwords (32 chars each)
+      ansible.builtin.set_fact:
+        stealth_vps_hysteria_auth_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+        stealth_vps_hysteria_obfs_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+      no_log: true
+
+    - name: Compose new hysteria state (Jinja dict so port stays int)
+      ansible.builtin.set_fact:
+        stealth_vps_hysteria_state: "{{ {
+          'port': (range(stealth_vps_hysteria_port_min, stealth_vps_hysteria_port_max + 1) | random),
+          'auth_password': stealth_vps_hysteria_auth_password,
+          'obfs_password': stealth_vps_hysteria_obfs_password,
+        } }}"
+      no_log: true
+
+    - name: Persist hysteria state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_hysteria_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+# --- TLS self-signed cert -------------------------------------------------
+
+- name: Probe existing TLS cert
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
+  register: stealth_vps_hysteria_cert_stat
+  tags: [hysteria, hysteria2]
+
+- name: Generate self-signed TLS cert (CN={{ stealth_vps_hysteria_cert_cn }})
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -nodes
+      - -days
+      - "3650"
+      - -subj
+      - "/CN={{ stealth_vps_hysteria_cert_cn }}"
+      - -keyout
+      - "{{ stealth_vps_hysteria_config_dir }}/cert.key"
+      - -out
+      - "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
+  when: not stealth_vps_hysteria_cert_stat.stat.exists
+  tags: [hysteria, hysteria2]
+
+- name: Set cert ownership + permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ stealth_vps_hysteria_user }}"
+    group: "{{ stealth_vps_hysteria_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ stealth_vps_hysteria_config_dir }}/cert.crt", mode: '0644' }
+    - { path: "{{ stealth_vps_hysteria_config_dir }}/cert.key", mode: '0600' }
+  tags: [hysteria, hysteria2]
+
+# --- Install / upgrade the binary ----------------------------------------
+
+- name: Probe installed hysteria version
+  ansible.builtin.command:
+    cmd: "{{ stealth_vps_hysteria_bin }} version"
+  register: stealth_vps_hysteria_installed_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [hysteria, hysteria2]
+
+- name: Install or upgrade hysteria binary
+  # See panel.yml for the analogous note: --check does not simulate
+  # binary downloads on a clean host.
+  when: >-
+    stealth_vps_hysteria_installed_version.rc != 0
+    or stealth_vps_hysteria_version | regex_replace('^app/', '')
+       not in (stealth_vps_hysteria_installed_version.stdout | default(''))
+  tags: [hysteria, hysteria2]
+  block:
+
+    - name: Stop hysteria-server if running (before swap)
+      ansible.builtin.systemd:
+        name: hysteria-server
+        state: stopped
+      failed_when: false
+
+    - name: Download hysteria binary ({{ stealth_vps_hysteria_version }})
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/apernet/hysteria/releases/download/{{ stealth_vps_hysteria_version
+          }}/hysteria-linux-amd64
+        dest: "{{ stealth_vps_hysteria_bin }}"
+        owner: root
+        group: root
+        mode: '0755'
+        force: true
+
+# --- Render config + systemd unit ----------------------------------------
+
+- name: Render hysteria config.yaml
+  ansible.builtin.template:
+    src: hysteria-config.yaml.j2
+    dest: "{{ stealth_vps_hysteria_config_dir }}/config.yaml"
+    owner: "{{ stealth_vps_hysteria_user }}"
+    group: "{{ stealth_vps_hysteria_user }}"
+    mode: '0640'
+  notify: Restart hysteria-server
+  tags: [hysteria, hysteria2]
+
+- name: Render hysteria-server systemd unit
+  ansible.builtin.template:
+    src: hysteria-server.service.j2
+    dest: /etc/systemd/system/hysteria-server.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_vps_hysteria_unit
+  tags: [hysteria, hysteria2]
+
+- name: Systemd daemon-reload after unit change
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: stealth_vps_hysteria_unit.changed
+  tags: [hysteria, hysteria2]
+
+- name: Flush handlers so the config change is applied before we verify
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start hysteria-server
+  ansible.builtin.systemd:
+    name: hysteria-server
+    state: started
+    enabled: true
+  tags: [hysteria, hysteria2]
+
+# --- Smoke test ----------------------------------------------------------
+
+- name: Wait for hysteria UDP port to be listening
+  ansible.builtin.shell:
+    cmd: "ss -lunH | awk '{print $5}' | grep -E ':{{ stealth_vps_hysteria_state.port }}$' | head -1"
+  register: stealth_vps_hysteria_udp_check
+  until: stealth_vps_hysteria_udp_check.rc == 0
+  retries: 15
+  delay: 1
+  changed_when: false
+  tags: [hysteria, hysteria2]
+
+- name: Show listening UDP socket
+  ansible.builtin.debug:
+    msg: "Hysteria2 listening on UDP {{ stealth_vps_hysteria_udp_check.stdout | trim }}"
+
+# --- Credentials file ----------------------------------------------------
+
+- name: Refresh operator credentials file (now with Hysteria2 section)
+  ansible.builtin.template:
+    src: stealth-vps-credentials.txt.j2
+    dest: "{{ stealth_vps_credentials_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  tags: [hysteria, hysteria2]

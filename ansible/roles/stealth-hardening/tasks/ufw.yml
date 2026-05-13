@@ -1,0 +1,171 @@
+---
+# UFW firewall.
+#
+# Default deny-incoming, allow-outgoing. We open just what we need:
+#  * SSH on stealth_hardening_ssh_port (always)
+#  * SSH on port 22 if the legacy listener is still around
+#  * Reality TCP port (from /etc/stealth-vps/reality.state.yml when it exists)
+#  * Hysteria2 UDP port (from /etc/stealth-vps/hysteria.state.yml)
+#  * Anything else the operator added via stealth_hardening_ufw_extra_ports
+#
+# The 3X-UI panel port is intentionally NOT exposed by default — use
+# `ssh -L` to tunnel until TLS + admin VPN land. Override with
+# stealth_hardening_ufw_expose_panel=true to open it anyway.
+
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [ufw, firewall, hardening]
+
+# --- Pick up the protocol ports from on-disk state -----------------------
+
+- name: Probe sibling state files (for protocol ports)
+  ansible.builtin.stat:
+    path: "/etc/stealth-vps/{{ item }}"
+  loop:
+    - reality.state.yml
+    - hysteria.state.yml
+  register: stealth_hardening_state_files_stat
+  tags: [ufw, firewall, hardening]
+
+- name: Load reality state for UFW port opening
+  ansible.builtin.include_vars:
+    file: /etc/stealth-vps/reality.state.yml
+    name: stealth_vps_reality_state
+  when: stealth_hardening_state_files_stat.results[0].stat.exists
+  tags: [ufw, firewall, hardening]
+
+- name: Load hysteria state for UFW port opening
+  ansible.builtin.include_vars:
+    file: /etc/stealth-vps/hysteria.state.yml
+    name: stealth_vps_hysteria_state
+  when: stealth_hardening_state_files_stat.results[1].stat.exists
+  tags: [ufw, firewall, hardening]
+
+# --- Apply default policies BEFORE enabling -----------------------------
+
+- name: Set default incoming policy
+  community.general.ufw:
+    default: "{{ stealth_hardening_ufw_default_incoming }}"
+    direction: incoming
+  tags: [ufw, firewall, hardening]
+
+- name: Set default outgoing policy
+  community.general.ufw:
+    default: "{{ stealth_hardening_ufw_default_outgoing }}"
+    direction: outgoing
+  tags: [ufw, firewall, hardening]
+
+# --- Whitelist SSH first — DO NOT enable UFW before this -----------------
+
+- name: Allow stealth SSH port
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_hardening_ssh_port | string }}"
+    proto: tcp
+    comment: "stealth-vps SSH (hardened)"
+  tags: [ufw, firewall, hardening]
+
+- name: Allow legacy SSH port 22 (transitional)
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    comment: "stealth-vps SSH (legacy — flip to false to remove)"
+  when: stealth_hardening_ufw_keep_ssh_port_22 | bool
+  tags: [ufw, firewall, hardening]
+
+- name: Remove the legacy SSH port 22 allow-rule when transition is over
+  # `delete: true` matches against the existing rule of the same kind.
+  # Earlier we used rule:deny + delete:true which silently no-ops because
+  # the rule we want to remove is `allow port:22 proto:tcp`. Default-deny
+  # already covers port 22 once this rule is gone.
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    delete: true
+  when: not (stealth_hardening_ufw_keep_ssh_port_22 | bool)
+  tags: [ufw, firewall, hardening]
+
+# --- Open protocol ports (from state) -----------------------------------
+
+- name: Allow Reality TCP port
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_vps_reality_state.port | string }}"
+    proto: tcp
+    comment: "stealth-vps Reality (VLESS)"
+  when: stealth_vps_reality_state is defined
+  tags: [ufw, firewall, hardening]
+
+- name: Allow Hysteria2 UDP port
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_vps_hysteria_state.port | string }}"
+    proto: udp
+    comment: "stealth-vps Hysteria2"
+  when: stealth_vps_hysteria_state is defined
+  tags: [ufw, firewall, hardening]
+
+# --- Panel exposure (off by default) -----------------------------------
+
+- name: Probe panel state for optional public exposure
+  ansible.builtin.stat:
+    path: /etc/stealth-vps/panel.state.yml
+  register: stealth_hardening_panel_state_stat
+  when: stealth_hardening_ufw_expose_panel | bool
+  tags: [ufw, firewall, hardening]
+
+- name: Load panel state when exposing externally
+  ansible.builtin.include_vars:
+    file: /etc/stealth-vps/panel.state.yml
+    name: stealth_vps_panel_state
+  when:
+    - stealth_hardening_ufw_expose_panel | bool
+    - stealth_hardening_panel_state_stat.stat.exists | default(false)
+  tags: [ufw, firewall, hardening]
+
+- name: Allow 3X-UI panel TCP port (only when explicitly enabled)
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_vps_panel_state.port | string }}"
+    proto: tcp
+    comment: "stealth-vps panel (exposed by operator override)"
+  when:
+    - stealth_hardening_ufw_expose_panel | bool
+    - stealth_vps_panel_state is defined
+  tags: [ufw, firewall, hardening]
+
+# --- Operator-provided extras -------------------------------------------
+
+- name: Apply operator-provided extra rules
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    comment: "{{ item.comment | default('stealth-vps extra rule') }}"
+  loop: "{{ stealth_hardening_ufw_extra_ports }}"
+  tags: [ufw, firewall, hardening]
+
+# --- Enable + status report --------------------------------------------
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  tags: [ufw, firewall, hardening]
+
+- name: Capture UFW status for the run summary
+  ansible.builtin.command:
+    cmd: ufw status verbose
+  register: stealth_hardening_ufw_status
+  changed_when: false
+  tags: [ufw, firewall, hardening]
+
+- name: Show UFW status
+  ansible.builtin.debug:
+    msg: "{{ stealth_hardening_ufw_status.stdout_lines }}"
+  tags: [ufw, firewall, hardening]

@@ -1,0 +1,328 @@
+---
+# Reality (VLESS-Reality) inbound on the 3X-UI panel.
+#
+# The expansion plan §2.3 picks Reality as the stealth-first transport: it
+# steals the TLS handshake from a real public site so the GFW sees a normal
+# visit to that hostname. A request without a valid shortId is proxied to
+# the real dest, which is what gives the active-probe resistance.
+#
+# Reality lives as an inbound INSIDE 3X-UI (created via the panel's REST
+# API) so traffic accounting, multi-client, expiry, and the share URL UI
+# all just work via the panel. The bundled xray under /usr/local/x-ui/
+# does the actual protocol work.
+#
+# Per-host state (X25519 keypair, client UUID, shortId, port) is generated
+# once and persisted to /etc/stealth-vps/reality.state.yml so the URL the
+# operator hands out does not rotate on every apply.
+
+# --- Pre-flight ----------------------------------------------------------
+
+- name: Probe x-ui service status
+  ansible.builtin.systemd:
+    name: x-ui
+  register: stealth_vps_xui_state
+  changed_when: false
+  check_mode: false
+  tags: [xray, reality]
+
+- name: Assert x-ui is active (Reality lives inside the panel)
+  ansible.builtin.assert:
+    that:
+      - stealth_vps_xui_state.status.ActiveState == 'active'
+    fail_msg: >-
+      x-ui is not active. Run the panel task first
+      (--tags panel) so the panel + bundled xray are installed.
+  tags: [xray, reality]
+
+- name: Probe bundled xray binary
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_dir }}/bin/xray-linux-amd64"
+  register: stealth_vps_xray_bin_stat
+  tags: [xray, reality]
+
+- name: Assert xray binary present
+  ansible.builtin.assert:
+    that: stealth_vps_xray_bin_stat.stat.exists
+    fail_msg: "xray binary missing under {{ stealth_vps_panel_dir }}/bin/."
+  tags: [xray, reality]
+
+# panel.state.yml is needed to authenticate against the panel's REST API.
+# It is created by tasks/panel.yml; we must load it here too because
+# `--tags xray` can be invoked without `--tags panel`.
+
+- name: Probe panel state file
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+  register: stealth_vps_panel_state_stat_for_xray
+  tags: [xray, reality]
+
+- name: Assert panel state exists (run --tags panel first if it does not)
+  ansible.builtin.assert:
+    that: stealth_vps_panel_state_stat_for_xray.stat.exists
+    fail_msg: >-
+      {{ stealth_vps_panel_state_dir }}/panel.state.yml is missing.
+      Run `ansible-playbook --tags panel ...` first so the panel and its
+      credentials exist; the xray task talks to the panel via REST API.
+  tags: [xray, reality]
+
+- name: Load panel state for API access
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    name: stealth_vps_panel_state
+  tags: [xray, reality]
+
+# --- Reality state (generate once, reuse forever) ------------------------
+
+- name: Probe existing reality state file
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+  register: stealth_vps_reality_state_stat
+  tags: [xray, reality]
+
+- name: Load existing reality state when present
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+    name: stealth_vps_reality_state
+  when: stealth_vps_reality_state_stat.stat.exists
+  tags: [xray, reality]
+
+- name: Generate Reality state (first run only)
+  when: not stealth_vps_reality_state_stat.stat.exists
+  tags: [xray, reality]
+  block:
+
+    - name: Generate X25519 keypair via bundled xray
+      ansible.builtin.command:
+        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-amd64 x25519"
+      register: stealth_vps_x25519_raw
+      changed_when: false
+      no_log: true
+
+    - name: Generate client UUID via bundled xray
+      ansible.builtin.command:
+        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-amd64 uuid"
+      register: stealth_vps_uuid_raw
+      changed_when: false
+
+    - name: Generate 8-char hex shortId
+      ansible.builtin.command:
+        cmd: openssl rand -hex 4
+      register: stealth_vps_shortid_raw
+      changed_when: false
+
+    - name: Compose new reality state
+      # Use a Jinja2 dict expression (rather than YAML mapping with
+      # `"{{ ... }}"` values) so the port stays an int. YAML mappings
+      # convert template outputs to strings, which then break the
+      # 3X-UI POST that expects port:int.
+      ansible.builtin.set_fact:
+        stealth_vps_reality_state: "{{ {
+          'port': (range(stealth_vps_reality_port_min, stealth_vps_reality_port_max + 1) | random),
+          'private_key': (stealth_vps_x25519_raw.stdout
+            | regex_search('PrivateKey:\\s+(\\S+)', '\\1') | first),
+          'public_key': (stealth_vps_x25519_raw.stdout
+            | regex_search('PublicKey\\):\\s+(\\S+)', '\\1') | first),
+          'client_uuid': (stealth_vps_uuid_raw.stdout | trim),
+          'client_email': stealth_vps_reality_default_client_email,
+          'short_id': (stealth_vps_shortid_raw.stdout | trim),
+        } }}"
+      no_log: true
+
+    - name: Persist reality state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_reality_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+# --- Authenticate to panel API ------------------------------------------
+
+- name: Login to 3X-UI panel
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ stealth_vps_panel_state.port
+      }}/{{ stealth_vps_panel_state.web_base_path }}/login
+    method: POST
+    body:
+      username: "{{ stealth_vps_panel_state.username }}"
+      password: "{{ stealth_vps_panel_state.password }}"
+    body_format: form-urlencoded
+    return_content: true
+    status_code: 200
+  register: stealth_vps_panel_login
+  no_log: true
+  tags: [xray, reality]
+
+- name: Assert login succeeded
+  ansible.builtin.assert:
+    that: stealth_vps_panel_login.json.success | bool
+    fail_msg: >-
+      3X-UI login failed: {{ stealth_vps_panel_login.json.msg | default('no message') }}.
+      Check credentials in /etc/stealth-vps/panel.state.yml.
+  tags: [xray, reality]
+
+# --- List + create the inbound ------------------------------------------
+
+- name: List existing inbounds
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ stealth_vps_panel_state.port
+      }}/{{ stealth_vps_panel_state.web_base_path }}/panel/api/inbounds/list
+    method: GET
+    headers:
+      Cookie: "{{ stealth_vps_panel_login.cookies_string }}"
+    return_content: true
+    status_code: 200
+  register: stealth_vps_inbounds_list
+  tags: [xray, reality]
+
+- name: Detect if Reality inbound already exists
+  ansible.builtin.set_fact:
+    stealth_vps_reality_exists: >-
+      {{ stealth_vps_inbounds_list.json.obj
+         | selectattr('remark', 'eq', stealth_vps_reality_remark)
+         | list | length > 0 }}
+  tags: [xray, reality]
+
+- name: Create Reality inbound via 3X-UI API
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ stealth_vps_panel_state.port
+      }}/{{ stealth_vps_panel_state.web_base_path }}/panel/api/inbounds/add
+    method: POST
+    headers:
+      Cookie: "{{ stealth_vps_panel_login.cookies_string }}"
+    body: "{{ _payload }}"
+    body_format: json
+    return_content: true
+    status_code: 200
+  vars:
+    _client:
+      id: "{{ stealth_vps_reality_state.client_uuid }}"
+      flow: "{{ stealth_vps_reality_flow }}"
+      email: "{{ stealth_vps_reality_state.client_email }}"
+      limitIp: 0
+      totalGB: 0
+      expiryTime: 0
+      enable: true
+      tgId: ""
+      subId: ""
+      reset: 0
+    _settings:
+      clients: "{{ [_client] }}"
+      decryption: "none"
+      fallbacks: []
+    _reality_settings:
+      show: false
+      xver: 0
+      dest: "{{ stealth_vps_reality_dest }}"
+      serverNames: "{{ stealth_vps_reality_servernames }}"
+      privateKey: "{{ stealth_vps_reality_state.private_key }}"
+      minClient: ""
+      maxClient: ""
+      maxTimediff: 0
+      shortIds: "{{ [stealth_vps_reality_state.short_id] }}"
+      settings:
+        publicKey: "{{ stealth_vps_reality_state.public_key }}"
+        fingerprint: "{{ stealth_vps_reality_fingerprint }}"
+        serverName: ""
+        spiderX: "/"
+    _stream_settings:
+      network: tcp
+      security: reality
+      externalProxy: []
+      realitySettings: "{{ _reality_settings }}"
+      tcpSettings:
+        acceptProxyProtocol: false
+        header:
+          type: none
+    _sniffing:
+      enabled: true
+      destOverride: [http, tls, quic]
+      metadataOnly: false
+      routeOnly: false
+    _allocate:
+      strategy: always
+      refresh: 5
+      concurrency: 3
+    # Build via Jinja dict so port stays int. 3X-UI's Go handler rejects
+    # the request with a json-unmarshal error if port arrives as string.
+    _payload: "{{ {
+      'up': 0,
+      'down': 0,
+      'total': 0,
+      'remark': stealth_vps_reality_remark,
+      'enable': true,
+      'expiryTime': 0,
+      'listen': '',
+      'port': (stealth_vps_reality_state.port | int),
+      'protocol': 'vless',
+      'settings': (_settings | to_json),
+      'streamSettings': (_stream_settings | to_json),
+      'sniffing': (_sniffing | to_json),
+      'allocate': (_allocate | to_json),
+    } }}"
+  register: stealth_vps_reality_add_result
+  when: not stealth_vps_reality_exists
+  tags: [xray, reality]
+
+- name: Assert inbound creation succeeded
+  ansible.builtin.assert:
+    that: stealth_vps_reality_add_result.json.success | bool
+    fail_msg: >-
+      3X-UI add inbound failed:
+      {{ stealth_vps_reality_add_result.json.msg | default('no message') }}
+  when: not stealth_vps_reality_exists
+  tags: [xray, reality]
+
+# --- Smoke test ---------------------------------------------------------
+
+- name: Wait for the Reality port to start listening
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ stealth_vps_reality_state.port }}"
+    timeout: 30
+  tags: [xray, reality]
+
+- name: TLS handshake probe (verifies dest cert is served on the inbound)
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - s_client
+      - -connect
+      - "127.0.0.1:{{ stealth_vps_reality_state.port }}"
+      - -servername
+      - "{{ stealth_vps_reality_servernames | first }}"
+      - -verify_return_error
+      - -brief
+  register: stealth_vps_reality_tls_probe
+  changed_when: false
+  failed_when: false
+  tags: [xray, reality]
+
+- name: Assert the served TLS cert matches the dest host
+  ansible.builtin.assert:
+    that:
+      - stealth_vps_reality_servernames | first in stealth_vps_reality_tls_probe.stderr
+        or stealth_vps_reality_servernames | first in stealth_vps_reality_tls_probe.stdout
+    fail_msg: >-
+      TLS probe did not see "{{ stealth_vps_reality_servernames | first }}" in the
+      handshake output. Reality may not be proxying probes to the real dest.
+      stdout: {{ stealth_vps_reality_tls_probe.stdout | default('') }}
+      stderr: {{ stealth_vps_reality_tls_probe.stderr | default('') }}
+    success_msg: "TLS handshake on Reality port serves {{ stealth_vps_reality_servernames | first }}."
+  tags: [xray, reality]
+
+# --- Credentials file ---------------------------------------------------
+
+- name: Refresh operator credentials file (now with Reality section)
+  ansible.builtin.template:
+    src: stealth-vps-credentials.txt.j2
+    dest: "{{ stealth_vps_credentials_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  tags: [xray, reality]

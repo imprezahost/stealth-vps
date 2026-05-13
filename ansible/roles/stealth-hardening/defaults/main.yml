@@ -2,17 +2,42 @@
 # Defaults for the stealth-hardening role.
 
 # ---- SSH ----
+# Port for the hardened drop-in (additive — the main sshd_config keeps
+# Port 22 alive too on first apply so we cannot lock ourselves out).
+# A follow-up sub-sprint flips `stealth_hardening_ssh_legacy_port_enabled`
+# to false to remove port 22 from the listener set.
 stealth_hardening_ssh_port: 22550
-stealth_hardening_ssh_permit_root_login: "prohibit-password"   # key-only for root
+stealth_hardening_ssh_legacy_port_enabled: true
+# Root login: prohibit-password = key-only for root. Set "no" to disable
+# root entirely once you have a non-root admin user (out of scope v0.1.0).
+stealth_hardening_ssh_permit_root_login: "prohibit-password"
+# Disable password auth entirely. Key-only.
 stealth_hardening_ssh_password_authentication: false
+# Auth limits.
 stealth_hardening_ssh_max_auth_tries: 3
+stealth_hardening_ssh_login_grace_time: 30
+stealth_hardening_ssh_max_sessions: 5
+# Idle handling — drop dead clients after ClientAliveInterval * Max seconds.
+stealth_hardening_ssh_client_alive_interval: 300
+stealth_hardening_ssh_client_alive_count_max: 2
+# Allow-list of unix users that may SSH in at all (matches `AllowUsers`).
+# Keep root for the install.sh / ansible-pull flow; add operator users here.
+stealth_hardening_ssh_allow_users:
+  - root
 
 # ---- fail2ban ----
 stealth_hardening_fail2ban_enabled: true
 stealth_hardening_fail2ban_bantime: 86400       # 24h
 stealth_hardening_fail2ban_findtime: 600        # 10min window
 stealth_hardening_fail2ban_maxretry: 3
-# Jails enabled by default. The "3xui" jail uses custom filter shipped with the role.
+# `ufw` action makes fail2ban call `ufw insert 1 deny from <ip>` so the
+# firewall is the single source of truth. Alternative: iptables-multiport.
+stealth_hardening_fail2ban_banaction: ufw
+# Path to the 3X-UI log fail2ban tails. Don't change unless you also
+# update the panel install task.
+stealth_hardening_fail2ban_3xui_logpath: /var/log/x-ui/3xui.log
+# Jails enabled by default. The "3xui" jail uses a custom filter shipped
+# with the role; sshd uses the stock filter from /etc/fail2ban/filter.d.
 stealth_hardening_fail2ban_jails:
   - sshd
   - 3xui
@@ -21,8 +46,18 @@ stealth_hardening_fail2ban_jails:
 stealth_hardening_ufw_enabled: true
 stealth_hardening_ufw_default_incoming: deny
 stealth_hardening_ufw_default_outgoing: allow
-stealth_hardening_ufw_allow_ports:
-  - "{{ stealth_hardening_ssh_port }}"
+# Whether to keep port 22 open while we transition. Same toggle as the SSH
+# block: set false in a follow-up apply to remove the legacy listener.
+stealth_hardening_ufw_keep_ssh_port_22: "{{ stealth_hardening_ssh_legacy_port_enabled }}"
+# Expose the 3X-UI panel to the public internet. Default false: operator
+# must `ssh -L` tunnel to the panel until TLS + admin VPN land.
+stealth_hardening_ufw_expose_panel: false
+# Static extra ports operators can add via inventory (TCP unless suffixed).
+# Example:
+#   stealth_hardening_ufw_extra_ports:
+#     - { port: 8080, proto: tcp }
+#     - { port: 51820, proto: udp }
+stealth_hardening_ufw_extra_ports: []
 
 # ---- unattended-upgrades ----
 stealth_hardening_unattended_upgrades: true

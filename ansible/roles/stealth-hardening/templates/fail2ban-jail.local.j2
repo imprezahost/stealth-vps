@@ -1,0 +1,39 @@
+# {{ ansible_managed }}
+# stealth-vps — fail2ban site config. Edit the role, not this file.
+
+[DEFAULT]
+# How long an offending IP stays banned.
+bantime  = {{ stealth_hardening_fail2ban_bantime }}
+# Window in which `maxretry` failures triggers a ban.
+findtime = {{ stealth_hardening_fail2ban_findtime }}
+maxretry = {{ stealth_hardening_fail2ban_maxretry }}
+# Use UFW as the enforcement backend so the firewall stays the single
+# source of truth for blocked IPs.
+banaction      = {{ stealth_hardening_fail2ban_banaction }}
+banaction_allports = {{ stealth_hardening_fail2ban_banaction }}
+# Backend that watches the log files. systemd works for sshd; the
+# 3xui jail overrides this to "auto" so it can tail the file directly.
+backend = systemd
+
+{% if 'sshd' in stealth_hardening_fail2ban_jails %}
+[sshd]
+enabled = true
+# Watch both ports while we are in the dual-listen transition.
+port    = {{ stealth_hardening_ssh_port }},22
+filter  = sshd
+backend = systemd
+{% endif %}
+
+{% if '3xui' in stealth_hardening_fail2ban_jails %}
+[3xui]
+enabled  = true
+# The panel is bound to all interfaces but UFW only allows it from
+# operators on a tunnel; this catches a curl-bombarding attacker that
+# slips past somehow.
+filter   = 3xui
+logpath  = {{ stealth_hardening_fail2ban_3xui_logpath }}
+backend  = auto
+maxretry = {{ stealth_hardening_fail2ban_maxretry }}
+findtime = {{ stealth_hardening_fail2ban_findtime }}
+bantime  = {{ stealth_hardening_fail2ban_bantime }}
+{% endif %}

@@ -7,7 +7,9 @@ galaxy_info:
     Installs and configures Xray-core with VLESS-Reality, Hysteria2, and 3X-UI
     panel for privacy-focused VPS deployments in restrictive network environments.
   license: MIT
-  min_ansible_version: "2.16"
+  # 2.14 is what Debian 12 ships in `ansible-core`, so the default apt path
+  # works without a PPA or pipx. 2.16 features are not required by the role.
+  min_ansible_version: "2.14"
   platforms:
     - name: Debian
       versions: [bookworm]
