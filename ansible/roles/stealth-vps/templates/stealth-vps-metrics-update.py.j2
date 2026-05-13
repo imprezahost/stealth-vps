@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+# {{ ansible_managed }}
+# Edit ansible/roles/stealth-vps/templates/stealth-vps-metrics-update.py.j2 —
+# local edits are overwritten on the next playbook run.
+#
+# stealth-vps metrics updater.
+#
+# Pulls traffic counters from:
+#   * the 3X-UI panel REST API (per-inbound and per-client up/down bytes
+#     for the Reality VLESS inbound — Xray's bundled stats subsystem
+#     surfaced through the panel)
+#   * the apernet/hysteria2 trafficStats HTTP API (per-client tx/rx
+#     plus the online-clients list — JSON, since 2.8.2 doesn't expose
+#     a /metrics endpoint natively)
+#
+# Writes the combined output as a Prometheus textfile that
+# prometheus-node-exporter picks up via --collector.textfile.directory.
+# That way Prometheus has ONE scrape target (:9100) covering the host
+# and both protocol stacks.
+#
+# Exits 0 even when one source is unreachable — we still want the
+# other half of the data, plus a `_scrape_error` gauge that flips to
+# 1 so dashboards can warn.
+
+import json
+import os
+import ssl
+import sys
+import tempfile
+import time
+import traceback
+import urllib.parse
+import urllib.request
+
+import yaml  # python3-yaml ships with Debian 12
+
+PANEL_STATE = "/etc/stealth-vps/panel.state.yml"
+HYSTERIA_TRAFFIC_URL = "http://{{ stealth_vps_hysteria_traffic_stats_listen }}"
+OUTPUT_DIR = "{{ stealth_vps_metrics_textfile_dir }}"
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "stealth-vps.prom")
+
+
+def quote(value):
+    """Prometheus label value escape."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def load_yaml(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def fetch_panel_inbounds():
+    """Returns (inbounds_list, error_string_or_None)."""
+    try:
+        panel = load_yaml(PANEL_STATE)
+        base = "https://127.0.0.1:%d/%s" % (
+            int(panel["port"]),
+            panel["web_base_path"],
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        # 1. Login
+        body = urllib.parse.urlencode({
+            "username": panel["username"],
+            "password": panel["password"],
+        }).encode()
+        req = urllib.request.Request(base + "/login", data=body)
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+            cookie = r.headers.get("Set-Cookie", "")
+        if not cookie:
+            return [], "no Set-Cookie from /login"
+        # urllib's Set-Cookie may be multi-valued; take the first chunk
+        cookie = cookie.split(";", 1)[0]
+        # 2. inbounds/list
+        req = urllib.request.Request(
+            base + "/panel/api/inbounds/list",
+            headers={"Cookie": cookie},
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+            payload = json.load(r)
+        if not payload.get("success"):
+            return [], "panel list returned success=false"
+        return payload.get("obj") or [], None
+    except Exception as e:
+        return [], "%s: %s" % (type(e).__name__, e)
+
+
+def fetch_hysteria_traffic():
+    """Returns ((traffic_dict, online_count), error_string_or_None)."""
+    try:
+        req = urllib.request.Request(HYSTERIA_TRAFFIC_URL + "/traffic")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            traffic = json.load(r)
+        req = urllib.request.Request(HYSTERIA_TRAFFIC_URL + "/online")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            online = json.load(r)
+        if not isinstance(traffic, dict):
+            traffic = {}
+        if isinstance(online, list):
+            count = len(online)
+        elif isinstance(online, dict):
+            count = sum(int(v) for v in online.values())
+        else:
+            count = 0
+        return (traffic, count), None
+    except Exception as e:
+        return ({}, 0), "%s: %s" % (type(e).__name__, e)
+
+
+def build_lines(panel_inbounds, panel_err, hy_traffic, hy_online, hy_err):
+    lines = []
+    now = int(time.time())
+
+    lines.append("# HELP stealth_vps_last_scrape_timestamp Unix time of the last successful scrape attempt.")
+    lines.append("# TYPE stealth_vps_last_scrape_timestamp gauge")
+    lines.append("stealth_vps_last_scrape_timestamp %d" % now)
+
+    lines.append("# HELP stealth_vps_panel_scrape_error 1 when the 3X-UI panel API was unreachable in the last run.")
+    lines.append("# TYPE stealth_vps_panel_scrape_error gauge")
+    lines.append("stealth_vps_panel_scrape_error %d" % (1 if panel_err else 0))
+
+    lines.append("# HELP stealth_vps_hysteria_scrape_error 1 when the Hysteria2 trafficStats API was unreachable in the last run.")
+    lines.append("# TYPE stealth_vps_hysteria_scrape_error gauge")
+    lines.append("stealth_vps_hysteria_scrape_error %d" % (1 if hy_err else 0))
+
+    # Panel: per-inbound + per-client traffic
+    if panel_inbounds:
+        lines.append("# HELP stealth_vps_inbound_up_bytes Total upload bytes for an inbound (Xray stats via 3X-UI panel).")
+        lines.append("# TYPE stealth_vps_inbound_up_bytes counter")
+        lines.append("# HELP stealth_vps_inbound_down_bytes Total download bytes for an inbound.")
+        lines.append("# TYPE stealth_vps_inbound_down_bytes counter")
+        lines.append("# HELP stealth_vps_inbound_enabled 1 if the inbound is enabled in the panel, 0 otherwise.")
+        lines.append("# TYPE stealth_vps_inbound_enabled gauge")
+        lines.append("# HELP stealth_vps_client_up_bytes Per-client upload bytes inside an inbound.")
+        lines.append("# TYPE stealth_vps_client_up_bytes counter")
+        lines.append("# HELP stealth_vps_client_down_bytes Per-client download bytes inside an inbound.")
+        lines.append("# TYPE stealth_vps_client_down_bytes counter")
+        for ib in panel_inbounds:
+            labels = (
+                'inbound_id="%s",remark="%s",protocol="%s",port="%s"'
+                % (
+                    quote(ib.get("id")),
+                    quote(ib.get("remark", "")),
+                    quote(ib.get("protocol", "")),
+                    quote(ib.get("port", "")),
+                )
+            )
+            lines.append("stealth_vps_inbound_up_bytes{%s} %d" % (labels, int(ib.get("up", 0))))
+            lines.append("stealth_vps_inbound_down_bytes{%s} %d" % (labels, int(ib.get("down", 0))))
+            lines.append("stealth_vps_inbound_enabled{%s} %d" % (labels, 1 if ib.get("enable") else 0))
+            for cs in ib.get("clientStats") or []:
+                clbl = labels + ',client_email="%s"' % quote(cs.get("email", ""))
+                lines.append("stealth_vps_client_up_bytes{%s} %d" % (clbl, int(cs.get("up", 0))))
+                lines.append("stealth_vps_client_down_bytes{%s} %d" % (clbl, int(cs.get("down", 0))))
+
+    # Hysteria2
+    lines.append("# HELP stealth_vps_hysteria_online_clients Number of clients currently connected to Hysteria2.")
+    lines.append("# TYPE stealth_vps_hysteria_online_clients gauge")
+    lines.append("stealth_vps_hysteria_online_clients %d" % int(hy_online))
+
+    if hy_traffic:
+        lines.append("# HELP stealth_vps_hysteria_tx_bytes Hysteria2 per-client transmit bytes (server -> client).")
+        lines.append("# TYPE stealth_vps_hysteria_tx_bytes counter")
+        lines.append("# HELP stealth_vps_hysteria_rx_bytes Hysteria2 per-client receive bytes (client -> server).")
+        lines.append("# TYPE stealth_vps_hysteria_rx_bytes counter")
+        for client_id, stats in hy_traffic.items():
+            if not isinstance(stats, dict):
+                continue
+            lbl = 'client_id="%s"' % quote(client_id)
+            lines.append("stealth_vps_hysteria_tx_bytes{%s} %d" % (lbl, int(stats.get("tx", 0))))
+            lines.append("stealth_vps_hysteria_rx_bytes{%s} %d" % (lbl, int(stats.get("rx", 0))))
+
+    return lines
+
+
+def write_atomic(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
+    try:
+        os.write(fd, content.encode())
+        os.close(fd)
+        os.chmod(tmp, 0o644)
+        os.rename(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def main():
+    panel_inbounds, panel_err = fetch_panel_inbounds()
+    (hy_traffic, hy_online), hy_err = fetch_hysteria_traffic()
+    if panel_err:
+        print("# panel: %s" % panel_err, file=sys.stderr)
+    if hy_err:
+        print("# hysteria: %s" % hy_err, file=sys.stderr)
+    lines = build_lines(
+        panel_inbounds, panel_err, hy_traffic, hy_online, hy_err
+    )
+    write_atomic(OUTPUT_FILE, "\n".join(lines) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)

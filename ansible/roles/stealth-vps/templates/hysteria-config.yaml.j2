@@ -37,3 +37,10 @@ masquerade:
 bandwidth:
   up: "{{ stealth_vps_hysteria_bandwidth_up }}"
   down: "{{ stealth_vps_hysteria_bandwidth_down }}"
+{% if stealth_vps_metrics_enabled %}
+
+# Loopback JSON traffic-stats API. Scraped by the stealth-vps metrics
+# updater, which converts to Prometheus textfile format.
+trafficStats:
+  listen: "{{ stealth_vps_hysteria_traffic_stats_listen }}"
+{% endif %}

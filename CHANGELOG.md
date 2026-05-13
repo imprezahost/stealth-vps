@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.3.0)
-- Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
-- zh-CN README rewrite by a native speaker
-- Xray / Hysteria2 Prometheus endpoints + stealth-vps-specific Grafana dashboards
+### Added
+- `stealth-vps` role: Reality (3X-UI panel API) and Hysteria2 (`trafficStats` JSON) traffic counters surfaced as Prometheus metrics. A `/usr/local/sbin/stealth-vps-metrics-update.py` runs every `stealth_vps_metrics_refresh_interval_sec` seconds (systemd `.timer`), pulls both APIs, and writes a `.prom` file into `/var/lib/stealth-vps/metrics/`. node_exporter is restarted with `--collector.textfile.directory` pointing at that dir, so Prometheus has one scrape target (`:9100`) covering host + protocols. `stealth_vps_metrics_enabled` (default true) toggles the whole thing.
+- Hysteria2 config now exposes its `trafficStats` JSON API on `stealth_vps_hysteria_traffic_stats_listen` (default `127.0.0.1:9101`, loopback only) so the updater can read it.
+
+### Planned (still in v0.3.0)
+- stealth-vps Grafana dashboard JSON consuming the new metrics
 - Alert rules: cert expiry, login flood, bandwidth spike, fail2ban ban rate
-- Source-IP filter variant for `stealth_vps_observability_listen` exposure
+- Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
 - Multi-platform Molecule matrix (Ubuntu 22.04 / 24.04 alongside Debian 12)
+- Source-IP filter variant for `stealth_vps_observability_listen` exposure
+- zh-CN README rewrite by a native speaker
 
 ## [0.2.0] - 2026-05-13
 
