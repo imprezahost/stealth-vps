@@ -74,11 +74,31 @@ Both share the same scrape target (`:9100`) — the stealth-vps panel reads the 
 | `stealth_vps_last_scrape_timestamp` | gauge | updater itself | `instance` |
 | `stealth_vps_panel_scrape_error` | gauge | updater (3X-UI API call) | `instance` |
 | `stealth_vps_hysteria_scrape_error` | gauge | updater (Hysteria2 API call) | `instance` |
+| `stealth_vps_cert_scrape_error` | gauge | updater (openssl on the TLS file) | `instance` |
+| `stealth_vps_fail2ban_scrape_error` | gauge | updater (`fail2ban-client status`) | `instance` |
 | `stealth_vps_inbound_{up,down}_bytes` | counter | 3X-UI panel REST API | `inbound_id`, `remark`, `protocol`, `port` |
 | `stealth_vps_inbound_enabled` | gauge | 3X-UI panel | same |
 | `stealth_vps_client_{up,down}_bytes` | counter | 3X-UI panel `clientStats[]` | inbound labels + `client_email` |
 | `stealth_vps_hysteria_online_clients` | gauge | Hysteria2 `/online` | `instance` |
 | `stealth_vps_hysteria_{tx,rx}_bytes` | counter | Hysteria2 `/traffic` | `client_id` |
+| `stealth_vps_cert_expiry_seconds` | gauge | `openssl x509 -enddate` (`-1` when no cert configured) | `cert="le-fullchain"` |
+| `stealth_vps_fail2ban_currently_banned` | gauge | `fail2ban-client status <jail>` | `jail` |
+| `stealth_vps_fail2ban_total_banned` | counter | same | `jail` |
+| `stealth_vps_fail2ban_currently_failed` | gauge | same | `jail` |
+| `stealth_vps_fail2ban_total_failed` | counter | same | `jail` |
+
+## Alert rules
+
+[`prometheus/alerts/stealth-vps.rules.yml`](prometheus/alerts/stealth-vps.rules.yml) is a drop-in for your central Prometheus's `rule_files:` glob. Includes:
+
+- `StealthVpsCertExpiringSoon` / `…Critical` — pages 7 days / 24h out from expiry. Filters out hosts where no LE cert is configured (the metric is `-1`).
+- `StealthVpsPanelScrapeError` / `StealthVpsHysteriaScrapeError` — flags when the metrics updater can't read one of the upstream APIs for >5min.
+- `StealthVpsScrapeStale` — flags when the updater itself stops firing (file timestamp >180s old).
+- `StealthVpsFail2banBanSpike` — >30 new bans/hour averaged over 10m, by jail.
+- `StealthVpsCurrentlyBannedHigh` — >100 IPs currently in a jail's ban list.
+- `StealthVpsInboundTrafficSpike` — 5m rate > 3× the 1h baseline AND > 1 MB/s, by inbound. Catches client loops and misconfigurations without paging on legitimate growth.
+
+Tune the thresholds / `for:` durations to your fleet's traffic profile and route via Alertmanager.
 
 ## What's not in scope yet
 

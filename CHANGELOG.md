@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `observability/grafana/dashboards/stealth-vps-overview.json` — importable Grafana dashboard consuming the new `stealth_vps_*` series. Panels: health stats (scrape errors, online Hysteria2 clients, last-scrape age), Reality inbound up/down per port, top-N per-client up/down (Reality), Hysteria2 tx/rx per `client_id`. Templating: Prometheus datasource picker + multi-select `Host` variable.
 - `observability/README.md` rewritten to document the dual-dashboard pattern (1860 for host + the new JSON for protocols) and the full metric reference table.
 
+### Added
+- Metrics updater (`stealth-vps-metrics-update.py`) now also exposes:
+  - `stealth_vps_cert_expiry_seconds{cert="le-fullchain"}` — seconds until the Let's Encrypt cert at `/etc/stealth-vps/tls/fullchain.pem` expires, or `-1` when no cert is configured.
+  - `stealth_vps_fail2ban_{currently,total}_{banned,failed}{jail="..."}` — per-jail counters parsed from `fail2ban-client status`.
+  - `stealth_vps_{cert,fail2ban}_scrape_error` gauges.
+- `observability/prometheus/alerts/stealth-vps.rules.yml` — Prometheus alert rules: cert expiry (warning at 7d, critical at 24h), scrape errors per upstream, scrape staleness, fail2ban ban-rate spike, currently-banned threshold, inbound traffic spike (3× baseline and >1 MB/s, by inbound). Drop the file into your central Prometheus `rule_files:` and reload.
+
 ### Planned (still in v0.3.0)
-- Alert rules: cert expiry, login flood, bandwidth spike, fail2ban ban rate
 - Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
 - Multi-platform Molecule matrix (Ubuntu 22.04 / 24.04 alongside Debian 12)
 - Source-IP filter variant for `stealth_vps_observability_listen` exposure

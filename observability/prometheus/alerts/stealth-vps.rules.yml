@@ -1,0 +1,155 @@
+---
+# stealth-vps Prometheus alert rules.
+#
+# Drop this file into your central Prometheus's `rule_files:` glob and
+# reload. Alerts route via your existing Alertmanager — pick severity
+# labels and grouping the way your fleet expects.
+#
+# All rules assume the `stealth_vps_*` metrics from
+# stealth-vps-metrics-update.py (see observability/README.md). The
+# `instance` label is whatever your scrape config attaches.
+
+groups:
+  - name: stealth-vps.tls
+    interval: 1m
+    rules:
+      - alert: StealthVpsCertExpiringSoon
+        # > 0 filters out hosts with no LE cert configured (-1 sentinel).
+        expr: |
+          stealth_vps_cert_expiry_seconds > 0
+          and stealth_vps_cert_expiry_seconds < (7 * 24 * 3600)
+        for: 30m
+        labels:
+          severity: warning
+          component: tls
+        annotations:
+          summary: "stealth-vps cert on {{ $labels.instance }} expires in less than 7 days"
+          description: |
+            The Let's Encrypt cert at /etc/stealth-vps/tls/fullchain.pem
+            expires in {{ $value | humanizeDuration }}. acme.sh's daily
+            cron should have renewed by now — check the cron log
+            (/var/log/letsencrypt/) and that ufw still allows port 80
+            for the HTTP-01 challenge.
+
+      - alert: StealthVpsCertExpiringCritical
+        expr: |
+          stealth_vps_cert_expiry_seconds > 0
+          and stealth_vps_cert_expiry_seconds < (24 * 3600)
+        for: 5m
+        labels:
+          severity: critical
+          component: tls
+        annotations:
+          summary: "stealth-vps cert on {{ $labels.instance }} expires in less than 24h"
+          description: |
+            Less than 24 hours to expiry. Renew immediately:
+              /root/.acme.sh/acme.sh --renew -d <domain> --force
+            Then restart hysteria-server and x-ui via acme.sh's
+            registered reloadcmd, or by hand.
+
+  - name: stealth-vps.scrape
+    interval: 1m
+    rules:
+      - alert: StealthVpsPanelScrapeError
+        expr: stealth_vps_panel_scrape_error == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: panel
+        annotations:
+          summary: "3X-UI panel API unreachable on {{ $labels.instance }}"
+          description: |
+            stealth-vps-metrics-update.py couldn't log into the panel
+            for at least 5 minutes. The panel itself may be down, or
+            the credentials in /etc/stealth-vps/panel.state.yml
+            drifted. `systemctl status x-ui` on the host.
+
+      - alert: StealthVpsHysteriaScrapeError
+        expr: stealth_vps_hysteria_scrape_error == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: hysteria2
+        annotations:
+          summary: "Hysteria2 trafficStats API unreachable on {{ $labels.instance }}"
+          description: |
+            Updater couldn't read Hysteria2's local JSON API for at
+            least 5 minutes. The service may be down or stuck in a
+            crash loop. `systemctl status hysteria-server`.
+
+      - alert: StealthVpsScrapeStale
+        # time() - last_scrape > 3x the timer interval means the
+        # updater itself stopped firing.
+        expr: time() - stealth_vps_last_scrape_timestamp > 180
+        for: 5m
+        labels:
+          severity: warning
+          component: metrics
+        annotations:
+          summary: "stealth-vps metrics updater is stale on {{ $labels.instance }}"
+          description: |
+            The updater hasn't written a fresh .prom file in
+            {{ $value | humanizeDuration }}. Check the timer:
+              systemctl status stealth-vps-metrics.timer
+              journalctl -u stealth-vps-metrics.service -n 30
+
+  - name: stealth-vps.fail2ban
+    interval: 1m
+    rules:
+      - alert: StealthVpsFail2banBanSpike
+        # > 30 new bans / hour averaged over the last 10m means
+        # someone is hammering us hard.
+        expr: |
+          rate(stealth_vps_fail2ban_total_banned[10m]) * 3600 > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: fail2ban
+        annotations:
+          summary: "fail2ban ban rate spike on {{ $labels.instance }} ({{ $labels.jail }})"
+          description: |
+            Jail {{ $labels.jail }} is banning {{ $value | humanize }}
+            IPs/hour. Could be a coordinated brute-force run. Inspect
+            recent bans:
+              fail2ban-client status {{ $labels.jail }}
+
+      - alert: StealthVpsCurrentlyBannedHigh
+        expr: stealth_vps_fail2ban_currently_banned > 100
+        for: 15m
+        labels:
+          severity: info
+          component: fail2ban
+        annotations:
+          summary: "{{ $value }} IPs currently banned in {{ $labels.jail }} on {{ $labels.instance }}"
+
+  - name: stealth-vps.traffic
+    interval: 1m
+    rules:
+      - alert: StealthVpsInboundTrafficSpike
+        # Current 5m rate exceeds 3x the 1h baseline AND is above 1
+        # MB/s — filters noise on idle hosts and only fires when a
+        # real spike happens.
+        expr: |
+          (
+            rate(stealth_vps_inbound_up_bytes[5m])
+            + rate(stealth_vps_inbound_down_bytes[5m])
+          )
+          > on (instance, inbound_id) (
+            3 * (
+              rate(stealth_vps_inbound_up_bytes[1h] offset 5m)
+              + rate(stealth_vps_inbound_down_bytes[1h] offset 5m)
+            )
+          )
+          and on (instance, inbound_id)
+            (rate(stealth_vps_inbound_up_bytes[5m]) + rate(stealth_vps_inbound_down_bytes[5m])) > 1e6
+        for: 10m
+        labels:
+          severity: info
+          component: traffic
+        annotations:
+          summary: "Inbound {{ $labels.remark }} on {{ $labels.instance }} has 3x its baseline traffic"
+          description: |
+            5-minute rate is {{ $value | humanize }}B/s, more than 3x
+            the previous hour's average. Probably normal client
+            growth, sometimes a misconfigured client looping. Worth
+            a glance.
