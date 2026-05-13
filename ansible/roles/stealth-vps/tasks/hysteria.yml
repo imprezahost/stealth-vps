@@ -314,6 +314,37 @@
 
 # --- Credentials file ----------------------------------------------------
 
+# --- Port hopping (UDP range → listener) -------------------------------
+
+- name: Inject Hysteria2 port-hopping DNAT into UFW before.rules
+  # Hysteria's client picks a random UDP destination port from the
+  # configured range each new connection; a single PREROUTING REDIRECT
+  # bounces them all to the actual server port. The rule lives in a
+  # standalone *nat block inserted before *filter — UFW happily loads
+  # multiple tables out of one before.rules file.
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before.rules
+    insertbefore: '^\*filter'
+    marker: "# {mark} stealth-vps hysteria-port-hopping"
+    block: |
+      *nat
+      :PREROUTING ACCEPT [0:0]
+      # Redirect any UDP packet in the hop range to the Hysteria2 listener.
+      -A PREROUTING -p udp --dport {{ stealth_vps_hysteria_port_hopping_min }}:{{ stealth_vps_hysteria_port_hopping_max }} -j REDIRECT --to-ports {{ stealth_vps_hysteria_state.port }}
+      COMMIT
+    state: "{{ 'present' if stealth_vps_hysteria_port_hopping else 'absent' }}"
+  register: stealth_vps_hysteria_porthop_block
+  tags: [hysteria, hysteria2]
+
+- name: Reload UFW when the port-hopping block changed
+  ansible.builtin.command:
+    cmd: ufw reload
+  when: stealth_vps_hysteria_porthop_block.changed
+  changed_when: stealth_vps_hysteria_porthop_block.changed
+  tags: [hysteria, hysteria2]
+
+# --- Credentials file ---------------------------------------------------
+
 - name: Refresh operator credentials file (now with Hysteria2 section)
   ansible.builtin.template:
     src: stealth-vps-credentials.txt.j2
