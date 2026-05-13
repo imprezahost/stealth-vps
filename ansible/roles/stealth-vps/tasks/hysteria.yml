@@ -58,7 +58,11 @@
     state: directory
     owner: root
     group: root
-    mode: '0700'
+    # 0711 so service users (hysteria) can traverse into /etc/stealth-vps/tls/.
+    # State files inside are still chmod 0600, so secrets stay root-only.
+    # Match panel.yml — both tasks must agree or the order of `--tags`
+    # invocation flips the mode every run.
+    mode: '0711'
   tags: [hysteria, hysteria2]
 
 # Load sibling-state files when present so the credentials.txt template
