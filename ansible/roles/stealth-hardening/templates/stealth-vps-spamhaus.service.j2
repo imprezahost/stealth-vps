@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+# stealth-vps — Spamhaus ipset refresh + bootstrap.
+#
+# Runs once at boot (Before=ufw.service) to recreate the ipset before
+# UFW's INPUT chain is reloaded, and runs daily via the matching
+# .timer to pull updates from Spamhaus.
+
+[Unit]
+Description=stealth-vps Spamhaus DROP list refresh
+Documentation=https://www.spamhaus.org/drop/
+After=network-online.target
+Wants=network-online.target
+Before=ufw.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/stealth-vps-update-spamhaus.sh
+StandardOutput=journal
+StandardError=journal
+# Don't restart on failure — a transient download error keeps the
+# previous ipset content, which is the safer default than retrying.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

@@ -14,8 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stealth-hardening` role: ufw task gains the `stealth_hardening_ufw_acme_http_challenge` toggle that opens port 80/tcp for HTTP-01 challenges and renewals.
 - Operator credentials file now emits `https://` panel URLs and drops `insecure=1` from the Hysteria2 URI when TLS is real.
 
+### Added
+- `stealth-hardening` role: Spamhaus DROP ipset task (`tasks/spamhaus.yml`) — installs ipset, drops a `stealth-vps-update-spamhaus.sh` script, a oneshot systemd service (runs `Before=ufw.service` so the set exists before UFW reloads), and a daily systemd timer with jitter. Injects a single `-A ufw-before-input -m set --match-set spamhaus-drop src -j DROP` rule into `/etc/ufw/before.rules` via blockinfile. Atomic swap pattern (build new ipset, swap, destroy old) keeps the firewall from ever observing an empty set. Spamhaus consolidated EDROP into DROP in early 2026, so we only consume the one URL.
+
+### Changed
+- `stealth_hardening_spamhaus_drop` + `stealth_hardening_spamhaus_edrop` split is replaced by a single `stealth_hardening_spamhaus_enabled` toggle (default `true`).
+
 ### Planned (still in v0.2.0)
-- Spamhaus DROP/EDROP via ipset + UFW (modern replacement for legacy `hosts.deny`)
 - Hysteria2 port hopping (DNAT range rules)
 - Molecule integration test scenario
 - Client setup walkthroughs (Android v2rayNG / NekoBox, Windows NekoBox, basic dashboards)

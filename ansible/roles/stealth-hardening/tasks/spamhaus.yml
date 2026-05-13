@@ -1,0 +1,143 @@
+---
+# Spamhaus DROP ipset + UFW integration.
+#
+# The legacy hosts.deny approach in the original expansion-plan only
+# affected services that linked against libwrap — sshd in Debian 12 no
+# longer does. This task replaces it with the modern equivalent: drop
+# the Spamhaus DROP feed into an ipset and reference it from
+# /etc/ufw/before.rules, so every inbound packet is matched at the
+# bottom of the kernel firewall fast-path.
+#
+# Update flow:
+#  - /usr/local/sbin/stealth-vps-update-spamhaus.sh downloads the feed,
+#    sanity-checks the entry count, then atomically swaps the ipset.
+#  - stealth-vps-spamhaus.service runs once at boot (Before=ufw.service)
+#    so the ipset exists before UFW reloads its chains.
+#  - stealth-vps-spamhaus.timer schedules a daily refresh with jitter.
+
+- name: Install ipset (and dependencies needed by the refresh script)
+  ansible.builtin.apt:
+    name:
+      - ipset
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [spamhaus, hardening]
+
+- name: Ensure stealth-vps state dir exists for ipset persistence
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [spamhaus, hardening]
+
+- name: Render Spamhaus update script
+  ansible.builtin.template:
+    src: update-spamhaus.sh.j2
+    dest: /usr/local/sbin/stealth-vps-update-spamhaus.sh
+    owner: root
+    group: root
+    mode: '0755'
+  tags: [spamhaus, hardening]
+
+- name: Render Spamhaus systemd service
+  ansible.builtin.template:
+    src: stealth-vps-spamhaus.service.j2
+    dest: /etc/systemd/system/stealth-vps-spamhaus.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_hardening_spamhaus_service
+  tags: [spamhaus, hardening]
+
+- name: Render Spamhaus systemd timer
+  ansible.builtin.template:
+    src: stealth-vps-spamhaus.timer.j2
+    dest: /etc/systemd/system/stealth-vps-spamhaus.timer
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_hardening_spamhaus_timer
+  tags: [spamhaus, hardening]
+
+- name: systemd daemon-reload after unit/timer install
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: stealth_hardening_spamhaus_service.changed or stealth_hardening_spamhaus_timer.changed
+  tags: [spamhaus, hardening]
+
+# Bootstrap the ipset: we MUST run the script at least once before
+# touching UFW's before.rules — otherwise `ufw reload` will fail with
+# "Set spamhaus-drop doesn't exist".
+
+- name: Probe ipset state — does our set already exist?
+  ansible.builtin.command:
+    cmd: "ipset list -n {{ stealth_hardening_spamhaus_ipset_name }}"
+  register: stealth_hardening_spamhaus_ipset_probe
+  changed_when: false
+  failed_when: false
+  tags: [spamhaus, hardening]
+
+- name: Bootstrap Spamhaus ipset (initial download + populate)
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/stealth-vps-update-spamhaus.sh
+  when: stealth_hardening_spamhaus_ipset_probe.rc != 0
+  tags: [spamhaus, hardening]
+
+- name: Enable the daily timer
+  ansible.builtin.systemd:
+    name: stealth-vps-spamhaus.timer
+    state: started
+    enabled: true
+  tags: [spamhaus, hardening]
+
+- name: Enable the bootstrap service (runs on every boot before ufw)
+  ansible.builtin.systemd:
+    name: stealth-vps-spamhaus.service
+    enabled: true
+  tags: [spamhaus, hardening]
+
+# Hook the ipset into UFW's before.rules. blockinfile marker keeps the
+# block recognizable so a future apply can update or remove it cleanly.
+
+- name: Inject Spamhaus DROP rule into UFW before.rules
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before.rules
+    insertafter: "^# End required lines"
+    marker: "# {mark} stealth-vps spamhaus"
+    block: |
+      # Drop any inbound packet whose source matches the Spamhaus DROP list.
+      # ipset is populated by /usr/local/sbin/stealth-vps-update-spamhaus.sh.
+      -A ufw-before-input -m set --match-set {{ stealth_hardening_spamhaus_ipset_name }} src -j DROP
+  register: stealth_hardening_spamhaus_ufw_block
+  tags: [spamhaus, hardening]
+
+- name: Reload UFW when the before.rules block changed
+  ansible.builtin.command:
+    cmd: ufw reload
+  when: stealth_hardening_spamhaus_ufw_block.changed
+  changed_when: stealth_hardening_spamhaus_ufw_block.changed
+  tags: [spamhaus, hardening]
+
+# Smoke test: ipset has entries + ufw rule active.
+
+- name: Confirm ipset has entries
+  ansible.builtin.shell:
+    cmd: "ipset list {{ stealth_hardening_spamhaus_ipset_name }} | grep -c '^[0-9]'"
+  register: stealth_hardening_spamhaus_count
+  changed_when: false
+  tags: [spamhaus, hardening]
+
+- name: Assert minimum entry count
+  ansible.builtin.assert:
+    that:
+      - stealth_hardening_spamhaus_count.stdout | int >= stealth_hardening_spamhaus_min_entries
+    fail_msg: >-
+      ipset only has {{ stealth_hardening_spamhaus_count.stdout }} entries
+      (expected >= {{ stealth_hardening_spamhaus_min_entries }}).
+    success_msg: "Spamhaus ipset loaded with {{ stealth_hardening_spamhaus_count.stdout }} entries."
+  tags: [spamhaus, hardening]

@@ -14,9 +14,10 @@ ansible/vault_pass.txt
 .cache/
 *.log
 
-# IDE / OS
+# IDE / OS / AI assistant workspaces
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 .DS_Store
