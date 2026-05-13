@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.4.2)
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 — still needs iOS + macOS hardware in the QA rotation)
+- zh-CN README rewrite by a native speaker (deferred from v0.4.0 / v0.4.1 — still needs reviewer)
+- Fix the GitLab shell-executor runner so `lint` + `molecule` + `mirror-to-github` jobs actually run on push instead of failing with "apt-get: Permission denied" (infra-level dívida técnica since v0.1.0; release mirror is done manually for now).
+
+### Planned (v0.5.0)
+- True byte-level JA3/JA4 + JA3S/JA4S in `tls_fingerprint_compare.py` (scapy or tlslite-ng); golden snapshots per dest + a `scripts/update_golden.py` for quarterly upstream rotations.
+- HTTP/2 SETTINGS-frame comparison in `active_probe.py`.
+- Terraform module (provider-agnostic) + Pulumi reference.
+
+## [0.4.1] - 2026-05-13
+
+Fifth tagged release. The two probe-resistance scripts that landed scaffolded in v0.4.0 (scenarios 02 + 03) are now runnable: real TLS shape comparison (seven handshake-visible features) and real HTTP/1.1 response-shape comparison (status + header-set + body-bucket). Both smoke-tested positively (target=dest matches) and negatively (target≠dest detects every divergent feature). Two roadmap items (pen-tested iOS/macOS validation, zh-CN README rewrite) carry over to v0.4.2 — still blocked on the same externals.
+
 ### Added
 - **Probe-resistance scripts 02 + 03 are now runnable** (filled in from the v0.4.0 scaffold):
   - `tls_fingerprint_compare.py` — 7-feature TLS shape comparison using stdlib `ssl` + a single `openssl x509 -inform DER -text` shell-out: protocol version, chosen cipher, selected ALPN, peer cert subject CN, SAN list (sorted), issuer CN, signature + public-key algorithms. Cert is captured to a temp file (avoids Windows openssl-stdin quirks). One `WHY:` line per diverging feature on fail.
@@ -16,9 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Honest naming: the script does **not** claim to compute JA3/JA4. Those are byte-level fingerprints over raw `ClientHello` / `ServerHello`; Python's stdlib abstracts those bytes away. Scenario doc 02 now documents this explicitly and points to v1.0 plug-in territory (scapy / tlslite-ng + golden snapshots).
 - Scenario docs `02-tls-fingerprint.md` and `03-active-probe-no-key.md` rewritten — the "v0.5 (planned)" sections become "v0.4.1 (runnable)" with the actual implementation details, and v1.0 picks up only what stays deferred.
 
-### Planned (v0.4.1 remaining)
-- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 — needs iOS + macOS hardware in the QA rotation)
-- zh-CN README rewrite by a native speaker (deferred from v0.4.0 — needs reviewer)
+### Deferred to v0.4.2
+- Pen-tested iOS + macOS validation pass — still needs hardware in the QA rotation.
+- zh-CN README rewrite — still needs native-speaker review.
 
 ## [0.4.0] - 2026-05-13
 
