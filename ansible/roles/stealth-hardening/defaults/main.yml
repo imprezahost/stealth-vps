@@ -2,10 +2,28 @@
 # Defaults for the stealth-hardening role.
 
 # ---- SSH ----
+# Port for the hardened drop-in (additive — the main sshd_config keeps
+# Port 22 alive too on first apply so we cannot lock ourselves out).
+# A follow-up sub-sprint flips `stealth_hardening_ssh_legacy_port_enabled`
+# to false to remove port 22 from the listener set.
 stealth_hardening_ssh_port: 22550
-stealth_hardening_ssh_permit_root_login: "prohibit-password"   # key-only for root
+stealth_hardening_ssh_legacy_port_enabled: true
+# Root login: prohibit-password = key-only for root. Set "no" to disable
+# root entirely once you have a non-root admin user (out of scope v0.1.0).
+stealth_hardening_ssh_permit_root_login: "prohibit-password"
+# Disable password auth entirely. Key-only.
 stealth_hardening_ssh_password_authentication: false
+# Auth limits.
 stealth_hardening_ssh_max_auth_tries: 3
+stealth_hardening_ssh_login_grace_time: 30
+stealth_hardening_ssh_max_sessions: 5
+# Idle handling — drop dead clients after ClientAliveInterval * Max seconds.
+stealth_hardening_ssh_client_alive_interval: 300
+stealth_hardening_ssh_client_alive_count_max: 2
+# Allow-list of unix users that may SSH in at all (matches `AllowUsers`).
+# Keep root for the install.sh / ansible-pull flow; add operator users here.
+stealth_hardening_ssh_allow_users:
+  - root
 
 # ---- fail2ban ----
 stealth_hardening_fail2ban_enabled: true

@@ -1,0 +1,68 @@
+---
+# SSH hardening — adds a drop-in to /etc/ssh/sshd_config.d/ that:
+#   * adds a stealth port (additive — port 22 stays until the legacy
+#     toggle is flipped in a follow-up sub-sprint)
+#   * forces key-only auth (no password)
+#   * tightens auth limits + idle handling
+#   * pins modern KEX / ciphers / MACs / host-key algorithms
+#   * restricts which unix accounts may log in at all
+#
+# `validate: sshd -t -f %s` runs against the rendered drop-in BEFORE it
+# is moved into place, so a typo cannot accidentally take sshd offline.
+# We then run a full `sshd -t` against the merged config to catch
+# conflicts with the main /etc/ssh/sshd_config.
+
+- name: Ensure /etc/ssh/sshd_config.d exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: [ssh, hardening]
+
+- name: Render stealth-vps sshd drop-in
+  ansible.builtin.template:
+    src: 99-stealth-vps.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-stealth-vps.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+    # sshd -t -f %s parses just this file. Catches obvious typos before
+    # we move it into place. The next task does a full-config validation.
+    validate: sshd -t -f %s
+  notify: Restart sshd
+  tags: [ssh, hardening]
+
+- name: Validate the merged sshd config (drop-in + main)
+  ansible.builtin.command:
+    cmd: sshd -t
+  changed_when: false
+  tags: [ssh, hardening]
+
+- name: Flush handlers so sshd restarts before we verify
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the hardened SSH port to listen
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ stealth_hardening_ssh_port }}"
+    timeout: 15
+  tags: [ssh, hardening]
+
+- name: Probe listening SSH sockets (status report)
+  ansible.builtin.command:
+    cmd: ss -ltnH
+  register: stealth_hardening_ssh_listeners
+  changed_when: false
+  tags: [ssh, hardening]
+
+- name: Show SSH listener summary
+  ansible.builtin.debug:
+    msg: >-
+      SSH listeners after hardening:
+      {{ stealth_hardening_ssh_listeners.stdout_lines
+         | select('search', ':(22|' + (stealth_hardening_ssh_port | string) + ')\\s')
+         | list }}
+  tags: [ssh, hardening]

@@ -1,0 +1,50 @@
+# {{ ansible_managed }}
+# stealth-vps — SSH hardening drop-in. Loaded after the main sshd_config
+# via `Include /etc/ssh/sshd_config.d/*.conf`.
+# Edit ansible/roles/stealth-hardening/templates/99-stealth-vps.conf.j2.
+# Local edits get overwritten on the next playbook run.
+
+# Additive listener — the main sshd_config still has Port 22 until
+# stealth_hardening_ssh_legacy_port_enabled is flipped to false.
+Port {{ stealth_hardening_ssh_port }}
+
+# --- Authentication ------------------------------------------------------
+PermitRootLogin {{ stealth_hardening_ssh_permit_root_login }}
+PasswordAuthentication {{ stealth_hardening_ssh_password_authentication | ternary('yes', 'no') }}
+PubkeyAuthentication yes
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+UsePAM yes
+PermitEmptyPasswords no
+
+# --- Auth / session limits ----------------------------------------------
+MaxAuthTries {{ stealth_hardening_ssh_max_auth_tries }}
+LoginGraceTime {{ stealth_hardening_ssh_login_grace_time }}
+MaxSessions {{ stealth_hardening_ssh_max_sessions }}
+MaxStartups 10:30:60
+
+# --- Idle handling ------------------------------------------------------
+ClientAliveInterval {{ stealth_hardening_ssh_client_alive_interval }}
+ClientAliveCountMax {{ stealth_hardening_ssh_client_alive_count_max }}
+TCPKeepAlive yes
+
+# --- Crypto: modern algorithms only -------------------------------------
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
+HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256
+
+# --- Reduce attack surface ---------------------------------------------
+AllowAgentForwarding no
+# Keep TCP forwarding on so operators can `ssh -L` tunnel the 3X-UI panel
+# until UFW + TLS land.
+AllowTcpForwarding yes
+X11Forwarding no
+PermitTunnel no
+PermitUserEnvironment no
+PrintMotd no
+GatewayPorts no
+Compression no
+
+# --- Account allow-list ------------------------------------------------
+AllowUsers {{ stealth_hardening_ssh_allow_users | join(' ') }}

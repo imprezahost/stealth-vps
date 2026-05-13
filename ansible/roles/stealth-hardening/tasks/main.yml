@@ -10,16 +10,16 @@
       - ansible_facts['distribution'] in ['Debian', 'Ubuntu']
     fail_msg: "stealth-hardening currently supports Debian 12+ and Ubuntu 22.04+ only."
 
-# Sprint 1 follow-ups — uncomment each as the file is added:
-#
-# - name: Harden SSH (port, key-only, sane defaults)
-#   ansible.builtin.include_tasks: ssh.yml
-#   tags: [ssh]
+- name: Harden SSH (port, key-only, sane defaults)
+  ansible.builtin.include_tasks: ssh.yml
+  tags: [ssh, hardening]
+
+# Sprint 2 follow-ups — uncomment each as the file is added:
 #
 # - name: Configure UFW firewall
 #   ansible.builtin.include_tasks: ufw.yml
 #   when: stealth_hardening_ufw_enabled | bool
-#   tags: [ufw, firewall]
+#   tags: [ufw, firewall, hardening]
 #
 # - name: Configure fail2ban (including working 3X-UI jail)
 #   ansible.builtin.include_tasks: fail2ban.yml
