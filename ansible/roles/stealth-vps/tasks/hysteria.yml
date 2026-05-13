@@ -187,16 +187,32 @@
   when: not stealth_vps_domain
   tags: [hysteria, hysteria2]
 
-- name: Grant hysteria user read access to the LE cert + key
+- name: Grant hysteria user access to the TLS dir + cert files
+  # tls.yml runs before the hysteria user exists, so we couldn't chown
+  # there. Re-chown here (after `User: hysteria` exists) so hysteria
+  # can both traverse the directory and read the cert/key files.
   ansible.builtin.file:
     path: "{{ item.path }}"
     owner: root
     group: "{{ stealth_vps_hysteria_user }}"
     mode: "{{ item.mode }}"
+    state: "{{ item.state }}"
   loop:
-    - { path: "{{ stealth_vps_tls_dir }}/fullchain.pem", mode: '0640' }
-    - { path: "{{ stealth_vps_tls_dir }}/privkey.pem", mode: '0640' }
+    - { path: "{{ stealth_vps_tls_dir }}",                 mode: '0750', state: directory }
+    - { path: "{{ stealth_vps_tls_dir }}/fullchain.pem",   mode: '0640', state: file }
+    - { path: "{{ stealth_vps_tls_dir }}/privkey.pem",     mode: '0640', state: file }
   when: stealth_vps_domain
+  register: stealth_vps_hysteria_tls_perms
+  tags: [hysteria, hysteria2]
+
+- name: Reset hysteria-server backoff state if it was crash-looping
+  # If perms were wrong on a previous apply, systemd may have entered
+  # a restart loop and saved a fail count. reset-failed clears it so
+  # the next start command works immediately.
+  ansible.builtin.command:
+    cmd: systemctl reset-failed hysteria-server
+  changed_when: false
+  when: stealth_vps_hysteria_tls_perms is changed
   tags: [hysteria, hysteria2]
 
 # --- Install / upgrade the binary ----------------------------------------

@@ -41,7 +41,12 @@
     state: directory
     owner: root
     group: root
-    mode: '0700'
+    # 0711: others can traverse but cannot list. Individual files inside
+    # are chmod 0600 (panel/reality/hysteria.state.yml), so secrets stay
+    # root-only. The traverse bit is necessary so service users like
+    # `hysteria` can reach /etc/stealth-vps/tls/{fullchain,privkey}.pem
+    # when Let's Encrypt is enabled.
+    mode: '0711'
   tags: [panel, 3xui]
 
 - name: Probe existing panel state file
