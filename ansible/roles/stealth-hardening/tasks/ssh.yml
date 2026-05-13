@@ -32,7 +32,7 @@
     # sshd -t -f %s parses just this file. Catches obvious typos before
     # we move it into place. The next task does a full-config validation.
     validate: sshd -t -f %s
-  notify: Restart sshd
+  register: stealth_hardening_ssh_dropin
   tags: [ssh, hardening]
 
 - name: Validate the merged sshd config (drop-in + main)
@@ -41,8 +41,16 @@
   changed_when: false
   tags: [ssh, hardening]
 
-- name: Flush handlers so sshd restarts before we verify
-  ansible.builtin.meta: flush_handlers
+- name: Restart sshd to pick up the new drop-in
+  # Explicit task instead of a handler — `meta: flush_handlers` inside an
+  # include_tasks didn't fire reliably on ansible-core 2.14 in our test.
+  # An explicit restart-on-changed is determinstic and shows up in the
+  # play recap, which makes debugging the listener trivial.
+  ansible.builtin.systemd:
+    name: ssh
+    state: restarted
+  when: stealth_hardening_ssh_dropin.changed
+  tags: [ssh, hardening]
 
 - name: Wait for the hardened SSH port to listen
   ansible.builtin.wait_for:
