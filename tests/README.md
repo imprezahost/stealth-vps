@@ -38,5 +38,5 @@ This catches lint regressions and runtime template / variable errors. Full valid
 | Version | Scope |
 |---|---|
 | v0.2.0 | Default scenario — kernel + SSH artifacts on Debian 12 |
-| v0.3.0 | Add Ubuntu 22.04 + 24.04 platforms; probably split into a multi-platform matrix |
+| **v0.3.0** | **Multi-platform matrix: Debian 12 + Ubuntu 22.04 + Ubuntu 24.04 in one scenario** (converge + verify + idempotence runs against all three) |
 | v1.0.0 | Probe-resistance suite — uTLS fingerprint comparison, simulated active-probing patterns, port-scan resistance |

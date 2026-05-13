@@ -31,11 +31,34 @@ driver:
   name: docker
 
 platforms:
+  # systemd-in-docker needs privileged + the cgroup mount; the
+  # geerlingguy/docker-*-ansible images are the de-facto Ansible-test
+  # containers that already have it set up.
   - name: stealth-vps-debian12
     image: geerlingguy/docker-debian12-ansible:latest
     pre_build_image: true
-    # systemd-in-docker needs privileged + the cgroup mount; this image
-    # is the de-facto Ansible-test container that has it set up already.
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /run/lock
+  - name: stealth-vps-ubuntu2204
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /run/lock
+  - name: stealth-vps-ubuntu2404
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
     privileged: true
     command: /lib/systemd/systemd
     volumes:
@@ -51,13 +74,16 @@ provisioner:
     converge: ../../../ansible/playbooks/site.yml
     verify: verify.yml
   inventory:
-    host_vars:
-      stealth-vps-debian12:
-        # Skip the pieces that don't behave inside a Docker container.
-        # Real-host validation lives in docs/development.md.
+    # Same opt-outs apply to every platform: skip the pieces that need
+    # a real network stack / privileged ipset / journald systemd
+    # collector. Real-host validation lives in docs/development.md.
+    group_vars:
+      all:
         stealth_vps_panel_enabled: false
         stealth_vps_reality_enabled: false
         stealth_vps_hysteria_enabled: false
+        stealth_vps_observability_enabled: false
+        stealth_vps_metrics_enabled: false
         stealth_vps_domain: null
 
         stealth_hardening_ufw_enabled: false
