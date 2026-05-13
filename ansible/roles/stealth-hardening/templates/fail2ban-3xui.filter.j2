@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+# stealth-vps — fail2ban filter for the 3X-UI panel login.
+#
+# Matches the log line that 3X-UI writes on each failed login attempt:
+#   2026/05/13 10:12:25 WARNING - wrong username: "guest", password: "x", IP: "1.2.3.4"
+#
+# Upstream 3X-UI's fail2ban example is well-known to be subtly broken
+# (wrong datepattern, missing quote handling). This filter is the one
+# we test in CI; do not replace it with the upstream blob.
+
+[Definition]
+
+failregex = ^.*WARNING - wrong username: "[^"]*", password: "[^"]*", IP: "<HOST>"\s*$
+
+ignoreregex =
+
+# 3X-UI uses YYYY/MM/DD HH:MM:SS (slashes, not dashes). Without this
+# pattern, fail2ban falls back to syslog parsing and silently misses
+# every line.
+datepattern = ^%%Y/%%m/%%d %%H:%%M:%%S

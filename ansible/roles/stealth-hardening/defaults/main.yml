@@ -30,7 +30,14 @@ stealth_hardening_fail2ban_enabled: true
 stealth_hardening_fail2ban_bantime: 86400       # 24h
 stealth_hardening_fail2ban_findtime: 600        # 10min window
 stealth_hardening_fail2ban_maxretry: 3
-# Jails enabled by default. The "3xui" jail uses custom filter shipped with the role.
+# `ufw` action makes fail2ban call `ufw insert 1 deny from <ip>` so the
+# firewall is the single source of truth. Alternative: iptables-multiport.
+stealth_hardening_fail2ban_banaction: ufw
+# Path to the 3X-UI log fail2ban tails. Don't change unless you also
+# update the panel install task.
+stealth_hardening_fail2ban_3xui_logpath: /var/log/x-ui/3xui.log
+# Jails enabled by default. The "3xui" jail uses a custom filter shipped
+# with the role; sshd uses the stock filter from /etc/fail2ban/filter.d.
 stealth_hardening_fail2ban_jails:
   - sshd
   - 3xui

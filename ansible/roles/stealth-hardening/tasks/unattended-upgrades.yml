@@ -1,0 +1,77 @@
+---
+# unattended-upgrades — applies security-only patches automatically.
+#
+# Two files:
+#  * /etc/apt/apt.conf.d/20auto-upgrades        — enables the hook timers
+#  * /etc/apt/apt.conf.d/51stealth-vps-unattended  — origin filter +
+#    per-host overrides (load order > 50, so stock defaults are
+#    overridden where we set the same key).
+#
+# Mail is off by default. Override `stealth_hardening_unattended_blacklist`
+# in inventory to pin packages that should never be auto-upgraded.
+
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [updates, patches, hardening]
+
+- name: Render 20auto-upgrades (enables periodic timers)
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: '0644'
+  tags: [updates, patches, hardening]
+
+- name: Render 51stealth-vps-unattended (origin filter, no auto-reboot)
+  ansible.builtin.template:
+    src: 51stealth-vps-unattended.j2
+    dest: /etc/apt/apt.conf.d/51stealth-vps-unattended
+    owner: root
+    group: root
+    mode: '0644'
+  tags: [updates, patches, hardening]
+
+- name: Validate apt config (any conf typo would block apt entirely)
+  ansible.builtin.command:
+    cmd: apt-config dump
+  changed_when: false
+  failed_when: false
+  register: stealth_hardening_apt_config_check
+  tags: [updates, patches, hardening]
+
+- name: Assert apt config still parses
+  ansible.builtin.assert:
+    that: stealth_hardening_apt_config_check.rc == 0
+    fail_msg: >-
+      apt-config dump returned non-zero — one of the apt.conf.d/ files we
+      just wrote is malformed. Inspect /etc/apt/apt.conf.d/ manually.
+  tags: [updates, patches, hardening]
+
+- name: Enable and start the unattended-upgrades service
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    state: started
+    enabled: true
+  tags: [updates, patches, hardening]
+
+- name: Dry-run unattended-upgrades to verify config end-to-end
+  ansible.builtin.command:
+    cmd: unattended-upgrade --dry-run --debug
+  changed_when: false
+  register: stealth_hardening_uupg_dry
+  tags: [updates, patches, hardening]
+
+- name: Show unattended-upgrades dry-run summary (origins + candidates)
+  ansible.builtin.debug:
+    msg: >-
+      {{ stealth_hardening_uupg_dry.stdout_lines
+         | select('search', 'Allowed origins|packages that will be|kept back|Checking')
+         | list | unique | first(20) }}
+  tags: [updates, patches, hardening]

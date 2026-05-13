@@ -18,6 +18,24 @@
   ansible.builtin.include_tasks: ufw.yml
   when: stealth_hardening_ufw_enabled | bool
   tags: [ufw, firewall, hardening]
+
+- name: Configure fail2ban (including working 3X-UI jail)
+  ansible.builtin.include_tasks: fail2ban.yml
+  when: stealth_hardening_fail2ban_enabled | bool
+  tags: [fail2ban, hardening]
+
+- name: Configure unattended-upgrades for security patches
+  ansible.builtin.include_tasks: unattended-upgrades.yml
+  when: stealth_hardening_unattended_upgrades | bool
+  tags: [updates, patches, hardening]
+
+# Sprint 2 follow-up — uncomment when implemented:
+#
+# - name: Apply Spamhaus DROP/EDROP via ipset + UFW (modern replacement
+#         for the legacy hosts.deny approach)
+#   ansible.builtin.include_tasks: spamhaus.yml
+#   when: stealth_hardening_spamhaus_drop | bool or stealth_hardening_spamhaus_edrop | bool
+#   tags: [spamhaus, hosts-deny, hardening]
 #
 # - name: Configure fail2ban (including working 3X-UI jail)
 #   ansible.builtin.include_tasks: fail2ban.yml
