@@ -61,6 +61,33 @@
     mode: '0700'
   tags: [hysteria, hysteria2]
 
+# Load sibling-state files when present so the credentials.txt template
+# can render the panel + Reality sections too. Optional — only the
+# Hysteria2 section needs them mandatory.
+
+- name: Probe sibling state files
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/{{ item }}"
+  loop:
+    - panel.state.yml
+    - reality.state.yml
+  register: stealth_vps_sibling_state_stat
+  tags: [hysteria, hysteria2]
+
+- name: Load panel state for credentials.txt
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    name: stealth_vps_panel_state
+  when: stealth_vps_sibling_state_stat.results[0].stat.exists
+  tags: [hysteria, hysteria2]
+
+- name: Load reality state for credentials.txt
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+    name: stealth_vps_reality_state
+  when: stealth_vps_sibling_state_stat.results[1].stat.exists
+  tags: [hysteria, hysteria2]
+
 # --- State (generate once, reuse forever) ---------------------------------
 
 - name: Probe existing hysteria state file
