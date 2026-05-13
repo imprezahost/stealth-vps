@@ -47,8 +47,9 @@ yamllint:
 ansible-lint:
   <<: *lint-base
   script:
-    - pip install "ansible-core>=2.16" ansible-lint
-    - ansible-lint ansible/
+    - pip install "ansible-core>=2.14,<2.18" ansible-lint
+    - ansible-galaxy collection install -r ansible/requirements.yml
+    - ansible-lint
 
 markdown-lint:
   <<: *lint-base
@@ -61,18 +62,35 @@ markdown-lint:
   allow_failure: true
 
 # ---------------------------------------------------------------------------
-# TEST (placeholder — Molecule wired up once roles have content)
+# TEST — Molecule converge + verify in a Debian 12 + systemd container
 # ---------------------------------------------------------------------------
 
 molecule:
   stage: test
-  image: python:3.12-slim
+  image: docker:24
+  services:
+    - name: docker:24-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
+  before_script:
+    - apk add --no-cache python3 py3-pip py3-virtualenv git bash
+    - python3 -m venv /tmp/.venv
+    - . /tmp/.venv/bin/activate
+    - pip install --quiet --upgrade pip
+    - pip install --quiet "ansible-core>=2.14,<2.18" "molecule>=24" "molecule-plugins[docker]" "docker"
+    - ansible-galaxy collection install -r ansible/requirements.yml
   script:
-    - echo "Molecule scenarios not yet implemented. Placeholder."
-    - exit 0
+    - . /tmp/.venv/bin/activate
+    - cd tests/molecule/default
+    - molecule test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # Allow failure for now — dind in self-hosted GitLab runners can be
+  # flaky; the manual VPS validation in docs/development.md remains
+  # the authoritative gate.
   allow_failure: true
 
 # ---------------------------------------------------------------------------

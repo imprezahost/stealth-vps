@@ -28,8 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/client-setup/windows.md` — full walkthrough for NekoBox (nekoray) and v2rayN, both proxy and TUN modes, with wintun handling and common error fixes.
 - `docs/client-setup/ios.md` and `docs/client-setup/macos.md` — promoted from "placeholder" to working quick-start tables of the recommended clients (Shadowrocket, Streisand, Hiddify on iOS; Hiddify, V2Box, NekoBox, Shadowrocket on macOS), with notes on TUN behaviour and App Store regional availability. Full pen-tested walkthrough lands in v0.3.0.
 
+### Added
+- `tests/molecule/default/` — working Molecule scenario. Boots a Debian 12 + systemd container, converges `site.yml` with the service-bound tasks toggled off (panel/xray/hysteria/UFW/fail2ban/spamhaus/unattended-upgrades — those need a real network stack), and `verify.yml` asserts the kernel sysctl drop-in + SSH hardening drop-in are in place. The `idempotence` step of `molecule test` gates regressions where a 2nd converge would mark anything changed.
+- `.gitlab-ci.yml` `molecule` job runs the scenario on every MR / `main` push. `allow_failure: true` for now because docker-in-docker self-hosted runners are flaky; the manual VPS validation in `docs/development.md` is still the authoritative gate.
+
+### Changed
+- `ansible-lint` CI job now installs the role's collection requirements first (so the role tree resolves) and lowers the pinned ansible-core to `>=2.14,<2.18` to match the project's actual support window.
+
 ### Planned (still in v0.2.0)
-- Molecule integration test scenario
 - Basic observability bundle (Prometheus exporter + Grafana JSON)
 - zh-CN README rewrite by a native speaker
 

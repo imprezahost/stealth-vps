@@ -1,0 +1,92 @@
+---
+# Molecule verify — asserts that the converge actually produced the
+# artifacts the role promises. Keep this list tight: only the things
+# that would silently regress otherwise.
+
+- name: Verify stealth-vps + stealth-hardening converge artifacts
+  hosts: all
+  gather_facts: true
+
+  tasks:
+
+    # --- kernel.yml output ----------------------------------------------
+
+    - name: /etc/sysctl.d/99-stealth.conf exists
+      ansible.builtin.stat:
+        path: /etc/sysctl.d/99-stealth.conf
+      register: stealth_vps_sysctl_stat
+
+    - name: Assert sysctl drop-in is present and root-owned
+      ansible.builtin.assert:
+        that:
+          - stealth_vps_sysctl_stat.stat.exists
+          - stealth_vps_sysctl_stat.stat.pw_name == 'root'
+          - stealth_vps_sysctl_stat.stat.mode == '0644'
+
+    - name: Read effective sysctl values
+      ansible.builtin.command:
+        cmd: "sysctl -n {{ item }}"
+      register: stealth_vps_sysctl_values
+      changed_when: false
+      loop:
+        - net.ipv4.tcp_congestion_control
+        - net.core.default_qdisc
+        - net.ipv4.tcp_fastopen
+        - net.core.rmem_max
+        - fs.file-max
+      # In a Docker container, /proc/sys is mounted from the host, so
+      # net.* may not actually flip to bbr/fq. Don't make the assertion
+      # strict — verify the *file* content instead, which is what the
+      # role actually controls.
+      failed_when: false
+
+    - name: Assert sysctl file contents match the template
+      ansible.builtin.shell:
+        cmd: "grep -E '^{{ item }}' /etc/sysctl.d/99-stealth.conf"
+      changed_when: false
+      loop:
+        - "net.core.default_qdisc = fq"
+        - "net.ipv4.tcp_congestion_control = bbr"
+        - "net.ipv4.tcp_fastopen = 3"
+        - "net.core.rmem_max"
+        - "fs.file-max"
+
+    - name: /etc/modules-load.d/tcp_bbr.conf is present
+      ansible.builtin.stat:
+        path: /etc/modules-load.d/tcp_bbr.conf
+      register: stealth_vps_modules_stat
+
+    - name: Assert tcp_bbr module-load drop-in exists
+      ansible.builtin.assert:
+        that: stealth_vps_modules_stat.stat.exists
+
+    # --- ssh.yml output -------------------------------------------------
+
+    - name: /etc/ssh/sshd_config.d/99-stealth-vps.conf exists
+      ansible.builtin.stat:
+        path: /etc/ssh/sshd_config.d/99-stealth-vps.conf
+      register: stealth_vps_ssh_dropin_stat
+
+    - name: Assert sshd drop-in is present and root-owned
+      ansible.builtin.assert:
+        that:
+          - stealth_vps_ssh_dropin_stat.stat.exists
+          - stealth_vps_ssh_dropin_stat.stat.pw_name == 'root'
+          - stealth_vps_ssh_dropin_stat.stat.mode == '0644'
+
+    - name: Merged sshd config parses cleanly
+      ansible.builtin.command:
+        cmd: sshd -t
+      changed_when: false
+
+    - name: sshd -T reports the hardened port
+      ansible.builtin.command:
+        cmd: "bash -c 'sshd -T | grep ^port'"
+      register: stealth_vps_sshd_port
+      changed_when: false
+
+    - name: Assert the stealth SSH port is in the effective config
+      ansible.builtin.assert:
+        that:
+          - "'22550' in stealth_vps_sshd_port.stdout"
+        fail_msg: "Expected 'port 22550' in sshd -T output; got: {{ stealth_vps_sshd_port.stdout }}"
