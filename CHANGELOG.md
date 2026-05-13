@@ -17,11 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `stealth-hardening` role: Spamhaus DROP ipset task (`tasks/spamhaus.yml`) — installs ipset, drops a `stealth-vps-update-spamhaus.sh` script, a oneshot systemd service (runs `Before=ufw.service` so the set exists before UFW reloads), and a daily systemd timer with jitter. Injects a single `-A ufw-before-input -m set --match-set spamhaus-drop src -j DROP` rule into `/etc/ufw/before.rules` via blockinfile. Atomic swap pattern (build new ipset, swap, destroy old) keeps the firewall from ever observing an empty set. Spamhaus consolidated EDROP into DROP in early 2026, so we only consume the one URL.
 
+### Added
+- `stealth-vps` role: Hysteria2 port hopping (`tasks/hysteria.yml`) — opt-in via `stealth_vps_hysteria_port_hopping=true`. Injects a `*nat` block into `/etc/ufw/before.rules` with a `PREROUTING REDIRECT` rule that bounces UDP traffic in `[stealth_vps_hysteria_port_hopping_min, _max]` (defaults 20000-50000) to the actual Hysteria2 listener port. The client URI in `credentials.txt` gets the `,min-max` suffix the apernet/hysteria client understands.
+
 ### Changed
 - `stealth_hardening_spamhaus_drop` + `stealth_hardening_spamhaus_edrop` split is replaced by a single `stealth_hardening_spamhaus_enabled` toggle (default `true`).
 
 ### Planned (still in v0.2.0)
-- Hysteria2 port hopping (DNAT range rules)
 - Molecule integration test scenario
 - Client setup walkthroughs (Android v2rayNG / NekoBox, Windows NekoBox, basic dashboards)
 - Basic observability bundle (Prometheus exporter + Grafana JSON)

@@ -42,9 +42,13 @@ stealth_vps_hysteria_bandwidth_down: "1 gbps"
 stealth_vps_hysteria_port_min: 40000
 stealth_vps_hysteria_port_max: 60000
 # Port hopping makes detection harder by spreading the same connection
-# across many ports. Requires firewall rules redirecting a port range
-# to the listener — wired up in sprint 2 alongside UFW.
+# across many ports. The role installs an iptables/UFW PREROUTING DNAT
+# rule that redirects UDP traffic in the configured range to the actual
+# Hysteria2 listening port; the client URI is rendered with the range
+# appended so clients can pick a random port per connection.
 stealth_vps_hysteria_port_hopping: false
+stealth_vps_hysteria_port_hopping_min: 20000
+stealth_vps_hysteria_port_hopping_max: 50000
 # apernet/hysteria release pin. Last stable in maybe/2026; bumped together
 # with a security review.
 stealth_vps_hysteria_version: "app/v2.8.2"
