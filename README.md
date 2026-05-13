@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.2.0 (alpha).** Production-grade stack: SSH / UFW / fail2ban / unattended-upgrades hardening, VLESS-Reality, Hysteria2 (with port hopping), 3X-UI panel, kernel tuning, Let's Encrypt automation, Spamhaus DROP via ipset, `node_exporter` baseline. Android + Windows client walkthroughs included; iOS / macOS get a quick-start in v0.2.0 with pen-tested walkthroughs in v0.3.0. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.3.0 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules (cert expiry / scrape / fail2ban / traffic spikes). Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -93,11 +93,12 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.1.0 | Ansible role (kernel + panel + Reality + Hysteria2), `stealth-hardening` role (SSH + UFW + fail2ban + unattended-upgrades), cloud-init, `install.sh`, EN README | shipped 2026-05-13 |
-| **v0.2.0** | Let's Encrypt automation (drops `insecure=1` on Hysteria2), Spamhaus DROP via ipset + UFW, Hysteria2 port hopping, Android + Windows client walkthroughs, `node_exporter` baseline observability, Molecule scenario | **shipped 2026-05-13** |
-| v0.3.0 | Pen-tested iOS / macOS client walkthroughs, Xray + Hysteria2 Prometheus endpoints, stealth-vps-specific Grafana dashboards, alert rules (cert expiry, login flood, bandwidth, fail2ban rate), zh-CN README rewrite, multi-platform Molecule matrix | planned |
-| v0.4.0 | Terraform module (provider-agnostic), Pulumi reference | planned |
-| v1.0.0 | Probe-resistance CI suite, signed releases, security audit | roadmap |
+| v0.1.0 | Ansible role (kernel + panel + Reality + Hysteria2), hardening role, cloud-init, `install.sh` | shipped 2026-05-13 |
+| v0.2.0 | Let's Encrypt automation, Spamhaus DROP, Hysteria2 port hopping, Android + Windows walkthroughs, `node_exporter` baseline, Molecule scenario | shipped 2026-05-13 |
+| **v0.3.0** | Per-protocol Prometheus metrics + Grafana dashboard + alert rules, multi-platform Molecule matrix (Debian 12 + Ubuntu 22.04/24.04), source-IP filter for `:9100`, iOS + macOS full walkthroughs | **shipped 2026-05-13** |
+| v0.4.0 | Pen-tested iOS + macOS validation pass, zh-CN README rewrite, arm64 packaging, reverse-mirror automation, probe-resistance test suite scaffolding | planned |
+| v0.5.0 | Terraform module (provider-agnostic), Pulumi reference | planned |
+| v1.0.0 | Probe-resistance CI suite (full), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.
 

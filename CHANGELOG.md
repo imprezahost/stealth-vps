@@ -7,35 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `stealth-vps` role: Reality (3X-UI panel API) and Hysteria2 (`trafficStats` JSON) traffic counters surfaced as Prometheus metrics. A `/usr/local/sbin/stealth-vps-metrics-update.py` runs every `stealth_vps_metrics_refresh_interval_sec` seconds (systemd `.timer`), pulls both APIs, and writes a `.prom` file into `/var/lib/stealth-vps/metrics/`. node_exporter is restarted with `--collector.textfile.directory` pointing at that dir, so Prometheus has one scrape target (`:9100`) covering host + protocols. `stealth_vps_metrics_enabled` (default true) toggles the whole thing.
-- Hysteria2 config now exposes its `trafficStats` JSON API on `stealth_vps_hysteria_traffic_stats_listen` (default `127.0.0.1:9101`, loopback only) so the updater can read it.
-
-### Added
-- `observability/grafana/dashboards/stealth-vps-overview.json` — importable Grafana dashboard consuming the new `stealth_vps_*` series. Panels: health stats (scrape errors, online Hysteria2 clients, last-scrape age), Reality inbound up/down per port, top-N per-client up/down (Reality), Hysteria2 tx/rx per `client_id`. Templating: Prometheus datasource picker + multi-select `Host` variable.
-- `observability/README.md` rewritten to document the dual-dashboard pattern (1860 for host + the new JSON for protocols) and the full metric reference table.
-
-### Added
-- Metrics updater (`stealth-vps-metrics-update.py`) now also exposes:
-  - `stealth_vps_cert_expiry_seconds{cert="le-fullchain"}` — seconds until the Let's Encrypt cert at `/etc/stealth-vps/tls/fullchain.pem` expires, or `-1` when no cert is configured.
-  - `stealth_vps_fail2ban_{currently,total}_{banned,failed}{jail="..."}` — per-jail counters parsed from `fail2ban-client status`.
-  - `stealth_vps_{cert,fail2ban}_scrape_error` gauges.
-- `observability/prometheus/alerts/stealth-vps.rules.yml` — Prometheus alert rules: cert expiry (warning at 7d, critical at 24h), scrape errors per upstream, scrape staleness, fail2ban ban-rate spike, currently-banned threshold, inbound traffic spike (3× baseline and >1 MB/s, by inbound). Drop the file into your central Prometheus `rule_files:` and reload.
-
-### Changed
-- `tests/molecule/default/molecule.yml` now converges + verifies the role against **three platforms in one scenario**: Debian 12, Ubuntu 22.04, Ubuntu 24.04 (all geerlingguy/docker-*-ansible images, systemd-in-docker). `inventory.host_vars` per-platform replaced with `group_vars: all` so the same opt-outs apply uniformly. The matrix runs in the existing `molecule` CI job; no extra runner config needed.
-
-### Added
-- `stealth_vps_observability_allow_from` — list of CIDRs allowed to reach the node_exporter port when it's bound to a non-loopback address. `tasks/ufw.yml` creates one `ufw allow from <cidr> to any port <port> proto tcp` per entry; an empty list (default) means no UFW rule, so the port stays loopback-only and the SSH-tunnel pattern is the only way in. observability/README.md got the new snippet.
-
-### Added
-- `docs/client-setup/ios.md` rewritten as a full walkthrough — Hiddify (recommended free), Shadowrocket (paid de-facto), Streisand (paid sing-box). Add-profile flows, connect, Reality field checks, Hysteria2 port-hopping + insecure handling, troubleshooting matrix for the common iOS breakages (VPN permission, DNS bypass, cellular UDP throttling, Battery-drain trade-off), multi-user sharing via panel subscription URLs.
-- `docs/client-setup/macos.md` rewritten as a full walkthrough — Hiddify Desktop, V2Box, NekoBox (nekoray), Shadowrocket on Apple Silicon. Per-client install/import/connect, TUN vs system proxy mode, the DNS-leak-via-Apple-private-DNS pitfall, the wintun/utun gotcha, and battery-priority Reality vs Hysteria2 guidance.
-- Both docs carry an explicit "Validation status" footer noting that per-screen pen-tested validation lands in v0.4.0 (when iOS / macOS hardware enters the QA rotation).
-
-### Planned (now v0.4.0)
-- Pen-tested iOS + macOS validation (replaces v0.3.0 entry)
+### Planned (v0.4.0)
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs
 - zh-CN README rewrite by a native speaker
+- arm64 packaging for the panel + Hysteria2 (so amd64-only assert can be relaxed)
+- Source-mirror automation: GitHub Actions reverse-mirror so external PR contributors get CI parity
+- Probe-resistance test suite scaffolding (v1.0 roadmap, started here)
+
+## [0.3.0] - 2026-05-13
+
+Third tagged release. Observability stack made useful: per-protocol traffic counters, ready-to-import Grafana dashboard, and a small but practical set of Prometheus alert rules. Multi-platform Molecule matrix. Source-IP filter for the exporter port. Real iOS + macOS walkthroughs replace the v0.2.0 quick-start tables.
+
+### Added
+- **Protocol metrics → Prometheus textfile** (`stealth-vps-metrics-update.py`):
+  - `stealth_vps_inbound_{up,down}_bytes{inbound_id, remark, protocol, port}` and `stealth_vps_inbound_enabled` from the 3X-UI panel REST API.
+  - `stealth_vps_client_{up,down}_bytes{... + client_email}` from the panel's per-client counters.
+  - `stealth_vps_hysteria_{tx,rx}_bytes{client_id}` + `stealth_vps_hysteria_online_clients` from Hysteria2's `trafficStats` JSON API (the role enables `trafficStats.listen: 127.0.0.1:9101` automatically).
+  - `stealth_vps_cert_expiry_seconds{cert="le-fullchain"}` parsed from `openssl x509 -enddate` (returns `-1` when no LE cert is configured).
+  - `stealth_vps_fail2ban_{currently,total}_{banned,failed}{jail}` parsed from `fail2ban-client status`.
+  - Health gauges: `stealth_vps_{panel,hysteria,cert,fail2ban}_scrape_error` + `stealth_vps_last_scrape_timestamp`.
+  Updater is a systemd `.timer` + oneshot service (every `stealth_vps_metrics_refresh_interval_sec`, default 30s), node_exporter exposes the textfile on the same `:9100`. Single scrape target covers host + protocols.
+- **Grafana dashboard** `observability/grafana/dashboards/stealth-vps-overview.json` — importable, paired with Grafana.com 1860 (Node Exporter Full). Panels: health stats, Reality inbound up/down per port, top-N per-client traffic (Reality + Hysteria2), online clients. Datasource picker + multi-select Host templating.
+- **Prometheus alert rules** `observability/prometheus/alerts/stealth-vps.rules.yml` — cert expiry (warning 7d / critical 24h), scrape errors per upstream, scrape staleness, fail2ban ban-rate spike, currently-banned threshold, inbound traffic spike (3× 1h baseline AND > 1 MB/s by inbound). Drop into central Prometheus `rule_files:` and reload.
+- **Multi-platform Molecule** — `tests/molecule/default/molecule.yml` now converges Debian 12 + Ubuntu 22.04 + Ubuntu 24.04 in one scenario. Same converge + idempotence + verify gates run against all three. `group_vars: all` replaces per-platform `host_vars` to keep opt-outs consistent.
+- **Source-IP filter** for the node_exporter port — `stealth_vps_observability_allow_from` (list of CIDRs). When non-empty AND the listen address is non-loopback, `tasks/ufw.yml` adds one `ufw allow from <cidr> to any port <port> proto tcp` per entry. Empty (default) keeps the port loopback-only.
+- **iOS walkthrough** `docs/client-setup/ios.md` — full guides for Hiddify (recommended free), Shadowrocket (paid de-facto), Streisand (paid sing-box). Add-profile flows, Reality field-check, Hysteria2 port-hopping + insecure handling, troubleshooting (VPN permission, DNS bypass, cellular UDP, TLS-after-LE, battery), multi-user sharing via subscription URLs.
+- **macOS walkthrough** `docs/client-setup/macos.md` — full guides for Hiddify Desktop, V2Box, NekoBox (nekoray), Shadowrocket on Apple Silicon. Install / import / connect, TUN vs system proxy, the Apple-private-DNS leak pitfall, wintun/utun gotcha, Reality-vs-Hysteria2 battery guidance.
+
+### Known limitations
+- iOS and macOS walkthroughs are written from app docs + server-side validation; **per-screen pen-tested validation lands in v0.4.0** when hardware enters the QA rotation.
+- Updater script's panel-API path needs the panel running with a known `panel.state.yml`; if you regenerate the panel password by hand outside Ansible, re-apply `--tags panel` first.
 
 ## [0.2.0] - 2026-05-13
 
@@ -90,6 +91,7 @@ First tagged release. Working stealth-VPS stack with hardened SSH, firewall, aut
 - Client setup docs are placeholders; full walkthroughs land in v0.2.0.
 - `observability/` directory is scaffolded but empty; Prometheus/Grafana bundle lands in v0.2.0.
 
-[Unreleased]: https://github.com/imprezahost/stealth-vps/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/imprezahost/stealth-vps/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/imprezahost/stealth-vps/releases/tag/v0.3.0
 [0.2.0]: https://github.com/imprezahost/stealth-vps/releases/tag/v0.2.0
 [0.1.0]: https://github.com/imprezahost/stealth-vps/releases/tag/v0.1.0
