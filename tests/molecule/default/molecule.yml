@@ -1,9 +1,31 @@
 ---
-# Placeholder Molecule scenario. Will be expanded with real verify steps
-# once the Ansible roles have implementation content.
+# Molecule scenario — converge stealth-vps + stealth-hardening against a
+# Debian 12 container with systemd. Scope is intentionally narrow:
+#
+#   * kernel tuning (sysctl + tcp_bbr) is verified end-to-end
+#   * SSH drop-in renders + sshd validates the merged config
+#   * panel / xray / hysteria are toggled off — they need a real running
+#     network stack (UDP, public IP, working systemctl restart of
+#     services bound to ports) that Docker doesn't quite reproduce.
+#     Those tasks are validated by applying on a real VPS (Path A or B).
+#   * UFW + fail2ban + unattended-upgrades + spamhaus are also off
+#     for the same reason (ipset / iptables-nft / apt rewrites are
+#     unreliable inside an unprivileged-ish container).
+#
+# What this catches:
+#   * Lint regressions (already caught earlier in CI by ansible-lint)
+#   * Variable / template errors that only show at runtime
+#   * Idempotency regressions: a second converge must end with
+#     `changed=0` (Molecule's built-in `idempotence` step asserts this)
+#
+# What this does NOT replace: applying the role on a real VPS. Path A /
+# Path B from docs/development.md remain the canonical validation
+# before tagging a release.
 
 dependency:
   name: galaxy
+  options:
+    requirements-file: ../../../ansible/requirements.yml
 
 driver:
   name: docker
@@ -12,21 +34,50 @@ platforms:
   - name: stealth-vps-debian12
     image: geerlingguy/docker-debian12-ansible:latest
     pre_build_image: true
+    # systemd-in-docker needs privileged + the cgroup mount; this image
+    # is the de-facto Ansible-test container that has it set up already.
     privileged: true
     command: /lib/systemd/systemd
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
     cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /run/lock
 
 provisioner:
   name: ansible
   playbooks:
     converge: ../../../ansible/playbooks/site.yml
+    verify: verify.yml
   inventory:
     host_vars:
       stealth-vps-debian12:
-        stealth_hardening_ssh_port: 22550
-        stealth_vps_reality_dest: "www.microsoft.com:443"
+        # Skip the pieces that don't behave inside a Docker container.
+        # Real-host validation lives in docs/development.md.
+        stealth_vps_panel_enabled: false
+        stealth_vps_reality_enabled: false
+        stealth_vps_hysteria_enabled: false
+        stealth_vps_domain: null
+
+        stealth_hardening_ufw_enabled: false
+        stealth_hardening_fail2ban_enabled: false
+        stealth_hardening_unattended_upgrades: false
+        stealth_hardening_spamhaus_enabled: false
 
 verifier:
   name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - cleanup
+    - destroy
