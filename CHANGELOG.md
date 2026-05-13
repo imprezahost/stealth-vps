@@ -7,14 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **One-shot install URL** — `https://get.imprezahost.com/stealth` was advertised in `README.md` and `scripts/install.sh` since v0.1.0 but the domain was never set up (`get.imprezahost.com` DNS does not resolve). Replaced with `https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.1/scripts/install.sh` — pinned to a real release tag, works the moment you copy-paste it.
-- **Installer default version drift** — `STEALTH_VERSION` default in `scripts/install.sh` was still `v0.1.0`, meaning anyone who ran the bootstrapper without an override got the v0.1.0 stack (no hardening, no LE, no observability, no arm64). Bumped to `v0.4.1`. The installer now ships the same release whose tag is in the URL it was downloaded from.
-
-### Planned (v0.4.2)
-- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 — still needs iOS + macOS hardware in the QA rotation)
-- zh-CN README rewrite by a native speaker (deferred from v0.4.0 / v0.4.1 — still needs reviewer)
+### Planned (v0.4.3)
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 / v0.4.2 — still needs iOS + macOS hardware in the QA rotation)
+- zh-CN README rewrite by a native speaker (deferred from v0.4.0 / v0.4.1 / v0.4.2 — still needs reviewer)
 - Fix the GitLab shell-executor runner so `lint` + `molecule` + `mirror-to-github` jobs actually run on push instead of failing with "apt-get: Permission denied" (infra-level dívida técnica since v0.1.0; release mirror is done manually for now).
+
+## [0.4.2] - 2026-05-13
+
+Hotfix release. Sole change: the one-shot installer path was broken since v0.1.0 — the advertised vanity URL never existed, and even if you fetched the installer some other way, its default `STEALTH_VERSION` would have deployed the v0.1.0 stack regardless of which release tag you got it from. Both fixed; the bootstrapper now self-pins to the v0.4.2 release the URL points at.
+
+The three roadmap items still blocked on externals (iOS/macOS hardware, native zh-CN reviewer, GitLab runner fix) carry over to v0.4.3.
+
+### Fixed
+- **One-shot install URL** — `https://get.imprezahost.com/stealth` was advertised in `README.md` and `scripts/install.sh` since v0.1.0 but the domain was never set up (`get.imprezahost.com` DNS does not resolve). Replaced with `https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.2/scripts/install.sh` — pinned to a real release tag, works the moment you copy-paste it.
+- **Installer default version drift** — `STEALTH_VERSION` default in `scripts/install.sh` was still `v0.1.0`, meaning anyone who ran the bootstrapper without an override got the v0.1.0 stack (no hardening, no LE, no observability, no arm64). Bumped to `v0.4.2`. The installer now ships the same release whose tag is in the URL it was downloaded from — both file references point at the v0.4.2 tag this release defines.
+
+### Deferred to v0.4.3
+- Pen-tested iOS + macOS validation pass — still needs hardware in the QA rotation.
+- zh-CN README rewrite — still needs native-speaker review.
+- GitLab shell-executor runner fix.
 
 ### Planned (v0.5.0)
 - True byte-level JA3/JA4 + JA3S/JA4S in `tls_fingerprint_compare.py` (scapy or tlslite-ng); golden snapshots per dest + a `scripts/update_golden.py` for quarterly upstream rotations.
