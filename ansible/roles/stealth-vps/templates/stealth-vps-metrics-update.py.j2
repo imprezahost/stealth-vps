@@ -22,7 +22,7 @@ half of the data, plus a `_scrape_error` gauge that flips to 1 so
 dashboards can warn.
 """
 
-# --- Ansible-templated paths (kept outside {% raw %} so they interpolate)
+# --- Ansible-templated paths (kept outside the raw block below so they interpolate)
 PANEL_STATE = "/etc/stealth-vps/panel.state.yml"
 HYSTERIA_TRAFFIC_URL = "http://{{ stealth_vps_hysteria_traffic_stats_listen }}"
 OUTPUT_DIR = "{{ stealth_vps_metrics_textfile_dir }}"
