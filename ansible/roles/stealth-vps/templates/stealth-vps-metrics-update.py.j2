@@ -26,17 +26,22 @@ dashboards can warn.
 PANEL_STATE = "/etc/stealth-vps/panel.state.yml"
 HYSTERIA_TRAFFIC_URL = "http://{{ stealth_vps_hysteria_traffic_stats_listen }}"
 OUTPUT_DIR = "{{ stealth_vps_metrics_textfile_dir }}"
+TLS_FULLCHAIN = "{{ stealth_vps_tls_dir }}/fullchain.pem"
 
 {% raw %}
 import json
 import os
+import re
 import ssl
+import subprocess
 import sys
 import tempfile
 import time
 import traceback
 import urllib.parse
 import urllib.request
+
+from datetime import datetime, timezone
 
 import yaml  # python3-yaml ships with Debian 12
 
@@ -116,6 +121,74 @@ def fetch_hysteria_traffic():
         return ({}, 0), type(e).__name__ + ": " + str(e)
 
 
+def fetch_cert_expiry():
+    """Returns (seconds_until_expiry_or_None, error_string_or_None).
+
+    Reads /etc/stealth-vps/tls/fullchain.pem via openssl. None when no
+    Let's Encrypt cert is configured (which is fine — just emit the
+    metric as a missing/-1 indicator and let the alert ignore it)."""
+    if not os.path.isfile(TLS_FULLCHAIN):
+        return None, None  # no cert configured; not an error
+    try:
+        out = subprocess.check_output(
+            ["openssl", "x509", "-in", TLS_FULLCHAIN, "-noout", "-enddate"],
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        ).decode().strip()
+        # Format: notAfter=Aug 11 16:49:54 2026 GMT
+        m = re.match(r"^notAfter=(.+)$", out)
+        if not m:
+            return None, "unexpected openssl output: " + out
+        # Parse the date — locale-independent, %b is English month abbrev.
+        not_after = datetime.strptime(
+            m.group(1), "%b %d %H:%M:%S %Y %Z"
+        ).replace(tzinfo=timezone.utc)
+        seconds = int((not_after - datetime.now(timezone.utc)).total_seconds())
+        return seconds, None
+    except Exception as e:
+        return None, type(e).__name__ + ": " + str(e)
+
+
+def fetch_fail2ban_stats():
+    """Returns (per_jail_dict, error_string_or_None).
+
+    Each value is {currently: int, total: int, failed: int}.
+    """
+    try:
+        # Which jails are running?
+        out = subprocess.check_output(
+            ["fail2ban-client", "status"],
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        ).decode()
+        m = re.search(r"Jail list:\s*(.+)", out)
+        if not m:
+            return {}, "no Jail list in fail2ban-client status output"
+        jails = [j.strip() for j in m.group(1).split(",") if j.strip()]
+        per_jail = {}
+        for jail in jails:
+            jout = subprocess.check_output(
+                ["fail2ban-client", "status", jail],
+                stderr=subprocess.STDOUT,
+                timeout=5,
+            ).decode()
+            curr = re.search(r"Currently banned:\s+(\d+)", jout)
+            tot = re.search(r"Total banned:\s+(\d+)", jout)
+            fail_c = re.search(r"Currently failed:\s+(\d+)", jout)
+            fail_t = re.search(r"Total failed:\s+(\d+)", jout)
+            per_jail[jail] = {
+                "currently_banned": int(curr.group(1)) if curr else 0,
+                "total_banned": int(tot.group(1)) if tot else 0,
+                "currently_failed": int(fail_c.group(1)) if fail_c else 0,
+                "total_failed": int(fail_t.group(1)) if fail_t else 0,
+            }
+        return per_jail, None
+    except FileNotFoundError:
+        return {}, None  # fail2ban not installed; not an error
+    except Exception as e:
+        return {}, type(e).__name__ + ": " + str(e)
+
+
 def build_inbound_labels(ib):
     return (
         'inbound_id="' + quote(ib.get("id")) + '",'
@@ -125,7 +198,8 @@ def build_inbound_labels(ib):
     )
 
 
-def build_lines(panel_inbounds, panel_err, hy_traffic, hy_online, hy_err):
+def build_lines(panel_inbounds, panel_err, hy_traffic, hy_online, hy_err,
+                cert_seconds, cert_err, f2b_stats, f2b_err):
     lines = []
     now = int(time.time())
 
@@ -140,6 +214,14 @@ def build_lines(panel_inbounds, panel_err, hy_traffic, hy_online, hy_err):
     lines.append("# HELP stealth_vps_hysteria_scrape_error 1 when the Hysteria2 trafficStats API was unreachable.")
     lines.append("# TYPE stealth_vps_hysteria_scrape_error gauge")
     lines.append("stealth_vps_hysteria_scrape_error " + ("1" if hy_err else "0"))
+
+    lines.append("# HELP stealth_vps_cert_scrape_error 1 when the TLS cert metadata could not be read.")
+    lines.append("# TYPE stealth_vps_cert_scrape_error gauge")
+    lines.append("stealth_vps_cert_scrape_error " + ("1" if cert_err else "0"))
+
+    lines.append("# HELP stealth_vps_fail2ban_scrape_error 1 when fail2ban-client could not be queried.")
+    lines.append("# TYPE stealth_vps_fail2ban_scrape_error gauge")
+    lines.append("stealth_vps_fail2ban_scrape_error " + ("1" if f2b_err else "0"))
 
     if panel_inbounds:
         lines.append("# HELP stealth_vps_inbound_up_bytes Total upload bytes per inbound.")
@@ -178,6 +260,31 @@ def build_lines(panel_inbounds, panel_err, hy_traffic, hy_online, hy_err):
             lines.append(metric_line("stealth_vps_hysteria_tx_bytes", lbl, int(stats.get("tx", 0))))
             lines.append(metric_line("stealth_vps_hysteria_rx_bytes", lbl, int(stats.get("rx", 0))))
 
+    # TLS cert expiry (-1 means "no cert configured" so alerts can ignore)
+    lines.append("# HELP stealth_vps_cert_expiry_seconds Seconds until the configured TLS cert expires (-1 if no cert).")
+    lines.append("# TYPE stealth_vps_cert_expiry_seconds gauge")
+    if cert_seconds is None:
+        lines.append('stealth_vps_cert_expiry_seconds{cert="le-fullchain"} -1')
+    else:
+        lines.append('stealth_vps_cert_expiry_seconds{cert="le-fullchain"} ' + str(int(cert_seconds)))
+
+    # fail2ban per-jail counters
+    if f2b_stats:
+        lines.append("# HELP stealth_vps_fail2ban_currently_banned IPs currently in the jail's banlist.")
+        lines.append("# TYPE stealth_vps_fail2ban_currently_banned gauge")
+        lines.append("# HELP stealth_vps_fail2ban_total_banned Total bans the jail has issued since fail2ban started.")
+        lines.append("# TYPE stealth_vps_fail2ban_total_banned counter")
+        lines.append("# HELP stealth_vps_fail2ban_currently_failed Auth failures in the jail's current window.")
+        lines.append("# TYPE stealth_vps_fail2ban_currently_failed gauge")
+        lines.append("# HELP stealth_vps_fail2ban_total_failed Total auth failures the jail has seen since fail2ban started.")
+        lines.append("# TYPE stealth_vps_fail2ban_total_failed counter")
+        for jail, s in f2b_stats.items():
+            lbl = 'jail="' + quote(jail) + '"'
+            lines.append(metric_line("stealth_vps_fail2ban_currently_banned", lbl, s["currently_banned"]))
+            lines.append(metric_line("stealth_vps_fail2ban_total_banned", lbl, s["total_banned"]))
+            lines.append(metric_line("stealth_vps_fail2ban_currently_failed", lbl, s["currently_failed"]))
+            lines.append(metric_line("stealth_vps_fail2ban_total_failed", lbl, s["total_failed"]))
+
     return lines
 
 
@@ -200,11 +307,22 @@ def write_atomic(path, content):
 def main():
     panel_inbounds, panel_err = fetch_panel_inbounds()
     (hy_traffic, hy_online), hy_err = fetch_hysteria_traffic()
+    cert_seconds, cert_err = fetch_cert_expiry()
+    f2b_stats, f2b_err = fetch_fail2ban_stats()
     if panel_err:
         print("# panel: " + panel_err, file=sys.stderr)
     if hy_err:
         print("# hysteria: " + hy_err, file=sys.stderr)
-    lines = build_lines(panel_inbounds, panel_err, hy_traffic, hy_online, hy_err)
+    if cert_err:
+        print("# cert: " + cert_err, file=sys.stderr)
+    if f2b_err:
+        print("# fail2ban: " + f2b_err, file=sys.stderr)
+    lines = build_lines(
+        panel_inbounds, panel_err,
+        hy_traffic, hy_online, hy_err,
+        cert_seconds, cert_err,
+        f2b_stats, f2b_err,
+    )
     write_atomic(OUTPUT_FILE, "\n".join(lines) + "\n")
     return 0
 
