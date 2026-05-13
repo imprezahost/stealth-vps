@@ -326,12 +326,14 @@
     path: /etc/ufw/before.rules
     insertbefore: '^\*filter'
     marker: "# {mark} stealth-vps hysteria-port-hopping"
+    # yamllint disable rule:line-length
     block: |
       *nat
       :PREROUTING ACCEPT [0:0]
       # Redirect any UDP packet in the hop range to the Hysteria2 listener.
       -A PREROUTING -p udp --dport {{ stealth_vps_hysteria_port_hopping_min }}:{{ stealth_vps_hysteria_port_hopping_max }} -j REDIRECT --to-ports {{ stealth_vps_hysteria_state.port }}
       COMMIT
+    # yamllint enable rule:line-length
     state: "{{ 'present' if stealth_vps_hysteria_port_hopping else 'absent' }}"
   register: stealth_vps_hysteria_porthop_block
   tags: [hysteria, hysteria2]

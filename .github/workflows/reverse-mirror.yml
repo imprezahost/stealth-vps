@@ -1,0 +1,176 @@
+---
+# Reverse-mirror: when an external contributor opens / updates a PR on GitHub,
+# push the PR head to the internal GitLab as a tracking branch (ext/pr-<N>)
+# and open (or refresh) a Merge Request there. The internal pipeline runs the
+# full CI matrix and reports status back to the GitHub PR via the companion
+# GitLab CI job `report-status-to-github` in .gitlab-ci.yml.
+#
+# Security note: we use `pull_request_target` so we have secrets available,
+# but we intentionally NEVER check out the PR code in the privileged context.
+# We only `git fetch` the PR head ref and `git push` it to GitLab. The
+# payload is never executed in this job.
+
+name: reverse-mirror
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  mirror:
+    name: Mirror PR to internal GitLab
+    runs-on: ubuntu-latest
+    # Skip the mirror dance for PRs from inside the org — those already
+    # flow through GitLab directly. Only mirror forks / external contributors.
+    if: >-
+      github.event.pull_request.head.repo.fork == true ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - name: Checkout base branch (no PR code)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Fetch PR head ref
+        # `pull/N/head` is a Git ref that GitHub maintains pointing at the
+        # PR's head SHA. We fetch it to a local branch but never check it
+        # out — the workspace stays on the trusted base branch.
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch origin "pull/${PR_NUM}/head:pr-${PR_NUM}"
+
+      - name: Push PR ref to GitLab as ext/pr-<N>
+        env:
+          GITLAB_MIRROR_URL: ${{ secrets.GITLAB_MIRROR_URL }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          BRANCH="ext/pr-${PR_NUM}"
+          # Force-push because the external contributor may force-push to
+          # their own branch; we want the GitLab MR to track the latest.
+          git push --force "$GITLAB_MIRROR_URL" "pr-${PR_NUM}:$BRANCH"
+
+      - name: Create or update GitLab MR
+        id: gitlab_mr
+        env:
+          GITLAB_API_URL: ${{ secrets.GITLAB_API_URL }}
+          GITLAB_PROJECT_ID: ${{ secrets.GITLAB_PROJECT_ID }}
+          GITLAB_API_TOKEN: ${{ secrets.GITLAB_API_TOKEN }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="ext/pr-${PR_NUM}"
+          MR_TITLE="[ext-pr-${PR_NUM}] ${PR_TITLE}"
+          MR_DESC=$(cat <<EOF
+          External PR from @${PR_AUTHOR}: ${PR_URL}
+
+          This merge request is auto-created and refreshed by the GitHub
+          reverse-mirror workflow. Discussion and review happen on the
+          upstream PR; this MR exists so the internal CI pipeline can run
+          and report status back.
+
+          | Field | Value |
+          |---|---|
+          | Upstream PR | ${PR_URL} |
+          | Head SHA | \`${PR_HEAD_SHA}\` |
+          | Author | @${PR_AUTHOR} |
+
+          Closing this MR has no effect on the upstream PR. To accept the
+          contribution, merge it here — the change will ship in the next
+          tagged release via the regular GitLab → GitHub release mirror.
+          EOF
+          )
+
+          # Look up an existing open MR for this branch (idempotent
+          # re-runs on `synchronize`).
+          EXISTING=$(curl -fsSL \
+            -H "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+            "$GITLAB_API_URL/projects/$GITLAB_PROJECT_ID/merge_requests?source_branch=$BRANCH&state=opened" \
+            | jq -r '.[0].iid // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "Existing MR !${EXISTING} for $BRANCH — refreshing description."
+            MR_IID="$EXISTING"
+            curl -fsSL -X PUT \
+              -H "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              "$GITLAB_API_URL/projects/$GITLAB_PROJECT_ID/merge_requests/$MR_IID" \
+              -d "$(jq -nc --arg t "$MR_TITLE" --arg d "$MR_DESC" \
+                    '{title:$t, description:$d}')" >/dev/null
+          else
+            echo "Creating new MR for $BRANCH."
+            MR_IID=$(curl -fsSL -X POST \
+              -H "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              "$GITLAB_API_URL/projects/$GITLAB_PROJECT_ID/merge_requests" \
+              -d "$(jq -nc \
+                    --arg src "$BRANCH" \
+                    --arg tgt "main" \
+                    --arg t "$MR_TITLE" \
+                    --arg d "$MR_DESC" \
+                    '{source_branch:$src,
+                      target_branch:$tgt,
+                      title:$t,
+                      description:$d,
+                      remove_source_branch:true,
+                      squash:true}')" \
+              | jq -r '.iid')
+          fi
+
+          echo "mr_iid=$MR_IID" >> "$GITHUB_OUTPUT"
+          echo "Mirrored: GitLab MR !${MR_IID}"
+
+      - name: Comment on PR with mirror status
+        uses: actions/github-script@v7
+        env:
+          MR_IID: ${{ steps.gitlab_mr.outputs.mr_iid }}
+          GITLAB_WEB_URL: ${{ vars.GITLAB_WEB_URL || 'https://git.imprezahost.com/impreza/stealth-vps' }}
+        with:
+          script: |
+            const mrUrl = `${process.env.GITLAB_WEB_URL}/-/merge_requests/${process.env.MR_IID}`;
+            const marker = '<!-- reverse-mirror-status -->';
+            const body = [
+              marker,
+              `### Internal mirror status`,
+              ``,
+              `This PR has been mirrored to the internal GitLab as **MR !${process.env.MR_IID}**.`,
+              `The internal pipeline (Molecule integration on Debian 12 + Ubuntu 22.04/24.04) runs there.`,
+              `Pipeline status will be reported back here as a commit status check when it completes.`,
+              ``,
+              `External contributors don't need to do anything — this is informational and updates on each push.`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing mirror-status comment ${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info(`Created new mirror-status comment`);
+            }
