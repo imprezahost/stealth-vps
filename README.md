@@ -38,9 +38,9 @@ If you'd rather paste a one-liner and move on, those other projects serve you be
 
 ---
 
-## Three ways to use it
+## Four ways to use it
 
-Pick the one that matches your workflow. All three apply the same configuration.
+Pick the one that matches your workflow. All four apply the same configuration.
 
 ### 1. One-shot install (`install.sh`)
 
@@ -70,6 +70,28 @@ ansible-playbook -i ansible/inventory/hosts.yml ansible/playbooks/site.yml
 ### 3. Cloud-init (for hypervisors)
 
 Drop `cloud-init/stealth-vps.yaml` as user-data when creating the VPS. Works with Proxmox, any cloud that supports cloud-init, and any modern hypervisor.
+
+### 4. Terraform module (`v0.5.0`+)
+
+Provider-agnostic — generates the cloud-init `user_data` from typed HCL inputs (SSH key, domain, release pin, Reality dest, free-form Ansible vars). Pass the output to any provider's create-server resource.
+
+```hcl
+module "stealth_vps_bootstrap" {
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.0"
+
+  stealth_version = "v0.5.0"
+  ssh_public_key  = file("~/.ssh/id_ed25519.pub")
+  domain          = "vpn.example.com"
+  letsencrypt_email = "ops@example.com"
+}
+
+resource "hcloud_server" "vps" {  # or aws_instance, digitalocean_droplet, vultr_instance, ...
+  # ...
+  user_data = module.stealth_vps_bootstrap.cloud_init
+}
+```
+
+End-to-end worked example for Hetzner Cloud in [`terraform/examples/hetzner/`](terraform/examples/hetzner/). See [`docs/terraform.md`](docs/terraform.md) for the full reference.
 
 ---
 
@@ -116,6 +138,7 @@ Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.
 
 - [Architecture](docs/architecture.md) — what gets installed, how the pieces fit
 - [Operations](docs/operations.md) — day-to-day: rotate creds, add users, upgrade
+- [Terraform](docs/terraform.md) — provider-agnostic module + Hetzner example (v0.5.0+)
 - Client setup guides: [Android](docs/client-setup/android.md) · [iOS](docs/client-setup/ios.md) · [Windows](docs/client-setup/windows.md) · [macOS](docs/client-setup/macos.md)
 
 中文文档: [README.zh-CN.md](README.zh-CN.md)

@@ -5,8 +5,11 @@
 # and runs the role from a pinned release tag of this repository.
 #
 # Customize:
-#   - replace `stealth_vps_version` with the desired release tag
-#   - optionally override role defaults via the `extra-vars` block
+#   - bump the release tag in the `ansible-pull -C` line below to a different version
+#   - override role defaults via the `extra-vars` block (see ansible/inventory/example.yml)
+#
+# For a Terraform-driven flow that generates this file dynamically (with
+# variables for SSH key, domain, release pin, etc.), see terraform/modules/stealth-vps/.
 
 package_update: true
 package_upgrade: true
@@ -32,7 +35,7 @@ runcmd:
   - |
     ansible-pull \
       -U https://github.com/imprezahost/stealth-vps.git \
-      -C v0.1.0 \
+      -C v0.4.2 \
       -i 'localhost,' \
       -c local \
       -e "@/etc/stealth-vps/extra-vars.yml" \

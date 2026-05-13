@@ -1,0 +1,46 @@
+# Copy to terraform.tfvars and fill in. Prefer `export TF_VAR_hcloud_token=...`
+# in your shell over committing the token here, even with .gitignore.
+
+# Required ------------------------------------------------------------------
+
+hcloud_token = "GENERATE-AT-console.hetzner.cloud--Project--Security--API-tokens"
+
+# Common overrides ----------------------------------------------------------
+
+server_name = "stealth-vps-fsn1"
+
+# cax11 = ARM 2v/4GB (cheapest, ~€3.79/mo); cx22 = AMD 2v/4GB; cax21 = ARM 4v/8GB
+server_type = "cax11"
+
+# fsn1 nbg1 hel1 = EU; ash hil = US; sin = SG
+location = "fsn1"
+
+# Debian 12 or ubuntu-22.04 or ubuntu-24.04
+image = "debian-12"
+
+# Path to YOUR pubkey. The contents land in both Hetzner's SSH key registry
+# and the server's /root/.ssh/authorized_keys via cloud-init.
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# SSH port the hardening role will move to. 22 stays open only during the
+# first cloud-init run; once the role finishes you connect on this port.
+ssh_port = 22550
+
+# Release pin
+stealth_version = "v0.4.2"
+
+# Optional: enable Let's Encrypt --------------------------------------------
+# Point a DNS A record at the IPv4 output BEFORE running `terraform apply`,
+# otherwise the HTTP-01 challenge fails and the first apply takes longer.
+# Leave as null to keep the self-signed Hysteria2 + HTTP panel baseline.
+
+# domain            = "vpn.example.com"
+# letsencrypt_email = "ops@example.com"
+
+# Reality config ------------------------------------------------------------
+# The default targets www.microsoft.com (validated against the GFW Q2/2026).
+# Change to another TLS1.3 + X25519 + HTTP/2 site if microsoft.com is blocked
+# at your route or you just want a different masquerade.
+
+reality_dest        = "www.microsoft.com:443"
+reality_servernames = ["www.microsoft.com"]
