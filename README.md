@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: pre-alpha (v0.1.0-dev).** Public structure only. Not yet usable. First tagged release expected soon.
+> **Status: v0.1.0 (alpha).** Functional stack. SSH/UFW/fail2ban/unattended-upgrades hardening, VLESS-Reality, Hysteria2 server, 3X-UI panel, kernel tuning — all working end-to-end. TLS automation, port hopping, client walkthroughs, and observability bundles land in v0.2.0. See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -15,9 +15,9 @@ The space already has good shell installers (`mack-a/v2ray-agent`, `3x-ui`, `Hid
 - You want **idempotent Ansible** so you can redeploy or recover predictably.
 - You want **cloud-init** that works in any hypervisor without manual interaction.
 - You want **fail2ban that actually works** with 3X-UI (a recurring pain point upstream).
-- You want **Prometheus + Grafana** dashboards out of the box.
 - You want a **permissive MIT license** (not AGPL viral) so providers and operators can adopt without legal friction.
 - You want **semver releases** and a changelog you can read.
+- A **Prometheus + Grafana** observability bundle is on the v0.2.0 roadmap.
 
 If you'd rather paste a one-liner and move on, those other projects serve you better.
 
@@ -26,12 +26,14 @@ If you'd rather paste a one-liner and move on, those other projects serve you be
 ## What it installs
 
 - **Xray-core** with VLESS-Reality (steals TLS handshake from a real site; resists active probing)
-- **Hysteria2** (QUIC-based, masquerades as HTTP/3, port-hopping enabled)
+- **Hysteria2** (QUIC-based, masquerades as HTTP/3 traffic to a real site; port-hopping arrives in v0.2.0)
 - **3X-UI** panel (multi-user, traffic limits, expiry, subscription links)
 - **Kernel tuning**: BBR + fq qdisc, larger socket buffers, TCP Fast Open
-- **Hardening**: SSH on non-default port, key-only auth, fail2ban with working 3X-UI rules, UFW, unattended-upgrades, Spamhaus DROP/EDROP via hosts.deny
-- **Observability**: Prometheus exporter for Xray/Hysteria2/system, Grafana dashboard, optional alert hooks
+- **Hardening**: SSH on non-default port, key-only auth, fail2ban with a *working* 3X-UI filter, UFW (deny-incoming default)
+- **Patching**: `unattended-upgrades` with security-origin filter and Package-Blacklist hook
 - **IPv6 dual-stack** by default
+- **Observability**: Prometheus / Grafana bundle planned for v0.2.0
+- **IP-blocklists**: Spamhaus DROP/EDROP via ipset + UFW planned for v0.2.0
 
 ---
 
@@ -90,9 +92,10 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 
 | Version | Scope | Status |
 |---|---|---|
-| **v0.1.0** | Ansible role, cloud-init, install.sh, basic observability, EN/zh-CN README, Android/Windows client docs | in development |
-| v0.2.0 | iOS/macOS client docs, additional Grafana dashboards, Discord/Telegram alert webhooks | planned |
-| v0.3.0 | Terraform module (provider-agnostic), Pulumi reference | planned |
+| **v0.1.0** | Ansible role (kernel + panel + Reality + Hysteria2), `stealth-hardening` role (SSH + UFW + fail2ban + unattended-upgrades), cloud-init, `install.sh`, EN README | **shipped 2026-05-13** |
+| v0.2.0 | Let's Encrypt automation (kills `insecure=1` on Hysteria2), Spamhaus DROP/EDROP via ipset+UFW, Hysteria2 port hopping, Android/Windows client walkthroughs, Prometheus exporter + Grafana dashboard, Molecule integration tests, zh-CN README rewrite | in development |
+| v0.3.0 | iOS/macOS client walkthroughs, more Grafana dashboards, Discord/Telegram alert webhooks | planned |
+| v0.4.0 | Terraform module (provider-agnostic), Pulumi reference | planned |
 | v1.0.0 | Probe-resistance CI suite, signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.
