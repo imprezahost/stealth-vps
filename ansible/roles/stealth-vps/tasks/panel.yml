@@ -41,7 +41,12 @@
     state: directory
     owner: root
     group: root
-    mode: '0700'
+    # 0711: others can traverse but cannot list. Individual files inside
+    # are chmod 0600 (panel/reality/hysteria.state.yml), so secrets stay
+    # root-only. The traverse bit is necessary so service users like
+    # `hysteria` can reach /etc/stealth-vps/tls/{fullchain,privkey}.pem
+    # when Let's Encrypt is enabled.
+    mode: '0711'
   tags: [panel, 3xui]
 
 - name: Probe existing panel state file
@@ -176,13 +181,49 @@
       - -webBasePath
       - "/{{ stealth_vps_panel_state.web_base_path }}/"
   changed_when: stealth_vps_panel_state_persisted.changed | default(false)
-  notify: Restart x-ui
+  register: stealth_vps_panel_settings_apply
+  tags: [panel, 3xui]
+
+- name: Read the cert currently bound to the panel
+  ansible.builtin.command:
+    cmd: "{{ stealth_vps_panel_dir }}/x-ui setting -getCert true"
+  register: stealth_vps_panel_current_cert
+  changed_when: false
+  when: stealth_vps_domain
+  tags: [panel, 3xui]
+
+- name: Bind the Let's Encrypt cert to the 3X-UI panel (HTTPS)
+  ansible.builtin.command:
+    argv:
+      - "{{ stealth_vps_panel_dir }}/x-ui"
+      - cert
+      - -webCert
+      - "{{ stealth_vps_tls_dir }}/fullchain.pem"
+      - -webCertKey
+      - "{{ stealth_vps_tls_dir }}/privkey.pem"
+  # Bind only when the DB doesn't already point at our managed cert
+  # paths. `x-ui cert` itself is idempotent but doesn't report change,
+  # so we gate on the getCert diff and trigger an explicit restart task
+  # below (handler+flush_handlers behaved unreliably inside this
+  # include_tasks on ansible-core 2.14).
+  when:
+    - stealth_vps_domain
+    - (stealth_vps_tls_dir + '/fullchain.pem')
+        not in (stealth_vps_panel_current_cert.stdout | default(''))
+  changed_when: true
+  register: stealth_vps_panel_cert_apply
   tags: [panel, 3xui]
 
 # --- Service + smoke test ------------------------------------------------
 
-- name: Flush handlers so x-ui restart picks up new settings before verify
-  ansible.builtin.meta: flush_handlers
+- name: Restart x-ui if panel settings or cert changed
+  ansible.builtin.systemd:
+    name: x-ui
+    state: restarted
+  when: >-
+    (stealth_vps_panel_settings_apply.changed | default(false))
+    or (stealth_vps_panel_cert_apply.changed | default(false))
+  tags: [panel, 3xui]
 
 - name: Enable and start x-ui service
   ansible.builtin.systemd:
@@ -198,11 +239,18 @@
     timeout: 30
   tags: [panel, 3xui]
 
-- name: Smoke-test panel HTTP endpoint
+- name: Smoke-test panel endpoint (HTTPS when domain set, HTTP otherwise)
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ stealth_vps_panel_state.port }}/{{ stealth_vps_panel_state.web_base_path }}/"
+    url: >-
+      {{ ('https://' if stealth_vps_domain else 'http://')
+         + '127.0.0.1:' + (stealth_vps_panel_state.port | string)
+         + '/' + stealth_vps_panel_state.web_base_path + '/' }}
     status_code: [200, 301, 302, 307]
     return_content: false
+    # Loopback hits the cert as 127.0.0.1, which won't match the SAN
+    # for the public domain — disable cert verification on the local
+    # probe only. External clients still verify against the real CA.
+    validate_certs: false
   tags: [panel, 3xui]
 
 # --- Credentials file ----------------------------------------------------

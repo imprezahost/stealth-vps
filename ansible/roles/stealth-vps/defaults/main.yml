@@ -76,6 +76,23 @@ stealth_vps_panel_port_max: 39999
 # for the operator. chmod 600.
 stealth_vps_credentials_file: /root/stealth-vps-credentials.txt
 
+# ---- TLS / ACME (Let's Encrypt) ----
+# When set to a DNS name whose A/AAAA record points at this host, the
+# role will issue a Let's Encrypt cert via acme.sh (HTTP-01 standalone)
+# and configure Hysteria2 + 3X-UI panel to use it. Leave null/false to
+# keep the v0.1.0 behaviour (self-signed Hysteria2 cert + HTTP panel).
+stealth_vps_domain: null
+# Email registered with the CA. Required for issuance — Let's Encrypt
+# uses it for expiry notifications and key recovery.
+stealth_vps_tls_email: ""
+# Where the role symlinks the live cert. Hysteria2 + 3X-UI both read
+# from these paths when stealth_vps_domain is set.
+stealth_vps_tls_dir: /etc/stealth-vps/tls
+# Standalone port acme.sh listens on for the HTTP-01 challenge. Must be
+# reachable from the public internet (UFW opens it when
+# stealth_hardening_ufw_acme_http_challenge is true).
+stealth_vps_acme_http_port: 80
+
 # ---- Kernel tuning ----
 # Enable BBR congestion control + fq qdisc. Disable only when the kernel
 # does not support BBR (rare on Debian 12+ / Ubuntu 22.04+; impossible on

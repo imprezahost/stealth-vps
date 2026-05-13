@@ -7,8 +7,8 @@
 listen: ":{{ stealth_vps_hysteria_state.port }}"
 
 tls:
-  cert: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
-  key: "{{ stealth_vps_hysteria_config_dir }}/cert.key"
+  cert: "{{ stealth_vps_hysteria_effective_cert | trim }}"
+  key: "{{ stealth_vps_hysteria_effective_key | trim }}"
 
 # Salamander wraps the QUIC handshake so deep inspection can't tell it
 # apart from random noise. Required for any chance of bypass in 2026.
