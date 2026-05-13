@@ -7,6 +7,7 @@
 stages:
   - lint
   - test
+  - probe
   - mirror
   - report
 
@@ -101,6 +102,37 @@ molecule:
   # Allow failure for now — dind in self-hosted GitLab runners can be
   # flaky; the manual VPS validation in docs/development.md remains
   # the authoritative gate.
+  allow_failure: true
+
+# ---------------------------------------------------------------------------
+# PROBE — probe-resistance suite against a live staging deploy
+# Manual trigger only. Needs PROBE_TARGET + PROBE_REALITY_DEST as CI vars
+# (set per pipeline run via the "Run pipeline" UI). See
+# tests/probe-resistance/README.md for the full env-var contract.
+# ---------------------------------------------------------------------------
+
+probe-resistance:
+  stage: probe
+  image: debian:12-slim
+  before_script:
+    - apt-get update -qq
+    - apt-get install -yqq --no-install-recommends curl ca-certificates nmap python3 python3-venv
+  script:
+    - cd tests/probe-resistance
+    - python3 -m venv .venv
+    - . .venv/bin/activate
+    - pip install --quiet -r requirements.txt
+    - echo "--- 01-https-direct-probe ---"
+    - bash scripts/https_direct_probe.sh
+    - echo "--- 02-tls-fingerprint (scaffold; exits 2) ---"
+    - python3 scripts/tls_fingerprint_compare.py || [ "$?" -eq 2 ]
+    - echo "--- 03-active-probe (scaffold; exits 2) ---"
+    - python3 scripts/active_probe.py || [ "$?" -eq 2 ]
+    - echo "--- 04-port-scan-baseline ---"
+    - bash scripts/port_scan_baseline.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $PROBE_TARGET
+      when: manual
   allow_failure: true
 
 # ---------------------------------------------------------------------------
