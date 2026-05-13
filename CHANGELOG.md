@@ -23,9 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `stealth_hardening_spamhaus_drop` + `stealth_hardening_spamhaus_edrop` split is replaced by a single `stealth_hardening_spamhaus_enabled` toggle (default `true`).
 
+### Added
+- `docs/client-setup/android.md` — full walkthrough for v2rayNG (Reality) and NekoBox for Android (Reality + Hysteria2), including verification steps, port-hopping URI handling, and a troubleshooting section for the common breakages (Xiaomi VPN permission, DNS leaks, Hysteria2 on mobile data).
+- `docs/client-setup/windows.md` — full walkthrough for NekoBox (nekoray) and v2rayN, both proxy and TUN modes, with wintun handling and common error fixes.
+- `docs/client-setup/ios.md` and `docs/client-setup/macos.md` — promoted from "placeholder" to working quick-start tables of the recommended clients (Shadowrocket, Streisand, Hiddify on iOS; Hiddify, V2Box, NekoBox, Shadowrocket on macOS), with notes on TUN behaviour and App Store regional availability. Full pen-tested walkthrough lands in v0.3.0.
+
 ### Planned (still in v0.2.0)
 - Molecule integration test scenario
-- Client setup walkthroughs (Android v2rayNG / NekoBox, Windows NekoBox, basic dashboards)
 - Basic observability bundle (Prometheus exporter + Grafana JSON)
 - zh-CN README rewrite by a native speaker
 
