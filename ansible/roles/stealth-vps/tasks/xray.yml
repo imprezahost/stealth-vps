@@ -46,6 +46,31 @@
     fail_msg: "xray binary missing under {{ stealth_vps_panel_dir }}/bin/."
   tags: [xray, reality]
 
+# panel.state.yml is needed to authenticate against the panel's REST API.
+# It is created by tasks/panel.yml; we must load it here too because
+# `--tags xray` can be invoked without `--tags panel`.
+
+- name: Probe panel state file
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+  register: stealth_vps_panel_state_stat_for_xray
+  tags: [xray, reality]
+
+- name: Assert panel state exists (run --tags panel first if it does not)
+  ansible.builtin.assert:
+    that: stealth_vps_panel_state_stat_for_xray.stat.exists
+    fail_msg: >-
+      {{ stealth_vps_panel_state_dir }}/panel.state.yml is missing.
+      Run `ansible-playbook --tags panel ...` first so the panel and its
+      credentials exist; the xray task talks to the panel via REST API.
+  tags: [xray, reality]
+
+- name: Load panel state for API access
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    name: stealth_vps_panel_state
+  tags: [xray, reality]
+
 # --- Reality state (generate once, reuse forever) ------------------------
 
 - name: Probe existing reality state file
@@ -86,14 +111,21 @@
       changed_when: false
 
     - name: Compose new reality state
+      # Use a Jinja2 dict expression (rather than YAML mapping with
+      # `"{{ ... }}"` values) so the port stays an int. YAML mappings
+      # convert template outputs to strings, which then break the
+      # 3X-UI POST that expects port:int.
       ansible.builtin.set_fact:
-        stealth_vps_reality_state:
-          port: "{{ range(stealth_vps_reality_port_min, stealth_vps_reality_port_max + 1) | random }}"
-          private_key: "{{ stealth_vps_x25519_raw.stdout | regex_search('PrivateKey:\\s+(\\S+)', '\\1') | first }}"
-          public_key: "{{ stealth_vps_x25519_raw.stdout | regex_search('PublicKey\\):\\s+(\\S+)', '\\1') | first }}"
-          client_uuid: "{{ stealth_vps_uuid_raw.stdout | trim }}"
-          client_email: "{{ stealth_vps_reality_default_client_email }}"
-          short_id: "{{ stealth_vps_shortid_raw.stdout | trim }}"
+        stealth_vps_reality_state: "{{ {
+          'port': (range(stealth_vps_reality_port_min, stealth_vps_reality_port_max + 1) | random),
+          'private_key': (stealth_vps_x25519_raw.stdout
+            | regex_search('PrivateKey:\\s+(\\S+)', '\\1') | first),
+          'public_key': (stealth_vps_x25519_raw.stdout
+            | regex_search('PublicKey\\):\\s+(\\S+)', '\\1') | first),
+          'client_uuid': (stealth_vps_uuid_raw.stdout | trim),
+          'client_email': stealth_vps_reality_default_client_email,
+          'short_id': (stealth_vps_shortid_raw.stdout | trim),
+        } }}"
       no_log: true
 
     - name: Persist reality state to disk
@@ -215,20 +247,23 @@
       strategy: always
       refresh: 5
       concurrency: 3
-    _payload:
-      up: 0
-      down: 0
-      total: 0
-      remark: "{{ stealth_vps_reality_remark }}"
-      enable: true
-      expiryTime: 0
-      listen: ""
-      port: "{{ stealth_vps_reality_state.port | int }}"
-      protocol: vless
-      settings: "{{ _settings | to_json }}"
-      streamSettings: "{{ _stream_settings | to_json }}"
-      sniffing: "{{ _sniffing | to_json }}"
-      allocate: "{{ _allocate | to_json }}"
+    # Build via Jinja dict so port stays int. 3X-UI's Go handler rejects
+    # the request with a json-unmarshal error if port arrives as string.
+    _payload: "{{ {
+      'up': 0,
+      'down': 0,
+      'total': 0,
+      'remark': stealth_vps_reality_remark,
+      'enable': true,
+      'expiryTime': 0,
+      'listen': '',
+      'port': (stealth_vps_reality_state.port | int),
+      'protocol': 'vless',
+      'settings': (_settings | to_json),
+      'streamSettings': (_stream_settings | to_json),
+      'sniffing': (_sniffing | to_json),
+      'allocate': (_allocate | to_json),
+    } }}"
   register: stealth_vps_reality_add_result
   when: not stealth_vps_reality_exists
   tags: [xray, reality]
