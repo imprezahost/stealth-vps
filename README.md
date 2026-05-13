@@ -47,10 +47,15 @@ Pick the one that matches your workflow. All three apply the same configuration.
 For a fresh VPS where you just want it done:
 
 ```bash
-curl -sSL https://get.imprezahost.com/stealth | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.1/scripts/install.sh | bash
 ```
 
-This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. Pinned to a release version.
+This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.4.1 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.1/scripts/install.sh \
+  | STEALTH_VERSION=v0.4.1 bash
+```
 
 ### 2. Ansible (recommended for repeatable use)
 

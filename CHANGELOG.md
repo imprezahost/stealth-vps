@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **One-shot install URL** — `https://get.imprezahost.com/stealth` was advertised in `README.md` and `scripts/install.sh` since v0.1.0 but the domain was never set up (`get.imprezahost.com` DNS does not resolve). Replaced with `https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.1/scripts/install.sh` — pinned to a real release tag, works the moment you copy-paste it.
+- **Installer default version drift** — `STEALTH_VERSION` default in `scripts/install.sh` was still `v0.1.0`, meaning anyone who ran the bootstrapper without an override got the v0.1.0 stack (no hardening, no LE, no observability, no arm64). Bumped to `v0.4.1`. The installer now ships the same release whose tag is in the URL it was downloaded from.
+
 ### Planned (v0.4.2)
 - Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 — still needs iOS + macOS hardware in the QA rotation)
 - zh-CN README rewrite by a native speaker (deferred from v0.4.0 / v0.4.1 — still needs reviewer)
