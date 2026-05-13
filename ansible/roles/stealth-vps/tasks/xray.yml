@@ -142,7 +142,7 @@
 - name: Login to 3X-UI panel
   ansible.builtin.uri:
     url: >-
-      http://127.0.0.1:{{ stealth_vps_panel_state.port
+      {{ 'https' if stealth_vps_domain else 'http' }}://127.0.0.1:{{ stealth_vps_panel_state.port
       }}/{{ stealth_vps_panel_state.web_base_path }}/login
     method: POST
     body:
@@ -151,6 +151,9 @@
     body_format: form-urlencoded
     return_content: true
     status_code: 200
+    # 127.0.0.1 vs the cert's CN — disable verify on the loopback API
+    # call. External clients still verify against the real LE chain.
+    validate_certs: false
   register: stealth_vps_panel_login
   no_log: true
   tags: [xray, reality]
@@ -168,13 +171,14 @@
 - name: List existing inbounds
   ansible.builtin.uri:
     url: >-
-      http://127.0.0.1:{{ stealth_vps_panel_state.port
+      {{ 'https' if stealth_vps_domain else 'http' }}://127.0.0.1:{{ stealth_vps_panel_state.port
       }}/{{ stealth_vps_panel_state.web_base_path }}/panel/api/inbounds/list
     method: GET
     headers:
       Cookie: "{{ stealth_vps_panel_login.cookies_string }}"
     return_content: true
     status_code: 200
+    validate_certs: false
   register: stealth_vps_inbounds_list
   tags: [xray, reality]
 
@@ -189,7 +193,7 @@
 - name: Create Reality inbound via 3X-UI API
   ansible.builtin.uri:
     url: >-
-      http://127.0.0.1:{{ stealth_vps_panel_state.port
+      {{ 'https' if stealth_vps_domain else 'http' }}://127.0.0.1:{{ stealth_vps_panel_state.port
       }}/{{ stealth_vps_panel_state.web_base_path }}/panel/api/inbounds/add
     method: POST
     headers:
@@ -198,6 +202,7 @@
     body_format: json
     return_content: true
     status_code: 200
+    validate_certs: false
   vars:
     _client:
       id: "{{ stealth_vps_reality_state.client_uuid }}"
