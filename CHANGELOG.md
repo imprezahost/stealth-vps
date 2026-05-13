@@ -28,8 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `stealth_vps_observability_allow_from` — list of CIDRs allowed to reach the node_exporter port when it's bound to a non-loopback address. `tasks/ufw.yml` creates one `ufw allow from <cidr> to any port <port> proto tcp` per entry; an empty list (default) means no UFW rule, so the port stays loopback-only and the SSH-tunnel pattern is the only way in. observability/README.md got the new snippet.
 
-### Planned (still in v0.3.0)
-- Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
+### Added
+- `docs/client-setup/ios.md` rewritten as a full walkthrough — Hiddify (recommended free), Shadowrocket (paid de-facto), Streisand (paid sing-box). Add-profile flows, connect, Reality field checks, Hysteria2 port-hopping + insecure handling, troubleshooting matrix for the common iOS breakages (VPN permission, DNS bypass, cellular UDP throttling, Battery-drain trade-off), multi-user sharing via panel subscription URLs.
+- `docs/client-setup/macos.md` rewritten as a full walkthrough — Hiddify Desktop, V2Box, NekoBox (nekoray), Shadowrocket on Apple Silicon. Per-client install/import/connect, TUN vs system proxy mode, the DNS-leak-via-Apple-private-DNS pitfall, the wintun/utun gotcha, and battery-priority Reality vs Hysteria2 guidance.
+- Both docs carry an explicit "Validation status" footer noting that per-screen pen-tested validation lands in v0.4.0 (when iOS / macOS hardware enters the QA rotation).
+
+### Planned (now v0.4.0)
+- Pen-tested iOS + macOS validation (replaces v0.3.0 entry)
 - zh-CN README rewrite by a native speaker
 
 ## [0.2.0] - 2026-05-13
