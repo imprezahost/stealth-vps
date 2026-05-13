@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **arm64 support** (`ansible_facts.architecture == 'aarch64'` is now accepted):
+  - New `stealth_vps_arch_map` in `defaults/main.yml` maps `uname -m` → GOARCH-style suffix (`x86_64 → amd64`, `aarch64 → arm64`). Every upstream binary URL (`Xray-core` bundled in 3X-UI, Hysteria2, the in-panel xray binary path) now derives from this map via the new `stealth_vps_arch` fact set in `tasks/main.yml`.
+  - The three per-component `x86_64`-only `assert`s in `panel.yml` / `hysteria.yml` are replaced by a single central assert against `stealth_vps_arch_map.keys()` in `tasks/main.yml`. To try an unvalidated architecture (armv7, 386, riscv64), extend the map and rerun — no other role changes required.
+  - `docs/operations.md` gains a "Running on arm64" section with the validated provider matrix (Oracle Ampere free tier, AWS Graviton, Hetzner CAX) and per-component arm64 caveats.
 - **Probe-resistance test suite scaffolding** (`tests/probe-resistance/`):
   - `README.md` with explicit threat model — which probe classes we test against, which we deliberately leave out of scope.
   - 5 numbered scenario docs under `scenarios/` covering HTTPS direct probe (01), TLS JA3/JA4 fingerprint (02), active probe with no Reality key (03), port-scan baseline (04), and replay-resistance (05). Each doc states what we test, why it matters, the threat-model anchor, and the failure modes we've seen in the wild.

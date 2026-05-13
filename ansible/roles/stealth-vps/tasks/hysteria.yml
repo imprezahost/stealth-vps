@@ -12,14 +12,8 @@
 # clients does not rotate on every apply.
 
 # --- Sanity ---------------------------------------------------------------
-
-- name: Assert supported CPU architecture (v0.1.0 ships amd64 only)
-  ansible.builtin.assert:
-    that: ansible_facts.architecture == 'x86_64'
-    fail_msg: >-
-      stealth-vps hysteria currently supports x86_64 only.
-      Architecture detected: {{ ansible_facts.architecture }}.
-  tags: [hysteria, hysteria2]
+# Architecture has already been asserted in tasks/main.yml; we just consume
+# `stealth_vps_arch` (set there) for the upstream binary URL below.
 
 - name: Install hysteria runtime dependencies
   ansible.builtin.apt:
@@ -247,11 +241,11 @@
         state: stopped
       failed_when: false
 
-    - name: Download hysteria binary ({{ stealth_vps_hysteria_version }})
+    - name: Download hysteria binary ({{ stealth_vps_hysteria_version }}, {{ stealth_vps_arch }})
       ansible.builtin.get_url:
         url: >-
           https://github.com/apernet/hysteria/releases/download/{{ stealth_vps_hysteria_version
-          }}/hysteria-linux-amd64
+          }}/hysteria-linux-{{ stealth_vps_arch }}
         dest: "{{ stealth_vps_hysteria_bin }}"
         owner: root
         group: root

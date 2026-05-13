@@ -7,16 +7,9 @@
 # the panel URL / login does not rotate on every apply.
 
 # --- Sanity ---------------------------------------------------------------
-
-- name: Assert supported CPU architecture (v0.1.0 ships amd64 only)
-  ansible.builtin.assert:
-    that:
-      - ansible_facts.architecture == 'x86_64'
-    fail_msg: >-
-      stealth-vps panel currently supports x86_64 only.
-      Architecture detected: {{ ansible_facts.architecture }}.
-      arm64 / armv7 / armv6 / 386 are on the roadmap.
-  tags: [panel, 3xui]
+# Architecture has already been asserted in tasks/main.yml; we just consume
+# `stealth_vps_arch` (set there) for the upstream binary URL + bundled
+# xray binary name below.
 
 - name: Install panel runtime dependencies
   ansible.builtin.apt:
@@ -105,12 +98,12 @@
   tags: [panel, 3xui]
   block:
 
-    - name: Download 3X-UI tarball ({{ stealth_vps_panel_version }})
+    - name: Download 3X-UI tarball ({{ stealth_vps_panel_version }}, {{ stealth_vps_arch }})
       ansible.builtin.get_url:
         url: >-
           https://github.com/MHSanaei/3x-ui/releases/download/{{ stealth_vps_panel_version
-          }}/x-ui-linux-amd64.tar.gz
-        dest: "/tmp/x-ui-{{ stealth_vps_panel_version }}.tar.gz"
+          }}/x-ui-linux-{{ stealth_vps_arch }}.tar.gz
+        dest: "/tmp/x-ui-{{ stealth_vps_panel_version }}-{{ stealth_vps_arch }}.tar.gz"
         mode: '0644'
         force: false
 
@@ -122,7 +115,7 @@
 
     - name: Extract 3X-UI into /usr/local/
       ansible.builtin.unarchive:
-        src: "/tmp/x-ui-{{ stealth_vps_panel_version }}.tar.gz"
+        src: "/tmp/x-ui-{{ stealth_vps_panel_version }}-{{ stealth_vps_arch }}.tar.gz"
         dest: /usr/local/
         remote_src: true
 
@@ -133,7 +126,7 @@
       loop:
         - x-ui
         - x-ui.sh
-        - bin/xray-linux-amd64
+        - "bin/xray-linux-{{ stealth_vps_arch }}"
 
     - name: Install x-ui control symlink
       ansible.builtin.file:

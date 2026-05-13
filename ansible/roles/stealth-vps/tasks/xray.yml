@@ -36,7 +36,7 @@
 
 - name: Probe bundled xray binary
   ansible.builtin.stat:
-    path: "{{ stealth_vps_panel_dir }}/bin/xray-linux-amd64"
+    path: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }}"
   register: stealth_vps_xray_bin_stat
   tags: [xray, reality]
 
@@ -93,14 +93,14 @@
 
     - name: Generate X25519 keypair via bundled xray
       ansible.builtin.command:
-        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-amd64 x25519"
+        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }} x25519"
       register: stealth_vps_x25519_raw
       changed_when: false
       no_log: true
 
     - name: Generate client UUID via bundled xray
       ansible.builtin.command:
-        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-amd64 uuid"
+        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }} uuid"
       register: stealth_vps_uuid_raw
       changed_when: false
 
