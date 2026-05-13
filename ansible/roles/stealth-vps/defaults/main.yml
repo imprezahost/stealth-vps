@@ -49,6 +49,9 @@ stealth_vps_hysteria_port_max: 60000
 stealth_vps_hysteria_port_hopping: false
 stealth_vps_hysteria_port_hopping_min: 20000
 stealth_vps_hysteria_port_hopping_max: 50000
+# Hysteria2 traffic stats API (JSON only in 2.8.2; converted to
+# Prometheus by stealth-vps-metrics-update.sh). Loopback only.
+stealth_vps_hysteria_traffic_stats_listen: "127.0.0.1:9101"
 # apernet/hysteria release pin. Last stable in maybe/2026; bumped together
 # with a security review.
 stealth_vps_hysteria_version: "app/v2.8.2"
@@ -126,3 +129,10 @@ stealth_vps_ipv6_enabled: true
 # Set to false on environments where you don't want the binary running.
 stealth_vps_observability_enabled: true
 stealth_vps_observability_listen: "127.0.0.1:9100"
+# Stealth-vps-specific metrics (Reality inbound traffic via 3X-UI API
+# + Hysteria2 trafficStats) get written as a Prometheus .prom file
+# into the textfile_collector dir below; node_exporter exposes them
+# on the same /metrics endpoint, so Prometheus has one scrape target.
+stealth_vps_metrics_enabled: true
+stealth_vps_metrics_textfile_dir: /var/lib/stealth-vps/metrics
+stealth_vps_metrics_refresh_interval_sec: 30

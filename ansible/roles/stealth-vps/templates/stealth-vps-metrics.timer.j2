@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Fires the metrics-updater service every {{ stealth_vps_metrics_refresh_interval_sec }}s.
+
+[Unit]
+Description=stealth-vps metrics updater — periodic refresh
+
+[Timer]
+# Wait 10s after boot so the panel + hysteria are up before the first run.
+OnBootSec=10s
+# After every completed run, re-fire after this interval.
+OnUnitInactiveSec={{ stealth_vps_metrics_refresh_interval_sec }}s
+# Don't drift; cap jitter.
+AccuracySec=1s
+Unit=stealth-vps-metrics.service
+
+[Install]
+WantedBy=timers.target

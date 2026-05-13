@@ -1,20 +1,27 @@
 ---
-# Observability — Prometheus node_exporter.
+# Observability — Prometheus node_exporter + a textfile collector
+# fed by a stealth-vps-specific metrics updater (3X-UI panel + Hysteria2).
 #
-# Scope for v0.2.0:
-#   * Install the upstream prometheus-node-exporter package
-#   * Override its systemd unit so it binds to loopback-only by default
+# Scope:
+#   * Install upstream prometheus-node-exporter package
+#   * Override its systemd unit to bind to loopback only
 #     (operators tunnel from a central Prometheus instead of running
 #     a per-host Prometheus + Grafana stack)
+#   * When stealth_vps_metrics_enabled: stand up a small Python updater
+#     that pulls per-inbound + per-client counters from the 3X-UI REST
+#     API and per-client traffic from Hysteria2's trafficStats JSON
+#     API, formats them as Prometheus and writes a .prom file that the
+#     node_exporter textfile collector picks up. Single scrape target.
 #
-# What's not in scope yet (v0.3.0+):
-#   * Xray / Hysteria2 Prometheus endpoints
-#   * Grafana dashboard JSON shipped with the role
+# Not in scope yet (v0.3.0+):
 #   * Alert rules
+#   * stealth-vps-specific Grafana dashboard JSON (use 1860 for host)
 
 - name: Install prometheus-node-exporter
   ansible.builtin.apt:
-    name: prometheus-node-exporter
+    name:
+      - prometheus-node-exporter
+      - python3-yaml
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -29,7 +36,17 @@
     mode: '0755'
   tags: [observability]
 
-- name: Drop listen-address override (bind to {{ stealth_vps_observability_listen }})
+- name: Ensure textfile collector dir exists (for stealth-vps .prom files)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_metrics_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: stealth_vps_metrics_enabled | bool
+  tags: [observability]
+
+- name: Drop listen-address (and textfile collector) override
   ansible.builtin.template:
     src: node-exporter.override.j2
     dest: /etc/systemd/system/prometheus-node-exporter.service.d/listen.conf
@@ -39,7 +56,7 @@
   register: stealth_vps_node_exporter_override
   tags: [observability]
 
-- name: systemd daemon-reload after override change
+- name: systemd daemon-reload after node-exporter override change
   ansible.builtin.systemd:
     daemon_reload: true
   when: stealth_vps_node_exporter_override.changed
@@ -57,6 +74,68 @@
     name: prometheus-node-exporter
     state: started
     enabled: true
+  tags: [observability]
+
+# --- stealth-vps metrics updater (Reality + Hysteria2 textfile) ----------
+
+- name: Drop the metrics-updater Python script
+  ansible.builtin.template:
+    src: stealth-vps-metrics-update.py.j2
+    dest: /usr/local/sbin/stealth-vps-metrics-update.py
+    owner: root
+    group: root
+    mode: '0755'
+  when: stealth_vps_metrics_enabled | bool
+  register: stealth_vps_metrics_script
+  tags: [observability]
+
+- name: Drop the metrics updater systemd service
+  ansible.builtin.template:
+    src: stealth-vps-metrics.service.j2
+    dest: /etc/systemd/system/stealth-vps-metrics.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_metrics_enabled | bool
+  register: stealth_vps_metrics_service
+  tags: [observability]
+
+- name: Drop the metrics updater systemd timer
+  ansible.builtin.template:
+    src: stealth-vps-metrics.timer.j2
+    dest: /etc/systemd/system/stealth-vps-metrics.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_metrics_enabled | bool
+  register: stealth_vps_metrics_timer
+  tags: [observability]
+
+- name: systemd daemon-reload after metrics unit/timer change
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: >-
+    stealth_vps_metrics_enabled | bool
+    and (stealth_vps_metrics_service.changed | default(false)
+         or stealth_vps_metrics_timer.changed | default(false))
+  tags: [observability]
+
+- name: Enable + start metrics timer
+  ansible.builtin.systemd:
+    name: stealth-vps-metrics.timer
+    state: started
+    enabled: true
+  when: stealth_vps_metrics_enabled | bool
+  tags: [observability]
+
+- name: Bootstrap a first run of the updater so node_exporter has data immediately
+  ansible.builtin.systemd:
+    name: stealth-vps-metrics.service
+    state: started
+  when: >-
+    stealth_vps_metrics_enabled | bool
+    and (stealth_vps_metrics_script.changed | default(false)
+         or stealth_vps_metrics_service.changed | default(false))
   tags: [observability]
 
 - name: Smoke-test node_exporter /metrics

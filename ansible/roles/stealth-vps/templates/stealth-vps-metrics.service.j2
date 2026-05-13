@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+# stealth-vps metrics updater — pulls 3X-UI panel + Hysteria2 stats and
+# writes a Prometheus textfile that node_exporter exposes on /metrics.
+
+[Unit]
+Description=stealth-vps metrics updater (writes .prom for node_exporter textfile collector)
+Documentation=https://github.com/imprezahost/stealth-vps
+After=network-online.target prometheus-node-exporter.service x-ui.service hysteria-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/stealth-vps-metrics-update.py
+# Keep stdout/stderr in the journal for debugging.
+StandardOutput=journal
+StandardError=journal
+# A stale write of /var/lib/stealth-vps/metrics/stealth-vps.prom is
+# self-healing on the next timer fire; no retries needed here.
+Restart=no

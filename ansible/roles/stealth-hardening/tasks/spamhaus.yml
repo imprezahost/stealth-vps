@@ -27,12 +27,17 @@
   tags: [spamhaus, hardening]
 
 - name: Ensure stealth-vps state dir exists for ipset persistence
+  # 0711: others traverse but cannot list. Same rationale as
+  # /etc/stealth-vps (parent dir). Lets the prometheus user reach
+  # /var/lib/stealth-vps/metrics/*.prom (created by the observability
+  # task) without exposing siblings like spamhaus.save (chmod 0600
+  # via the script).
   ansible.builtin.file:
     path: /var/lib/stealth-vps
     state: directory
     owner: root
     group: root
-    mode: '0700'
+    mode: '0711'
   tags: [spamhaus, hardening]
 
 - name: Render Spamhaus update script
