@@ -89,10 +89,15 @@
   tags: [panel, 3xui]
 
 - name: Install or upgrade 3X-UI
+  # Note: --check mode does NOT simulate this block correctly on a fresh
+  # host — get_url is a no-op under --check, then unarchive errors with
+  # "Source does not exist". Run a real apply once, then --check is
+  # idempotent on subsequent runs.
   when: >-
     stealth_vps_panel_installed_version.rc != 0
     or stealth_vps_panel_installed_version.stdout | trim
        != (stealth_vps_panel_version | regex_replace('^v', ''))
+  tags: [panel, 3xui]
   block:
 
     - name: Download 3X-UI tarball ({{ stealth_vps_panel_version }})
@@ -142,7 +147,7 @@
         mode: '0644'
       notify: Restart x-ui
 
-    - name: systemd daemon-reload after unit install
+    - name: Systemd daemon-reload after unit install
       ansible.builtin.systemd:
         daemon_reload: true
 
