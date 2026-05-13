@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+# stealth-vps — daily Spamhaus feed refresh (jittered to avoid every
+# stealth-vps instance hitting Spamhaus at the same second).
+
+[Unit]
+Description=stealth-vps Spamhaus refresh — daily
+
+[Timer]
+OnCalendar={{ stealth_hardening_spamhaus_refresh_schedule }}
+RandomizedDelaySec={{ stealth_hardening_spamhaus_refresh_jitter }}
+Persistent=true
+Unit=stealth-vps-spamhaus.service
+
+[Install]
+WantedBy=timers.target

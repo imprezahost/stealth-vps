@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# stealth-vps — download the Spamhaus DROP list and atomically swap it
+# into the named ipset. UFW's before.rules drops INPUT traffic matching
+# this set.
+#
+# Exit codes:
+#   0   success — ipset is now populated with the fresh feed
+#   1   transient error (download failure, feed too small) — ipset
+#       content is left as-is, the previous run's data is still active
+
+set -euo pipefail
+
+URL="${STEALTH_VPS_SPAMHAUS_URL:-{{ stealth_hardening_spamhaus_url }}}"
+SET_NAME="${STEALTH_VPS_SPAMHAUS_IPSET:-{{ stealth_hardening_spamhaus_ipset_name }}}"
+MIN_ENTRIES="${STEALTH_VPS_SPAMHAUS_MIN_ENTRIES:-{{ stealth_hardening_spamhaus_min_entries }}}"
+STATE_DIR=/var/lib/stealth-vps
+SAVE_FILE="${STATE_DIR}/spamhaus.save"
+
+mkdir -p "${STATE_DIR}"
+
+FEED="$(mktemp)"
+trap 'rm -f "${FEED}"' EXIT
+
+if ! curl -fsSL --max-time 30 "${URL}" -o "${FEED}"; then
+  echo "stealth-vps spamhaus: failed to download ${URL}" >&2
+  exit 1
+fi
+
+COUNT=$(awk '/^[0-9]/{n++} END{print n+0}' "${FEED}")
+if [ "${COUNT}" -lt "${MIN_ENTRIES}" ]; then
+  echo "stealth-vps spamhaus: only ${COUNT} entries in feed (need >= ${MIN_ENTRIES}); keeping current ipset" >&2
+  exit 1
+fi
+
+# Ensure the target ipset exists so the swap below has something to swap with.
+ipset create "${SET_NAME}" hash:net family inet -exist
+
+# Build the new set in a scratch ipset, then atomically swap. This way
+# the firewall never observes an empty set.
+TMP_SET="${SET_NAME}-new"
+ipset create "${TMP_SET}" hash:net family inet -exist
+ipset flush "${TMP_SET}"
+
+awk -v set="${TMP_SET}" '/^[0-9]/{print "add " set " " $1}' "${FEED}" \
+  | ipset restore -exist
+
+ipset swap "${TMP_SET}" "${SET_NAME}"
+ipset destroy "${TMP_SET}"
+
+# Persist so a reboot can restore the set before ufw.service starts.
+ipset save "${SET_NAME}" > "${SAVE_FILE}"
+
+echo "stealth-vps spamhaus: loaded ${COUNT} entries into ipset '${SET_NAME}'"

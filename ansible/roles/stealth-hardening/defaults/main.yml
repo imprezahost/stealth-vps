@@ -69,6 +69,18 @@ stealth_hardening_ufw_acme_http_challenge: false
 # ---- unattended-upgrades ----
 stealth_hardening_unattended_upgrades: true
 
-# ---- hosts.deny / Spamhaus ----
-stealth_hardening_spamhaus_drop: true
-stealth_hardening_spamhaus_edrop: true
+# ---- Spamhaus DROP ipset ----
+# Modern replacement for the legacy hosts.deny path. Loads the
+# Spamhaus DROP list into an ipset and injects a single UFW before.rules
+# rule that drops anything sourced from those CIDRs. Spamhaus merged the
+# EDROP feed into DROP in early 2026, so we only consume the one URL.
+stealth_hardening_spamhaus_enabled: true
+stealth_hardening_spamhaus_url: "https://www.spamhaus.org/drop/drop.txt"
+stealth_hardening_spamhaus_ipset_name: "spamhaus-drop"
+# systemd OnCalendar expression for the daily refresh. Override to
+# stagger across a fleet (Spamhaus rate-limits aggressive polling).
+stealth_hardening_spamhaus_refresh_schedule: "daily"
+stealth_hardening_spamhaus_refresh_jitter: "4h"
+# Minimum number of entries to accept; below this we treat the feed as
+# corrupt and abort the swap, keeping the previous ipset content.
+stealth_hardening_spamhaus_min_entries: 100
