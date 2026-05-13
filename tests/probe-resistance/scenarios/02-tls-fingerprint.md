@@ -1,12 +1,32 @@
-# 02 — TLS fingerprint comparison
+# 02 — TLS shape comparison
 
 ## What we're testing
 
-The TLS ClientHello and ServerHello shape (cipher list, extension order, supported groups, ALPN, key-share) of our VPS — when responding to a probe that does **not** carry a valid Reality key — must match the shape of the real `dest` site.
+The TLS handshake response shape from our VPS — when responding to a probe that does **not** carry a valid Reality key — must match the shape of the real `dest` site for every feature the probe can read from a stdlib TLS handshake.
 
-In practical terms: capture the JA3/JA4 fingerprint from both `dest` directly and our VPS in fallback mode. They must collide.
+We compare seven features:
 
-Reality's design intends this: when the server can't verify the client's key, it reverse-proxies the full TLS handshake from `dest`. A successful collision proves the proxy is working at the handshake level, not just at the HTTP body level.
+1. Negotiated TLS protocol version (e.g. `TLSv1.3`)
+2. Chosen cipher suite (e.g. `TLS_AES_256_GCM_SHA384`)
+3. ALPN protocol selected (e.g. `h2`)
+4. Peer cert subject CN
+5. Peer cert SAN list (sorted)
+6. Peer cert issuer CN
+7. Peer cert signature algorithm + public-key algorithm
+
+If Reality's reverse-proxy fallback is working, every one of these collides with the real dest, because Reality is literally returning the dest's TLS response. Divergence pinpoints which layer leaks — most commonly a cert-mismatch (we presented our own cert instead of mirroring dest's).
+
+## What this is *not* (yet)
+
+This is **not** a true JA3 / JA4 fingerprint. Those compute over the raw `ClientHello` / `ServerHello` byte stream — extension order, supported-groups list, key-share preferences — which Python's stdlib `ssl` module abstracts away. Computing real JA3/JA4 needs raw-packet capture (scapy) or a pure-Python TLS implementation (tlslite-ng).
+
+We chose the seven-feature shape comparison because:
+
+- In practice it catches every Reality misconfiguration we've seen in production. The hard failure modes (own cert leaked, wrong cipher chosen, ALPN mismatch) all show up in features 1-7.
+- It's pure stdlib + one shell-out to `openssl x509`. No third-party deps; works on any Debian/Ubuntu host.
+- The fail output names every divergent feature with a `WHY:` line so triage is direct.
+
+A future v1.0 plug-in that uses scapy or tlslite-ng for byte-level JA3/JA4 can subsume this scenario without changing the script contract (env vars + exit codes are stable).
 
 ## Why it matters
 
@@ -46,16 +66,15 @@ A collision on JA3 alone is not enough in 2026. Both must match.
 
 `scripts/tls_fingerprint_compare.py`:
 
-**v0.4.0 (scaffold):** parses env vars, validates the targets resolve, prints what it would test, exits 2 (inconclusive). Establishes the script contract so v0.5 / v1.0 can fill the body without changing how CI calls it.
+**v0.4.1 (runnable):**
 
-**v0.5 (planned):**
+- Opens two TLS handshakes (dest, then VPS-with-dest-SNI) via stdlib `ssl.SSLContext`. ALPN offer defaults to `h2,http/1.1` (override via `PROBE_ALPN`).
+- Reads protocol version + chosen cipher + selected ALPN directly from the wrapped socket.
+- Captures the peer cert in DER form, writes it to a temp file, shells out to `openssl x509 -inform DER -text` to parse subject CN, SAN list, issuer CN, signature algorithm, and public-key algorithm.
+- Diffs the seven features. Exits 0 on collision, 1 with one `WHY:` line per diverging feature, 2 on inconclusive (target unreachable, openssl missing, etc.).
+- `PROBE_VERBOSE=1` dumps both shapes for triage.
 
-- Use `scapy.layers.tls` or `tlslite-ng` for raw ClientHello capture, or shell out to `openssl s_client -msg -tlsextdebug` and parse stderr.
-- JA3 computation: open-source `pyJA3` or inline (it's ~30 lines).
-- JA4 computation: `ja4-python` (FoxIO reference impl) or inline (~80 lines, well-specified).
-- Exit codes per the suite contract.
-
-**v1.0 (planned):** snapshot tests — golden JA4 strings checked into the repo per-dest, with a `update_golden.py` helper for when upstream microsoft.com / cloudflare.com rotate cipher preferences.
+**v1.0 (planned):** plug in scapy or tlslite-ng to capture raw `ServerHello` bytes and compute true JA3S + JA4S strings; check golden JA4S into the repo per dest with a `scripts/update_golden.py` helper for the quarterly cipher-preference rotations upstream sites do.
 
 ## Failure modes (expected once implemented)
 
