@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.4.0)
+### Added
+- **Reverse-mirror automation** (`.github/workflows/reverse-mirror.yml` + `.gitlab-ci.yml` `report` stage):
+  - External PRs on the GitHub mirror are auto-pushed to internal GitLab as `ext/pr-<N>` and a tracking Merge Request is opened via the GitLab API. The workflow runs under `pull_request_target` but never checks out the untrusted PR code — only `git fetch` of `pull/N/head` + `git push` to GitLab, so secrets stay safe.
+  - Force-pushes to the PR refresh the same MR (idempotent on `MR_IID`).
+  - The GitLab MR pipeline reports `pending` / `success` / `failure` back to the upstream PR commit as a status check named `stealth-vps/gitlab-ci` (using the GitHub Commit Statuses API).
+  - `workflow.rules` in `.gitlab-ci.yml` suppresses the empty push-pipeline that would otherwise fire on `ext/pr-*` branches — only the MR-pipeline runs CI.
+  - Secrets / variables required documented in `docs/development.md § External contributor flow`.
+- **`CONTRIBUTING.md`** updated to describe the mechanized flow (replaces the v0.3 "we re-apply manually internally" wording).
+
+### Fixed
+- Two pre-existing `yamllint` line-length errors on `ansible/roles/stealth-vps/tasks/{hysteria,tls}.yml` that snuck in during v0.2/v0.3 — wrapped in `# yamllint disable rule:line-length` because the offending lines are single-token shell or iptables-restore directives that can't be split.
+
+### Planned (v0.4.0 remaining)
 - Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs
 - zh-CN README rewrite by a native speaker
 - arm64 packaging for the panel + Hysteria2 (so amd64-only assert can be relaxed)
-- Source-mirror automation: GitHub Actions reverse-mirror so external PR contributors get CI parity
 - Probe-resistance test suite scaffolding (v1.0 roadmap, started here)
 
 ## [0.3.0] - 2026-05-13

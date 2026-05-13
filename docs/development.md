@@ -90,6 +90,83 @@ Available top-level tags: `hardening`, `stealth`, plus per-area: `kernel`, `xray
 - **GitLab** (`.gitlab-ci.yml`) is the canonical pipeline: shellcheck, yamllint, ansible-lint, and (once roles have content) Molecule.
 - **GitHub** (`.github/workflows/ci-validate.yml`) runs report-only lint on the public mirror to give external contributors quick feedback.
 
+## External contributor flow (reverse-mirror)
+
+External contributors open PRs on the GitHub mirror. Those PRs do not have access to the internal GitLab pipeline directly, so a **reverse-mirror workflow** bridges the two:
+
+```text
+   external dev                       GitHub                       internal GitLab
+   ============                       ======                       ===============
+
+   opens PR  ──────────────►  imprezahost/stealth-vps
+                                      │
+                              (pull_request_target)
+                                      │
+                                      ▼
+                       .github/workflows/reverse-mirror.yml
+                                      │
+                                      │   (1) fetch pull/N/head — never checked out
+                                      │   (2) git push to GitLab ext/pr-N
+                                      │   (3) create or refresh MR via GitLab API
+                                      │   (4) comment on PR with MR link
+                                      ▼
+                                                            git.imprezahost.com/.../-/merge_requests/M
+                                                                       │
+                                                              MR pipeline runs:
+                                                                  shellcheck, yamllint,
+                                                                  ansible-lint, Molecule
+                                                                       │
+                                                                       ▼
+                                                              .gitlab-ci.yml `report-status-*`
+                                                                       │
+                                  ◄──────────  POST /repos/.../statuses/<sha>  ──────────
+                                  (pending / success / failure)
+                                      │
+                                      ▼
+   PR commit checks updated  ◄──  GitHub status API
+```
+
+### Required secrets
+
+**On the GitHub mirror (`imprezahost/stealth-vps` → Settings → Secrets and variables → Actions):**
+
+| Secret | Purpose |
+|---|---|
+| `GITLAB_MIRROR_URL` | Push URL with embedded token, e.g. `https://oauth2:<deploy_token>@git.imprezahost.com/impreza/stealth-vps.git`. Deploy token needs `write_repository` scope. |
+| `GITLAB_API_URL` | `https://git.imprezahost.com/api/v4` |
+| `GITLAB_PROJECT_ID` | Numeric project ID from GitLab → project home → vertical-ellipsis → Copy project ID |
+| `GITLAB_API_TOKEN` | PAT with `api` scope, used to create / update / list MRs |
+
+**Optional variable** (Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GITLAB_WEB_URL` | `https://git.imprezahost.com/impreza/stealth-vps` | Override if the project URL changes |
+
+**On the GitLab project (Settings → CI/CD → Variables):**
+
+| Variable | Purpose |
+|---|---|
+| `GITHUB_API_TOKEN` | PAT with `repo:status` scope (classic) or `Commit statuses: read+write` (fine-grained) on `imprezahost/stealth-vps`. Mask + protect. |
+| `GITHUB_DEPLOY_KEY` | SSH private key for the `mirror-to-github` job (pre-existing). Mask + protect. File type, not Variable. |
+
+### Behaviour summary
+
+| Event on GitHub | Action |
+|---|---|
+| External PR opened / reopened | Push to GitLab `ext/pr-N`, open MR, comment on PR |
+| External PR head force-pushed | Force-push to GitLab `ext/pr-N`, refresh MR description (same `MR_IID`) |
+| Internal PR (same-repo branch) | Skipped — internal branches already go through GitLab directly |
+| MR pipeline starts on GitLab | POST `pending` status to upstream PR commit |
+| MR pipeline ends — success | POST `success` status to upstream PR commit |
+| MR pipeline ends — failure | POST `failure` status to upstream PR commit |
+
+### Security notes
+
+- The reverse-mirror workflow uses `pull_request_target` (privileged context with secrets). It intentionally **never checks out the PR code** — only `git fetch` of `pull/N/head` followed by `git push` to GitLab. The PR payload is opaque to the privileged job, so a malicious PR cannot exfiltrate secrets.
+- The MR runs inside GitLab CI, where execution is on private runners. Standard `pull_request` CI rules (sandbox the PR code, no production secrets) apply there.
+- Force-push protection on the GitLab `main` branch should be enabled so an `ext/pr-N` MR cannot bypass review.
+
 ## Commit style
 
 Conventional Commits. See [CONTRIBUTING.md](../CONTRIBUTING.md) for examples.

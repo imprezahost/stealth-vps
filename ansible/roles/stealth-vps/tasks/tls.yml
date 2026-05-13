@@ -107,6 +107,7 @@
       # we can't rely on its stdout for change detection. Gate on a
       # marker file keyed by domain — re-run is fine if the domain
       # changes (different marker) or after a manual `rm` of the marker.
+      # yamllint disable rule:line-length
       ansible.builtin.command:
         cmd: >-
           /root/.acme.sh/acme.sh --install-cert
@@ -115,6 +116,7 @@
           --key-file       {{ stealth_vps_tls_dir }}/privkey.pem
           --reloadcmd "systemctl restart hysteria-server 2>/dev/null || true; systemctl restart x-ui 2>/dev/null || true"
         creates: "{{ stealth_vps_tls_dir }}/.installed-{{ stealth_vps_domain }}"
+      # yamllint enable rule:line-length
       register: stealth_vps_acme_install
 
     - name: Drop install-cert marker

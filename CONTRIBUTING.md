@@ -31,14 +31,20 @@ For security issues, **do not open a public issue** — see [SECURITY.md](SECURI
 
 ### Submitting pull requests
 
-Pull requests are welcome on GitHub. The workflow is:
+Pull requests are welcome on GitHub. The workflow is automated:
 
 1. Open a PR against `main` on GitHub.
-2. We review it publicly. Discussion happens in the PR.
-3. If accepted, the change is re-applied internally on GitLab (the source of truth) with attribution to the original author preserved in the commit trailer.
-4. The change ships in the next tagged release on GitHub.
+2. A bot mirrors the PR head to the internal GitLab as `ext/pr-<N>` and opens a tracking Merge Request there. You'll see a comment on your PR with the MR link.
+3. The internal CI pipeline (Molecule on Debian 12 + Ubuntu 22.04/24.04, full lint matrix) runs against your changes. The pipeline status is reported back on your PR as a commit-status check named `stealth-vps/gitlab-ci`.
+4. We review publicly on GitHub. Discussion happens in the PR.
+5. If accepted, a maintainer merges the internal MR. Your original commits + authorship are preserved.
+6. The change ships in the next tagged release; the release tag triggers the GitLab → GitHub release mirror and shows up on `main` here.
 
-The mirror-and-port flow may add a small delay between PR approval and the change appearing in `main`. We'll close the PR with a reference to the inclusion commit once the next release ships.
+The "release-only" mirror means your PR may stay open for a few days after acceptance, until the next tag goes out. We'll close the PR with a reference to the inclusion tag once it ships.
+
+If you force-push to your PR branch, the workflow refreshes the same internal MR — no need to coordinate manually.
+
+See [docs/development.md § External contributor flow](docs/development.md#external-contributor-flow-reverse-mirror) for the implementation details if you're curious.
 
 ### Code style
 
