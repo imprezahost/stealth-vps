@@ -33,3 +33,8 @@
   ansible.builtin.include_tasks: hysteria.yml
   when: stealth_vps_hysteria_enabled | bool
   tags: [hysteria, hysteria2]
+
+- name: Install Prometheus node_exporter (observability)
+  ansible.builtin.include_tasks: observability.yml
+  when: stealth_vps_observability_enabled | bool
+  tags: [observability]

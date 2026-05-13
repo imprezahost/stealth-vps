@@ -1,30 +1,67 @@
 # Observability
 
-This directory ships ready-to-use Prometheus exporters, Grafana dashboards, and alerting templates so you can see what's actually happening on your VPS without piecing together a monitoring stack from scratch.
+How to see what's actually happening on a stealth-vps host — CPU, memory, network, login attempts, blocked IPs — without piecing the stack together from scratch.
 
-## What's here
+## What ships in v0.2.0
+
+The `stealth-vps` role installs **`prometheus-node-exporter`** bound to `127.0.0.1:9100` by default. The exporter is left *not* exposed externally; pull metrics from a central Prometheus via SSH tunnel, or override `stealth_vps_observability_listen` if you want it open.
 
 ```
 observability/
 ├── grafana/
-│   └── dashboards/        # JSON dashboards importable into Grafana
+│   └── dashboards/      # JSON dashboards (planned — v0.3.0)
 ├── prometheus/
-│   └── exporter/          # systemd-managed exporter for Xray/Hysteria2/system
-└── alerts/                # alert rule templates (Discord/Telegram webhooks)
+│   └── exporter/        # (room for stealth-vps-specific exporters — v0.3.0)
+└── alerts/              # (room for alert rule templates — v0.3.0)
 ```
 
-## Status
+## Pulling metrics from a central Prometheus
 
-Skeleton only in v0.1.0-dev. Dashboards and exporter implementation land before the v0.1.0 tag.
+The recommended pattern is one Prometheus + one Grafana **outside** the stealth fleet, scraping each stealth-vps over a private connection.
 
-The intent:
+### Option A: SSH tunnel from the Prometheus host
 
-- One **system dashboard** (CPU, memory, network, disk, load) — sourced from `node_exporter`
-- One **traffic dashboard** (per-user upload/download, connection count, top destinations) — sourced from Xray stats API + Hysteria2 metrics
-- Alert templates for unusual login attempts, fail2ban bans, certificate expiry, and bandwidth spikes
+On the Prometheus host:
 
-## Why this is in the project
+```bash
+ssh -fN -i /path/to/key -p 22550 \
+  -L 9100:127.0.0.1:9100 \
+  root@<stealth-vps>
+```
 
-Most stealth-VPS tutorials stop at "it's installed, here's your config link." After a few weeks you're flying blind — you have no idea if you're being probed, throttled, or burning bandwidth on the wrong destination.
+Then in `prometheus.yml`:
 
-Shipping a working observability layer in the same release artifact is a deliberate differentiator. If you don't want it, the role lets you skip it; the default leaves it enabled.
+```yaml
+scrape_configs:
+  - job_name: stealth-vps-tokyo
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          host: tokyo
+```
+
+### Option B: Expose with a UFW source filter
+
+Override in inventory:
+
+```yaml
+stealth_vps_observability_listen: "0.0.0.0:9100"
+stealth_hardening_ufw_extra_ports:
+  - { port: 9100, proto: tcp, comment: "node_exporter from prometheus host only" }
+```
+
+…then on the firewall side, restrict source IP via `ufw allow from <prom-host-ip> to any port 9100`. (Future v0.3.0 will add a source-ip variant to the role.)
+
+## Dashboards
+
+For now, import the public **Node Exporter Full** dashboard (Grafana.com ID `1860`) — it covers everything `prometheus-node-exporter` reports. A stealth-vps-specific dashboard (panel inbound stats, Hysteria2 metrics, fail2ban ban rate) lands in v0.3.0.
+
+## What's not in scope yet
+
+- **Xray / Hysteria2 Prometheus endpoints**: both upstreams support exposing metrics; the role doesn't wire them up yet because the panel + standalone setups need different configuration. v0.3.0.
+- **Alert rules**: cert expiry, login flood, bandwidth spike, fail2ban ban rate. v0.3.0.
+- **Grafana shipped with the role**: anti-pattern in a fleet. Run Grafana once, centrally.
+
+## Why this directory exists
+
+Most stealth-VPS tutorials stop at "it's installed, here's your config link." After a few weeks you're flying blind — you can't tell if you're being probed, throttled, or burning bandwidth on the wrong destination. Shipping the baseline exporter as a deliberate part of the role is a small differentiator, not an afterthought.

@@ -1,0 +1,68 @@
+---
+# Observability — Prometheus node_exporter.
+#
+# Scope for v0.2.0:
+#   * Install the upstream prometheus-node-exporter package
+#   * Override its systemd unit so it binds to loopback-only by default
+#     (operators tunnel from a central Prometheus instead of running
+#     a per-host Prometheus + Grafana stack)
+#
+# What's not in scope yet (v0.3.0+):
+#   * Xray / Hysteria2 Prometheus endpoints
+#   * Grafana dashboard JSON shipped with the role
+#   * Alert rules
+
+- name: Install prometheus-node-exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [observability]
+
+- name: Ensure systemd override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/prometheus-node-exporter.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: [observability]
+
+- name: Drop listen-address override (bind to {{ stealth_vps_observability_listen }})
+  ansible.builtin.template:
+    src: node-exporter.override.j2
+    dest: /etc/systemd/system/prometheus-node-exporter.service.d/listen.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_vps_node_exporter_override
+  tags: [observability]
+
+- name: systemd daemon-reload after override change
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: stealth_vps_node_exporter_override.changed
+  tags: [observability]
+
+- name: Restart node_exporter when the override changed
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: restarted
+  when: stealth_vps_node_exporter_override.changed
+  tags: [observability]
+
+- name: Enable + start node_exporter
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true
+  tags: [observability]
+
+- name: Smoke-test node_exporter /metrics
+  ansible.builtin.uri:
+    url: "http://{{ stealth_vps_observability_listen }}/metrics"
+    return_content: false
+    status_code: 200
+    timeout: 5
+  tags: [observability]

@@ -35,9 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `ansible-lint` CI job now installs the role's collection requirements first (so the role tree resolves) and lowers the pinned ansible-core to `>=2.14,<2.18` to match the project's actual support window.
 
+### Added
+- `stealth-vps` role: observability task (`tasks/observability.yml`) — installs `prometheus-node-exporter` and overrides its systemd unit to bind to `stealth_vps_observability_listen` (default `127.0.0.1:9100`, i.e. loopback only). Smoke-tests `/metrics`. Toggle via `stealth_vps_observability_enabled` (default `true`).
+- `observability/README.md` rewritten with the central-Prometheus pull pattern (SSH tunnel or UFW source filter), reference to Grafana.com dashboard `1860` (Node Exporter Full) for now, and what's deferred to v0.3.0 (Xray/Hysteria2 endpoints, alert rules, stealth-vps-specific dashboards).
+
 ### Planned (still in v0.2.0)
-- Basic observability bundle (Prometheus exporter + Grafana JSON)
-- zh-CN README rewrite by a native speaker
+- zh-CN README rewrite by a native speaker (will likely slip to v0.3.0; freelance work)
 
 ## [0.1.0] - 2026-05-13
 

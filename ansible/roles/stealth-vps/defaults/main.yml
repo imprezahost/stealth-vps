@@ -117,3 +117,12 @@ stealth_vps_kernel_file_max: 1048576
 
 # ---- IPv6 ----
 stealth_vps_ipv6_enabled: true
+
+# ---- Observability (node_exporter) ----
+# Installs Prometheus node_exporter bound to 127.0.0.1:9100 (NOT
+# exposed externally — operator pulls metrics via SSH tunnel from
+# a central Prometheus, or flips stealth_vps_observability_listen
+# to "0.0.0.0:9100" and adds a UFW rule with explicit source).
+# Set to false on environments where you don't want the binary running.
+stealth_vps_observability_enabled: true
+stealth_vps_observability_listen: "127.0.0.1:9100"
