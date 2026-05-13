@@ -42,6 +42,6 @@ This catches lint regressions and runtime template / variable errors. Full valid
 |---|---|
 | v0.2.0 | Default scenario — kernel + SSH artifacts on Debian 12 |
 | v0.3.0 | Multi-platform matrix: Debian 12 + Ubuntu 22.04 + Ubuntu 24.04 in one scenario (converge + verify + idempotence runs against all three) |
-| **v0.4.0** | **Probe-resistance scaffolding** — 5 scenario docs, 2 runnable scripts (HTTPS direct probe, port-scan baseline), 2 scaffolded (TLS fingerprint, active probe), 1 manual (replay resistance). GitLab CI `probe-resistance` job behind manual trigger. See `probe-resistance/README.md`. |
-| v0.5.0 | Probe-resistance: fill TLS fingerprint (JA3+JA4) + active-probe comparison body; pin chosen TLS libs in `requirements.txt`. |
-| v1.0.0 | Probe-resistance: golden JA4 fingerprints per-dest; automated replay-resistance scenario; quarterly refresh tooling. |
+| v0.4.0 | Probe-resistance scaffolding — 5 scenario docs, 2 runnable scripts (HTTPS direct probe, port-scan baseline), 2 scaffolded (TLS fingerprint, active probe), 1 manual (replay resistance). GitLab CI `probe-resistance` job behind manual trigger. |
+| **v0.4.1** | **Probe-resistance scripts 02 + 03 filled in**: TLS shape comparison (7 features: version + cipher + ALPN + cert subject/SAN/issuer/sig) using stdlib `ssl` + `openssl x509`; HTTP response-shape comparison (status + header-set + body-bucket) via stdlib `http.client`. Both smoke-tested positively (target=dest matches) and negatively (target≠dest detects every divergent feature). |
+| v1.0.0 | Probe-resistance: true byte-level JA3/JA4 + JA3S/JA4S via scapy or tlslite-ng (golden snapshots per dest); HTTP/2 SETTINGS-frame comparison; automated replay-resistance scenario; quarterly refresh tooling. |

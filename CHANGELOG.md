@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.4.1)
+### Added
+- **Probe-resistance scripts 02 + 03 are now runnable** (filled in from the v0.4.0 scaffold):
+  - `tls_fingerprint_compare.py` — 7-feature TLS shape comparison using stdlib `ssl` + a single `openssl x509 -inform DER -text` shell-out: protocol version, chosen cipher, selected ALPN, peer cert subject CN, SAN list (sorted), issuer CN, signature + public-key algorithms. Cert is captured to a temp file (avoids Windows openssl-stdin quirks). One `WHY:` line per diverging feature on fail.
+  - `active_probe.py` — HTTP/1.1 response-shape comparison via stdlib `http.client`: status code, lower-cased header keys (minus a VARIABLE_HEADERS set for `date` / `set-cookie` / `cf-ray` / `x-amz-cf-id` / etc.), and a body-size bucket. Forces ALPN `http/1.1` so the response parses with stdlib; HTTP/2 frame check stays v1.0.
+  - Both scripts smoke-tested positively (target=`www.microsoft.com`, dest=`www.microsoft.com` → exit 0 with one-line OK) and negatively (target=`www.apple.com`, dest=`www.microsoft.com` → exit 1, every divergent feature reported).
+  - `PROBE_VERBOSE=1` dumps full shapes for triage.
+- Honest naming: the script does **not** claim to compute JA3/JA4. Those are byte-level fingerprints over raw `ClientHello` / `ServerHello`; Python's stdlib abstracts those bytes away. Scenario doc 02 now documents this explicitly and points to v1.0 plug-in territory (scapy / tlslite-ng + golden snapshots).
+- Scenario docs `02-tls-fingerprint.md` and `03-active-probe-no-key.md` rewritten — the "v0.5 (planned)" sections become "v0.4.1 (runnable)" with the actual implementation details, and v1.0 picks up only what stays deferred.
+
+### Planned (v0.4.1 remaining)
 - Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 — needs iOS + macOS hardware in the QA rotation)
 - zh-CN README rewrite by a native speaker (deferred from v0.4.0 — needs reviewer)
-- Probe-resistance scripts: fill JA3/JA4 fingerprint body in `tls_fingerprint_compare.py`, fill VPS-side comparison body in `active_probe.py`. Contract is locked from v0.4.0.
 
 ## [0.4.0] - 2026-05-13
 

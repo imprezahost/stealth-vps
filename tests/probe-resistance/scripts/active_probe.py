@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """Scenario 03: active probe with no Reality key.
 
-v0.4.0 status: scaffold. Exercises the dest side (so we know the baseline
-works from the controller), then exits 2. Contract is locked.
+Opens a TLS connection to dest:443 SNI=dest, GETs `/`, captures the
+response shape as (status, header_set, body_bucket). Repeats against
+the VPS at the same SNI. The two shapes must collide; any divergence
+means Reality's reverse-proxy fallback is leaking a tell after the
+handshake layer.
 
 Env vars:
     PROBE_TARGET            VPS hostname or IP (required)
     PROBE_REALITY_DEST      dest hostname (required)
     PROBE_REALITY_PORT      dest port (default: 443)
     PROBE_TIMEOUT           per-request timeout in seconds (default: 15)
+    PROBE_VERBOSE           any value → dump full baseline + probe on diff
 
 Exit codes:
     0 — HTTP response shape matches (status + header-set + body-bucket)
     1 — shape mismatch
-    2 — inconclusive (target unreachable, scaffold-mode, etc.)
+    2 — inconclusive (target unreachable, baseline broken, etc.)
 """
 
 from __future__ import annotations
@@ -46,6 +50,9 @@ VARIABLE_HEADERS = frozenset(
         "x-timer",
         "x-request-id",
         "x-correlation-id",
+        "report-to",
+        "nel",
+        "age",
     }
 )
 
@@ -54,6 +61,7 @@ class ProbeShape(NamedTuple):
     status: int
     headers: frozenset[str]
     body_bucket: int
+    body_len: int  # kept for verbose output; not part of the equality check
 
 
 def fail_inconclusive(reason: str) -> None:
@@ -70,38 +78,76 @@ def resolve(host: str) -> str:
 
 
 def http_probe(host_ip: str, sni: str, port: int, timeout: int) -> ProbeShape:
-    """Issue a GET / over TLS, return the (status, header-set, body-bucket).
+    """Issue a GET / over TLS to host_ip with SNI=sni.
 
-    `verify=False` because for the VPS probe we won't trust the chain — the
-    proxy presents whatever cert chain dest does, but the controller's cert
-    store may not match the chain dest uses. We're testing shape, not trust.
+    Returns (status, header-set, body-bucket). `verify=False` because for
+    the VPS probe we don't trust the chain — Reality presents whatever
+    dest does, but the runner's CA store may not match. We're testing
+    shape, not trust.
+
+    We open the socket manually so SNI is set explicitly via
+    `ctx.wrap_socket(server_hostname=...)`, decouple from the
+    HTTPSConnection's own SNI/CONNECT logic that would target host_ip.
     """
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_alpn_protocols(["http/1.1"])  # force h1 so the response is a
+    # plain http.client.HTTPResponse — h2 would need hyper/h2 lib.
 
-    conn = http.client.HTTPSConnection(
-        host_ip,
-        port=port,
-        timeout=timeout,
-        context=ctx,
-    )
-    # server_hostname must be set on the underlying socket for SNI.
-    conn.host = sni  # so that the HTTP `Host:` header matches dest
-    conn._tunnel_host = None  # avoid CONNECT path
+    sock = socket.create_connection((host_ip, port), timeout=timeout)
     try:
-        # Open the socket manually so we can set SNI properly.
-        sock = socket.create_connection((host_ip, port), timeout=timeout)
         wrapped = ctx.wrap_socket(sock, server_hostname=sni)
+        # Hand the already-wrapped socket to http.client.
+        conn = http.client.HTTPSConnection(host_ip, port=port, timeout=timeout)
         conn.sock = wrapped
-        conn.request("GET", "/", headers={"Host": sni, "User-Agent": "stealth-probe/0.4"})
-        resp = conn.getresponse()
-        body = resp.read()
-        headers = frozenset(k.lower() for k, _ in resp.getheaders()) - VARIABLE_HEADERS
-        bucket = bisect.bisect_right(BODY_BUCKETS, len(body))
-        return ProbeShape(status=resp.status, headers=headers, body_bucket=bucket)
+        try:
+            conn.request("GET", "/", headers={
+                "Host": sni,
+                "User-Agent": "stealth-probe/0.4",
+                "Accept": "*/*",
+                "Connection": "close",
+            })
+            resp = conn.getresponse()
+            body = resp.read()
+            headers_keys = frozenset(k.lower() for k, _ in resp.getheaders())
+            stable = headers_keys - VARIABLE_HEADERS
+            bucket = bisect.bisect_right(BODY_BUCKETS, len(body))
+            return ProbeShape(
+                status=resp.status,
+                headers=stable,
+                body_bucket=bucket,
+                body_len=len(body),
+            )
+        finally:
+            conn.close()
     finally:
-        conn.close()
+        # `conn.close()` already closes the underlying socket; this is
+        # defensive in case the wrap_socket raised before assignment.
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def diff_shapes(baseline: ProbeShape, probe: ProbeShape) -> list[str]:
+    why: list[str] = []
+    if baseline.status != probe.status:
+        why.append(f"status baseline={baseline.status} probe={probe.status}")
+    if baseline.headers != probe.headers:
+        extra = sorted(probe.headers - baseline.headers)
+        missing = sorted(baseline.headers - probe.headers)
+        if extra:
+            why.append(f"extra_headers={extra}")
+        if missing:
+            why.append(f"missing_headers={missing}")
+    if baseline.body_bucket != probe.body_bucket:
+        why.append(
+            f"body_bucket baseline={baseline.body_bucket} "
+            f"(len~{baseline.body_len}) probe={probe.body_bucket} "
+            f"(len~{probe.body_len})"
+        )
+    return why
 
 
 def main() -> int:
@@ -118,47 +164,42 @@ def main() -> int:
     target_ip = resolve(target)
     dest_ip = resolve(dest)
 
-    # Exercise the dest side so we know the baseline shape captures from
-    # the controller's network. If this fails the test is inconclusive
-    # (probably MITM on the controller's network — see scenario doc).
     try:
         baseline = http_probe(dest_ip, sni=dest, port=port, timeout=timeout)
     except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
-        fail_inconclusive(f"baseline probe to dest failed: {exc}")
-        return 2  # for the type checker
+        fail_inconclusive(f"baseline probe to dest {dest_ip}:{port} failed: {exc}")
+        return 2
 
-    # Scaffold-mode contract: don't probe the VPS yet — the comparison logic
-    # below is implemented but the test treats v0.4.0 as inconclusive until
-    # we've validated it against real deployments in v0.5.
-    print(
-        "SCAFFOLD: active_probe "
-        f"baseline=(status={baseline.status} "
-        f"headers={len(baseline.headers)} body_bucket={baseline.body_bucket}) "
-        f"dest={dest}({dest_ip}) target={target}({target_ip})"
-    )
-    print(
-        "SCAFFOLD: VPS-side probe + comparison ready but unvalidated against "
-        "real deploys. Exiting 2 (inconclusive)."
-    )
+    try:
+        probe = http_probe(target_ip, sni=dest, port=port, timeout=timeout)
+    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+        fail_inconclusive(f"probe to vps {target_ip}:{port} failed: {exc}")
+        return 2
 
-    # The comparison would be (already-written for v0.5):
-    #
-    #   probe = http_probe(target_ip, sni=dest, port=port, timeout=timeout)
-    #   why = []
-    #   if probe.status != baseline.status:
-    #       why.append(f"status baseline={baseline.status} probe={probe.status}")
-    #   if probe.headers != baseline.headers:
-    #       extra = sorted(probe.headers - baseline.headers)
-    #       missing = sorted(baseline.headers - probe.headers)
-    #       if extra:   why.append(f"extra_headers={extra}")
-    #       if missing: why.append(f"missing_headers={missing}")
-    #   if probe.body_bucket != baseline.body_bucket:
-    #       why.append(f"body_bucket baseline={baseline.body_bucket} probe={probe.body_bucket}")
-    #   if why:
-    #       for line in why: print(f"WHY: {line}")
-    #       return 1
-    #   return 0
-    return 2
+    why = diff_shapes(baseline, probe)
+
+    if why:
+        print(
+            f"FAIL: response shape diverges "
+            f"[dest={dest}({dest_ip}) vps={target}({target_ip})]"
+        )
+        for line in why:
+            print(f"WHY: {line}")
+        if os.environ.get("PROBE_VERBOSE"):
+            print("--- baseline ---")
+            print(f"  status={baseline.status} body_len={baseline.body_len}")
+            print(f"  headers={sorted(baseline.headers)}")
+            print("--- probe ---")
+            print(f"  status={probe.status} body_len={probe.body_len}")
+            print(f"  headers={sorted(probe.headers)}")
+        return 1
+
+    print(
+        f"OK [status={probe.status} headers={len(probe.headers)} "
+        f"body_bucket={probe.body_bucket}] "
+        f"dest={dest}({dest_ip}) vps={target}({target_ip})"
+    )
+    return 0
 
 
 if __name__ == "__main__":

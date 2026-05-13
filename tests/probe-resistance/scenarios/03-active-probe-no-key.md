@@ -56,20 +56,20 @@ But the *set* of headers a CDN returns is extremely stable. A 7-header response 
 
 `scripts/active_probe.py`:
 
-**v0.4.0 (scaffold):**
-- Parses env vars, resolves both endpoints, prints what it would compare.
-- Sends a real HTTP/1.1 GET to dest to validate the controller-side baseline works.
-- Exits 2 (inconclusive) because the VPS side isn't actually exercised yet.
-- Contract for v0.5 / v1.0 is locked.
+**v0.4.1 (runnable):**
 
-**v0.5 (planned):**
-- Use `httpx` with `verify=False` for the VPS probe (we present a cert chain we trust, but the test runner doesn't load our CA).
-- Body-bucket = `bisect.bisect_right([1024, 10240, 102400, 1048576], len(body))`.
-- Header-set comparison after lowercasing keys, filtering known-variable headers (`Date`, `Set-Cookie`, common CDN trace headers).
+- Opens a TLS connection via stdlib `ssl.SSLContext`, force-negotiates ALPN `http/1.1` (so `http.client.HTTPResponse` parses the response — h2 would need a third-party h2 lib), then issues `GET /` with `Host: $dest`, `Connection: close`.
+- Captures status code, lower-cased header keys (minus the VARIABLE_HEADERS set: `date`, `set-cookie`, CDN trace headers like `cf-ray` / `x-amz-cf-id`, etc.), and a body-size bucket via `bisect_right([1024, 10240, 102400, 1048576], len(body))`.
+- Compares status, header-set, and body-bucket. Exits 0 on collision, 1 on divergence with one `WHY:` per field, 2 on inconclusive.
+- `PROBE_VERBOSE=1` dumps full status + header set + body length for both sides.
+
+The h1-only forcing is deliberate: we lose the ability to inspect HTTP/2 frame structure here, but get a stable stdlib-only probe. The h2 frame check is v1.0 territory (needs `h2` lib or raw frame parsing).
 
 **v1.0 (planned):**
-- HTTP/2 path: open via ALPN h2, read first SETTINGS frame, compare the parameter set against dest's.
-- Connection close pattern: graceful `close_notify` vs RST vs FIN — captured via raw socket and compared.
+
+- HTTP/2 path: open via ALPN `h2`, read first SETTINGS frame, compare the SETTINGS parameter set against dest's via the `h2` lib.
+- Connection-close pattern: graceful `close_notify` vs RST vs FIN — captured via raw socket and compared.
+- Add a no-SNI variant for the same `GET /` (current probe always sets SNI = dest).
 
 ## Failure modes (expected once implemented)
 
