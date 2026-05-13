@@ -15,6 +15,11 @@
   ansible.builtin.include_tasks: kernel.yml
   tags: [kernel, sysctl]
 
+- name: Install and configure 3X-UI panel
+  ansible.builtin.include_tasks: panel.yml
+  when: stealth_vps_panel_enabled | bool
+  tags: [panel, 3xui]
+
 # Sprint 1 follow-ups — uncomment each as the file is added:
 #
 # - name: Install and configure Xray-core (Reality)
@@ -26,8 +31,3 @@
 #   ansible.builtin.include_tasks: hysteria.yml
 #   when: stealth_vps_hysteria_enabled | bool
 #   tags: [hysteria, hysteria2]
-#
-# - name: Install and configure 3X-UI panel
-#   ansible.builtin.include_tasks: panel.yml
-#   when: stealth_vps_panel_enabled | bool
-#   tags: [panel, 3xui]

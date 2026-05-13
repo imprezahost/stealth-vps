@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project scaffolding (directory layout, license, contribution workflow)
 - Placeholder structure for Ansible roles, cloud-init, install script, observability, docs, tests
 - `stealth-vps` role: kernel tuning task (`tasks/kernel.yml`) — loads `tcp_bbr`, renders `/etc/sysctl.d/99-stealth.conf`, asserts BBR + fq active post-apply
+- `stealth-vps` role: 3X-UI panel install task (`tasks/panel.yml`) — pinned to `v2.9.4`, generates per-host random port/username/password/webBasePath, persists them in `/etc/stealth-vps/panel.state.yml`, applies via `x-ui setting`, smoke-tests the HTTP endpoint, and writes `/root/stealth-vps-credentials.txt`
 - `ansible/requirements.yml` declaring `community.general` and `ansible.posix` collection dependencies
 - `docs/development.md` documenting the controller-on-laptop (Path A) and controller-on-VPS (Path B) iteration loops
 

@@ -22,9 +22,21 @@ stealth_vps_hysteria_port_hopping: true
 
 # ---- 3X-UI panel ----
 stealth_vps_panel_enabled: true
-# Panel port and path are randomized by default; pin them only if you must.
-stealth_vps_panel_port: null   # null = randomize
-stealth_vps_panel_path: null   # null = randomize
+# Pinned to the last 2.x stable; bump after the 3.x line settles. Used in
+# the upstream tarball URL — must match a release tag at
+# https://github.com/MHSanaei/3x-ui/releases.
+stealth_vps_panel_version: "v2.9.4"
+# Install layout. Override only if you really need to.
+stealth_vps_panel_dir: /usr/local/x-ui
+stealth_vps_panel_state_dir: /etc/stealth-vps
+# Port range for the panel — kept disjoint from the Reality / Hysteria2
+# ranges so the random pick can never collide. Override the single fields
+# below to pin instead.
+stealth_vps_panel_port_min: 30000
+stealth_vps_panel_port_max: 39999
+# Where to record generated panel credentials and (later) connection URIs
+# for the operator. chmod 600.
+stealth_vps_credentials_file: /root/stealth-vps-credentials.txt
 
 # ---- Kernel tuning ----
 # Enable BBR congestion control + fq qdisc. Disable only when the kernel

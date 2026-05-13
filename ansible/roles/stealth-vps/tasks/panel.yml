@@ -1,0 +1,213 @@
+---
+# 3X-UI panel install + non-interactive configuration.
+#
+# Reproduces what `MHSanaei/3x-ui/install.sh` does, but split into
+# idempotent Ansible tasks. Generated credentials persist in
+# {{ stealth_vps_panel_state_dir }}/panel.state.yml across re-runs so
+# the panel URL / login does not rotate on every apply.
+
+# --- Sanity ---------------------------------------------------------------
+
+- name: Assert supported CPU architecture (v0.1.0 ships amd64 only)
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.architecture == 'x86_64'
+    fail_msg: >-
+      stealth-vps panel currently supports x86_64 only.
+      Architecture detected: {{ ansible_facts.architecture }}.
+      arm64 / armv7 / armv6 / 386 are on the roadmap.
+  tags: [panel, 3xui]
+
+- name: Install panel runtime dependencies
+  ansible.builtin.apt:
+    name:
+      - cron
+      - curl
+      - tar
+      - tzdata
+      - socat
+      - ca-certificates
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [panel, 3xui]
+
+# --- State (generate credentials once, reuse forever) ---------------------
+
+- name: Ensure stealth-vps state directory exists
+  ansible.builtin.file:
+    path: "{{ stealth_vps_panel_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [panel, 3xui]
+
+- name: Probe existing panel state file
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+  register: stealth_vps_panel_state_stat
+  tags: [panel, 3xui]
+
+- name: Load existing panel state when present
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    name: stealth_vps_panel_state
+  when: stealth_vps_panel_state_stat.stat.exists
+  tags: [panel, 3xui]
+
+- name: Generate new panel state when absent (first run only)
+  ansible.builtin.set_fact:
+    stealth_vps_panel_state:
+      port: "{{ range(stealth_vps_panel_port_min, stealth_vps_panel_port_max + 1) | random }}"
+      username: "{{ lookup('password', '/dev/null length=10 chars=ascii_lowercase,digits') }}"
+      password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+      web_base_path: "{{ lookup('password', '/dev/null length=16 chars=ascii_lowercase,digits') }}"
+  when: not stealth_vps_panel_state_stat.stat.exists
+  tags: [panel, 3xui]
+
+- name: Persist panel state to disk (root-only, idempotent across reruns)
+  ansible.builtin.copy:
+    content: "{{ stealth_vps_panel_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+    dest: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    owner: root
+    group: root
+    mode: '0600'
+  when: not stealth_vps_panel_state_stat.stat.exists
+  register: stealth_vps_panel_state_persisted
+  tags: [panel, 3xui]
+
+# --- Install / upgrade the panel binary ----------------------------------
+
+- name: Probe installed 3X-UI version
+  ansible.builtin.command: "{{ stealth_vps_panel_dir }}/x-ui -v"
+  register: stealth_vps_panel_installed_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [panel, 3xui]
+
+- name: Install or upgrade 3X-UI
+  when: >-
+    stealth_vps_panel_installed_version.rc != 0
+    or stealth_vps_panel_installed_version.stdout | trim
+       != (stealth_vps_panel_version | regex_replace('^v', ''))
+  block:
+
+    - name: Download 3X-UI tarball ({{ stealth_vps_panel_version }})
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/MHSanaei/3x-ui/releases/download/{{ stealth_vps_panel_version
+          }}/x-ui-linux-amd64.tar.gz
+        dest: "/tmp/x-ui-{{ stealth_vps_panel_version }}.tar.gz"
+        mode: '0644'
+        force: false
+
+    - name: Stop x-ui if it is running (before swap)
+      ansible.builtin.systemd:
+        name: x-ui
+        state: stopped
+      failed_when: false
+
+    - name: Extract 3X-UI into /usr/local/
+      ansible.builtin.unarchive:
+        src: "/tmp/x-ui-{{ stealth_vps_panel_version }}.tar.gz"
+        dest: /usr/local/
+        remote_src: true
+
+    - name: Set executable bits on x-ui binaries
+      ansible.builtin.file:
+        path: "{{ stealth_vps_panel_dir }}/{{ item }}"
+        mode: '0755'
+      loop:
+        - x-ui
+        - x-ui.sh
+        - bin/xray-linux-amd64
+
+    - name: Install x-ui control symlink
+      ansible.builtin.file:
+        src: "{{ stealth_vps_panel_dir }}/x-ui.sh"
+        dest: /usr/bin/x-ui
+        state: link
+        force: true
+
+    - name: Install x-ui systemd unit (Debian flavor)
+      ansible.builtin.copy:
+        src: "{{ stealth_vps_panel_dir }}/x-ui.service.debian"
+        dest: /etc/systemd/system/x-ui.service
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart x-ui
+
+    - name: systemd daemon-reload after unit install
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Apply pending db migrations
+      ansible.builtin.command: "{{ stealth_vps_panel_dir }}/x-ui migrate"
+      changed_when: false
+
+    - name: Drop the source tarball
+      ansible.builtin.file:
+        path: "/tmp/x-ui-{{ stealth_vps_panel_version }}.tar.gz"
+        state: absent
+  tags: [panel, 3xui]
+
+# --- Apply configured settings -------------------------------------------
+
+- name: Apply panel settings (port, credentials, base path)
+  ansible.builtin.command:
+    argv:
+      - "{{ stealth_vps_panel_dir }}/x-ui"
+      - setting
+      - -port
+      - "{{ stealth_vps_panel_state.port }}"
+      - -username
+      - "{{ stealth_vps_panel_state.username }}"
+      - -password
+      - "{{ stealth_vps_panel_state.password }}"
+      - -webBasePath
+      - "/{{ stealth_vps_panel_state.web_base_path }}/"
+  changed_when: stealth_vps_panel_state_persisted.changed | default(false)
+  notify: Restart x-ui
+  tags: [panel, 3xui]
+
+# --- Service + smoke test ------------------------------------------------
+
+- name: Flush handlers so x-ui restart picks up new settings before verify
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start x-ui service
+  ansible.builtin.systemd:
+    name: x-ui
+    state: started
+    enabled: true
+  tags: [panel, 3xui]
+
+- name: Wait until panel port is listening
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ stealth_vps_panel_state.port }}"
+    timeout: 30
+  tags: [panel, 3xui]
+
+- name: Smoke-test panel HTTP endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ stealth_vps_panel_state.port }}/{{ stealth_vps_panel_state.web_base_path }}/"
+    status_code: [200, 301, 302, 307]
+    return_content: false
+  tags: [panel, 3xui]
+
+# --- Credentials file ----------------------------------------------------
+
+- name: Render operator credentials file
+  ansible.builtin.template:
+    src: stealth-vps-credentials.txt.j2
+    dest: "{{ stealth_vps_credentials_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  tags: [panel, 3xui]
