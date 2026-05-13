@@ -71,7 +71,7 @@
 - name: Show unattended-upgrades dry-run summary (origins + candidates)
   ansible.builtin.debug:
     msg: >-
-      {{ stealth_hardening_uupg_dry.stdout_lines
-         | select('search', 'Allowed origins|packages that will be|kept back|Checking')
-         | list | unique | first(20) }}
+      {{ (stealth_hardening_uupg_dry.stdout_lines
+          | select('search', 'Allowed origins|packages that will be|kept back|Checking')
+          | list | unique)[:20] }}
   tags: [updates, patches, hardening]
