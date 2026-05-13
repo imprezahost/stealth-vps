@@ -1,0 +1,41 @@
+#cloud-config
+# stealth-vps cloud-init bootstrap (rendered by terraform/modules/stealth-vps).
+#
+# Generated for stealth-vps ${stealth_version}.
+# Do not edit on the running VPS — re-render via `terraform apply`.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ansible
+  - git
+  - python3-pip
+  - ca-certificates
+
+ssh_authorized_keys:
+  - ${ssh_public_key}
+
+write_files:
+  - path: /etc/stealth-vps/extra-vars.yml
+    permissions: "0600"
+    owner: root:root
+    content: |
+${indent(6, extra_vars_yaml)}
+
+runcmd:
+  - mkdir -p ${log_dir}
+  - |
+    ansible-pull \
+      -U ${repo_url} \
+      -C ${stealth_version} \
+      -i 'localhost,' \
+      -c local \
+      -e "@/etc/stealth-vps/extra-vars.yml" \
+      ansible/playbooks/site.yml \
+      2>&1 | tee ${log_dir}/bootstrap.log
+
+final_message: |
+  stealth-vps ${stealth_version} cloud-init bootstrap finished.
+  Logs: ${log_dir}/bootstrap.log
+  Panel and connection details: /root/stealth-vps-credentials.txt
