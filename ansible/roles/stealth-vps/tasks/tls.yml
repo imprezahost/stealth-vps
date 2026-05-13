@@ -68,11 +68,13 @@
       changed_when: false
 
     - name: Ensure TLS directory exists
+      # Don't pin owner/group here — hysteria.yml chgrps this to
+      # root:hysteria after the hysteria service user exists. If we
+      # pinned group:root here too, the two tasks would flip-flop on
+      # every apply and break idempotency.
       ansible.builtin.file:
         path: "{{ stealth_vps_tls_dir }}"
         state: directory
-        owner: root
-        group: root
         mode: '0750'
 
     - name: Probe existing live cert
@@ -100,6 +102,11 @@
         and 'Domains not changed' not in (stealth_vps_acme_issue.stdout | default(''))
 
     - name: Install cert into the TLS dir + register reload command for renewals
+      # acme.sh --install-cert always rewrites the destination files and
+      # always runs the reloadcmd (even if nothing actually changed), so
+      # we can't rely on its stdout for change detection. Gate on a
+      # marker file keyed by domain — re-run is fine if the domain
+      # changes (different marker) or after a manual `rm` of the marker.
       ansible.builtin.command:
         cmd: >-
           /root/.acme.sh/acme.sh --install-cert
@@ -107,17 +114,21 @@
           --fullchain-file {{ stealth_vps_tls_dir }}/fullchain.pem
           --key-file       {{ stealth_vps_tls_dir }}/privkey.pem
           --reloadcmd "systemctl restart hysteria-server 2>/dev/null || true; systemctl restart x-ui 2>/dev/null || true"
+        creates: "{{ stealth_vps_tls_dir }}/.installed-{{ stealth_vps_domain }}"
       register: stealth_vps_acme_install
-      changed_when: >-
-        'Installing fullchain' in (stealth_vps_acme_install.stdout | default(''))
-        or 'Installing key' in (stealth_vps_acme_install.stdout | default(''))
-        or 'Run reload cmd' in (stealth_vps_acme_install.stdout | default(''))
 
-    - name: Set cert + key permissions (root-readable; key is 0640 for service groups later)
-      ansible.builtin.file:
-        path: "{{ item.path }}"
+    - name: Drop install-cert marker
+      ansible.builtin.copy:
+        content: "Installed by Ansible for {{ stealth_vps_domain }}.\n"
+        dest: "{{ stealth_vps_tls_dir }}/.installed-{{ stealth_vps_domain }}"
         owner: root
         group: root
+        mode: '0644'
+      when: stealth_vps_acme_install is changed
+
+    - name: Enforce cert file modes (owner/group left for hysteria.yml)
+      ansible.builtin.file:
+        path: "{{ item.path }}"
         mode: "{{ item.mode }}"
       loop:
         - { path: "{{ stealth_vps_tls_dir }}/fullchain.pem", mode: '0644' }
