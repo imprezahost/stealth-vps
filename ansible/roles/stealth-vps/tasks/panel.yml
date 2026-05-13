@@ -179,6 +179,14 @@
   notify: Restart x-ui
   tags: [panel, 3xui]
 
+- name: Read the cert currently bound to the panel
+  ansible.builtin.command:
+    cmd: "{{ stealth_vps_panel_dir }}/x-ui setting -getCert true"
+  register: stealth_vps_panel_current_cert
+  changed_when: false
+  when: stealth_vps_domain
+  tags: [panel, 3xui]
+
 - name: Bind the Let's Encrypt cert to the 3X-UI panel (HTTPS)
   ansible.builtin.command:
     argv:
@@ -188,11 +196,14 @@
       - "{{ stealth_vps_tls_dir }}/fullchain.pem"
       - -webCertKey
       - "{{ stealth_vps_tls_dir }}/privkey.pem"
-  when: stealth_vps_domain
-  # `x-ui cert` is idempotent (no-op when the cert paths already match
-  # what's in the DB), but it does not give us a clean changed signal
-  # — gate the restart on whether we configured the cert in this run.
-  changed_when: stealth_vps_panel_state_persisted.changed | default(false)
+  # Only bind (and notify restart) when the DB doesn't already point at
+  # our managed cert paths. `x-ui cert` itself is idempotent but doesn't
+  # report change, so we gate on the getCert diff.
+  when:
+    - stealth_vps_domain
+    - (stealth_vps_tls_dir + '/fullchain.pem')
+        not in (stealth_vps_panel_current_cert.stdout | default(''))
+  changed_when: true
   notify: Restart x-ui
   tags: [panel, 3xui]
 
