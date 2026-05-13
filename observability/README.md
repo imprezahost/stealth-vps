@@ -54,7 +54,31 @@ stealth_hardening_ufw_extra_ports:
 
 ## Dashboards
 
-For now, import the public **Node Exporter Full** dashboard (Grafana.com ID `1860`) — it covers everything `prometheus-node-exporter` reports. A stealth-vps-specific dashboard (panel inbound stats, Hysteria2 metrics, fail2ban ban rate) lands in v0.3.0.
+Two dashboards work together:
+
+- **Host metrics** — import Grafana.com ID **`1860`** (Node Exporter Full). Covers everything `prometheus-node-exporter` reports out of the box.
+- **stealth-vps protocol metrics** — import [`grafana/dashboards/stealth-vps-overview.json`](grafana/dashboards/stealth-vps-overview.json) from this repo. Panels for Reality inbound up/down, top-N per-client traffic, Hysteria2 tx/rx per client, online clients, and scrape-error indicators.
+
+Both share the same scrape target (`:9100`) — the stealth-vps panel reads the metrics that `stealth-vps-metrics-update.py` writes into the node_exporter textfile collector dir.
+
+### Importing the stealth-vps overview
+
+1. Grafana → Dashboards → New → Import → Upload JSON file → pick `stealth-vps-overview.json`.
+2. Pick the Prometheus datasource that scrapes your stealth-vps fleet.
+3. The `Host` variable lists all instances reporting `stealth_vps_last_scrape_timestamp` — `$__all` works for fleet-wide views.
+
+### Metric reference
+
+| Series | Type | Source | Labels |
+|---|---|---|---|
+| `stealth_vps_last_scrape_timestamp` | gauge | updater itself | `instance` |
+| `stealth_vps_panel_scrape_error` | gauge | updater (3X-UI API call) | `instance` |
+| `stealth_vps_hysteria_scrape_error` | gauge | updater (Hysteria2 API call) | `instance` |
+| `stealth_vps_inbound_{up,down}_bytes` | counter | 3X-UI panel REST API | `inbound_id`, `remark`, `protocol`, `port` |
+| `stealth_vps_inbound_enabled` | gauge | 3X-UI panel | same |
+| `stealth_vps_client_{up,down}_bytes` | counter | 3X-UI panel `clientStats[]` | inbound labels + `client_email` |
+| `stealth_vps_hysteria_online_clients` | gauge | Hysteria2 `/online` | `instance` |
+| `stealth_vps_hysteria_{tx,rx}_bytes` | counter | Hysteria2 `/traffic` | `client_id` |
 
 ## What's not in scope yet
 
