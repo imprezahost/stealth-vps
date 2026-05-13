@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.4.2 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI; `stealth-vps/gitlab-ci` status reports back. Probe-resistance test suite: **4 of 5 scenarios runnable** (HTTPS direct probe, TLS shape comparison, active probe, port-scan baseline) under `tests/probe-resistance/`. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.5.0 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI; `stealth-vps/gitlab-ci` status reports back. Probe-resistance test suite: **4 of 5 scenarios runnable** (HTTPS direct probe, TLS shape comparison, active probe, port-scan baseline) under `tests/probe-resistance/`. **New in v0.5.0**: provider-agnostic Terraform module under `terraform/modules/stealth-vps/` + Hetzner Cloud worked example. See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -47,14 +47,14 @@ Pick the one that matches your workflow. All four apply the same configuration.
 For a fresh VPS where you just want it done:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.2/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.0/scripts/install.sh | bash
 ```
 
-This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.4.2 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
+This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.5.0 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.4.2/scripts/install.sh \
-  | STEALTH_VERSION=v0.4.2 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.0/scripts/install.sh \
+  | STEALTH_VERSION=v0.5.0 bash
 ```
 
 ### 2. Ansible (recommended for repeatable use)
@@ -125,9 +125,10 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 | v0.3.0 | Per-protocol Prometheus metrics + Grafana dashboard + alert rules, multi-platform Molecule matrix (Debian 12 + Ubuntu 22.04/24.04), source-IP filter for `:9100`, iOS + macOS full walkthroughs | shipped 2026-05-13 |
 | v0.4.0 | arm64 packaging (Oracle Ampere / Graviton / Hetzner CAX), reverse-mirror automation (GitHub PR → GitLab CI → GitHub commit status), probe-resistance test suite scaffolding (5 scenarios, 2 runnable scripts) | shipped 2026-05-13 |
 | v0.4.1 | Probe-resistance scripts 02 + 03 filled in (7-feature TLS shape comparison; HTTP response-shape comparison); 4 of 5 scenarios now runnable end-to-end | shipped 2026-05-13 |
-| **v0.4.2** | Hotfix: replace dead `get.imprezahost.com/stealth` URL with release-pinned raw GitHub URL; bump `STEALTH_VERSION` default `v0.1.0 → v0.4.2` so one-shot install actually deploys the current stack | **shipped 2026-05-13** |
+| v0.4.2 | Hotfix: replace dead `get.imprezahost.com/stealth` URL with release-pinned raw GitHub URL; bump `STEALTH_VERSION` default `v0.1.0 → v0.4.2` so one-shot install actually deploys the current stack | shipped 2026-05-13 |
 | v0.4.3 | Pen-tested iOS + macOS validation pass, zh-CN README rewrite, GitLab shell-executor runner fix | planned |
-| v0.5.0 | True byte-level JA3/JA4 (scapy/tlslite-ng + golden snapshots), HTTP/2 frame comparison, Terraform module (provider-agnostic), Pulumi reference | planned |
+| **v0.5.0** | Provider-agnostic Terraform module (`terraform/modules/stealth-vps/`) + Hetzner Cloud worked example; cloud-init drift fix (`v0.1.0 → v0.5.0`); README "Three ways" → "Four" with the Terraform path | **shipped 2026-05-13** |
+| v0.5.x | Byte-level JA3/JA4 + JA3S/JA4S (scapy/tlslite-ng + golden snapshots), HTTP/2 SETTINGS-frame comparison, more Terraform examples (AWS / DigitalOcean / Vultr / Proxmox), Pulumi reference | planned |
 | v1.0.0 | Probe-resistance CI suite (full), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.

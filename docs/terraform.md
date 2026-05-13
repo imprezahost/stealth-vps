@@ -80,7 +80,7 @@ The module has no `required_providers`. Drop it into any Terraform config:
 module "stealth_vps_bootstrap" {
   source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.0"
 
-  stealth_version = "v0.4.2"
+  stealth_version = "v0.5.0"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   ssh_port        = 22550
   domain          = "vpn.example.com"

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.x — later sprints)
+- True byte-level JA3/JA4 + JA3S/JA4S in `tls_fingerprint_compare.py` (scapy or tlslite-ng) with golden snapshots per dest.
+- HTTP/2 SETTINGS-frame comparison in `active_probe.py`.
+- Additional Terraform examples (AWS / DigitalOcean / Vultr / Proxmox).
+- Pulumi reference (same mechanism as Terraform, TypeScript/Python/Go instead of HCL).
+
+### Planned (v0.4.3 — still blocked on externals)
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 / v0.4.2 / v0.5.0 — needs iOS + macOS hardware in the QA rotation)
+- zh-CN README rewrite by a native speaker (deferred — needs reviewer)
+- Fix the GitLab shell-executor runner so `lint` + `molecule` + `mirror-to-github` jobs actually run on push instead of failing with "apt-get: Permission denied".
+
+## [0.5.0] - 2026-05-13
+
+Sixth tagged release. Introduces a fourth entry-point for stealth-vps: a **provider-agnostic Terraform module** under `terraform/modules/stealth-vps/`. The module generates the cloud-init `user_data` string from typed HCL inputs; the caller hands the string to whatever cloud provider's create-server resource they use. One end-to-end worked example (Hetzner Cloud, ARM `cax11` by default). The other three v0.5.0 roadmap items (byte-level JA3/JA4, HTTP/2 frame comparison, Pulumi reference) move to "later in v0.5.x".
+
 ### Added
 - **Terraform module** (`terraform/modules/stealth-vps/`) — provider-agnostic. Generates the cloud-init `user_data` string from typed HCL inputs (SSH key, ssh_port, domain, letsencrypt_email, reality_dest, reality_servernames, free-form `extra_role_vars`, repo_url, log_dir). Output is a string; the caller hands it to whatever provider's create-server resource they use. No `required_providers` block in the module — the user picks the cloud.
   - Input validation: `stealth_version` matches SemVer tag pattern, `ssh_public_key` starts with a supported key type, `ssh_port` is non-privileged, `letsencrypt_email` is email-shaped when non-empty.
@@ -16,18 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README "Three ways to use it" → "Four ways"** — Terraform path added as the IaC option; the other three (`install.sh`, raw Ansible, static cloud-init) stay unchanged.
 
 ### Fixed
-- **cloud-init/stealth-vps.yaml version drift** — same shape as the v0.4.2 install.sh fix: the static cloud-init still pinned `ansible-pull -C v0.1.0`, so anyone who pasted that YAML into a hypervisor's user-data field would have deployed the v0.1.0 stack. Bumped to `v0.4.2`. Comment also points at the new Terraform module for the dynamic variant.
+- **cloud-init/stealth-vps.yaml version drift** — same shape as the v0.4.2 install.sh fix: the static cloud-init still pinned `ansible-pull -C v0.1.0`, so anyone who pasted that YAML into a hypervisor's user-data field would have deployed the v0.1.0 stack. Bumped to `v0.5.0` (now matches the release tag). Comment also points at the new Terraform module for the dynamic variant.
+- **Self-pinning across all entry points** — `scripts/install.sh` URL + `STEALTH_VERSION` default, `cloud-init/stealth-vps.yaml` `ansible-pull -C` arg, `terraform/modules/stealth-vps` `stealth_version` default, and the Hetzner example all now reference `v0.5.0`. Fetching any entry point at the v0.5.0 tag deploys the v0.5.0 release.
 
-### Planned (v0.4.3)
-- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 / v0.4.2 — still needs iOS + macOS hardware in the QA rotation)
-- zh-CN README rewrite by a native speaker (deferred from v0.4.0 / v0.4.1 / v0.4.2 — still needs reviewer)
-- Fix the GitLab shell-executor runner so `lint` + `molecule` + `mirror-to-github` jobs actually run on push instead of failing with "apt-get: Permission denied" (infra-level dívida técnica since v0.1.0; release mirror is done manually for now).
-
-### Planned (later in v0.5.x)
-- True byte-level JA3/JA4 + JA3S/JA4S in `tls_fingerprint_compare.py` (scapy or tlslite-ng) with golden snapshots per dest.
-- HTTP/2 SETTINGS-frame comparison in `active_probe.py`.
-- Additional Terraform examples (AWS / DigitalOcean / Vultr / Proxmox).
-- Pulumi reference (same mechanism, different language).
+### Deferred to v0.5.x (later sprints)
+- Byte-level JA3/JA4 + JA3S/JA4S.
+- HTTP/2 SETTINGS-frame comparison.
+- AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
+- Pulumi reference.
 
 ## [0.4.2] - 2026-05-13
 
