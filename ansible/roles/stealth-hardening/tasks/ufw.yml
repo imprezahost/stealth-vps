@@ -78,9 +78,13 @@
   when: stealth_hardening_ufw_keep_ssh_port_22 | bool
   tags: [ufw, firewall, hardening]
 
-- name: Deny legacy SSH port 22 when transition is over
+- name: Remove the legacy SSH port 22 allow-rule when transition is over
+  # `delete: true` matches against the existing rule of the same kind.
+  # Earlier we used rule:deny + delete:true which silently no-ops because
+  # the rule we want to remove is `allow port:22 proto:tcp`. Default-deny
+  # already covers port 22 once this rule is gone.
   community.general.ufw:
-    rule: deny
+    rule: allow
     port: "22"
     proto: tcp
     delete: true
