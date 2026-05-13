@@ -159,7 +159,6 @@
       ansible.builtin.file:
         path: "/tmp/x-ui-{{ stealth_vps_panel_version }}.tar.gz"
         state: absent
-  tags: [panel, 3xui]
 
 # --- Apply configured settings -------------------------------------------
 
