@@ -22,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `stealth_vps_{cert,fail2ban}_scrape_error` gauges.
 - `observability/prometheus/alerts/stealth-vps.rules.yml` — Prometheus alert rules: cert expiry (warning at 7d, critical at 24h), scrape errors per upstream, scrape staleness, fail2ban ban-rate spike, currently-banned threshold, inbound traffic spike (3× baseline and >1 MB/s, by inbound). Drop the file into your central Prometheus `rule_files:` and reload.
 
+### Changed
+- `tests/molecule/default/molecule.yml` now converges + verifies the role against **three platforms in one scenario**: Debian 12, Ubuntu 22.04, Ubuntu 24.04 (all geerlingguy/docker-*-ansible images, systemd-in-docker). `inventory.host_vars` per-platform replaced with `group_vars: all` so the same opt-outs apply uniformly. The matrix runs in the existing `molecule` CI job; no extra runner config needed.
+
 ### Planned (still in v0.3.0)
 - Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
-- Multi-platform Molecule matrix (Ubuntu 22.04 / 24.04 alongside Debian 12)
 - Source-IP filter variant for `stealth_vps_observability_listen` exposure
 - zh-CN README rewrite by a native speaker
 
