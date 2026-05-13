@@ -179,6 +179,23 @@
   notify: Restart x-ui
   tags: [panel, 3xui]
 
+- name: Bind the Let's Encrypt cert to the 3X-UI panel (HTTPS)
+  ansible.builtin.command:
+    argv:
+      - "{{ stealth_vps_panel_dir }}/x-ui"
+      - cert
+      - -webCert
+      - "{{ stealth_vps_tls_dir }}/fullchain.pem"
+      - -webCertKey
+      - "{{ stealth_vps_tls_dir }}/privkey.pem"
+  when: stealth_vps_domain
+  # `x-ui cert` is idempotent (no-op when the cert paths already match
+  # what's in the DB), but it does not give us a clean changed signal
+  # — gate the restart on whether we configured the cert in this run.
+  changed_when: stealth_vps_panel_state_persisted.changed | default(false)
+  notify: Restart x-ui
+  tags: [panel, 3xui]
+
 # --- Service + smoke test ------------------------------------------------
 
 - name: Flush handlers so x-ui restart picks up new settings before verify
@@ -198,11 +215,18 @@
     timeout: 30
   tags: [panel, 3xui]
 
-- name: Smoke-test panel HTTP endpoint
+- name: Smoke-test panel endpoint (HTTPS when domain set, HTTP otherwise)
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ stealth_vps_panel_state.port }}/{{ stealth_vps_panel_state.web_base_path }}/"
+    url: >-
+      {{ ('https://' if stealth_vps_domain else 'http://')
+         + '127.0.0.1:' + (stealth_vps_panel_state.port | string)
+         + '/' + stealth_vps_panel_state.web_base_path + '/' }}
     status_code: [200, 301, 302, 307]
     return_content: false
+    # Loopback hits the cert as 127.0.0.1, which won't match the SAN
+    # for the public domain — disable cert verification on the local
+    # probe only. External clients still verify against the real CA.
+    validate_certs: false
   tags: [panel, 3xui]
 
 # --- Credentials file ----------------------------------------------------

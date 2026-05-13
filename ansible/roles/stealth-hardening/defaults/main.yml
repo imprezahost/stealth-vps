@@ -59,6 +59,13 @@ stealth_hardening_ufw_expose_panel: false
 #     - { port: 51820, proto: udp }
 stealth_hardening_ufw_extra_ports: []
 
+# Open port 80/tcp for the ACME HTTP-01 challenge. Required while the
+# stealth-vps role is provisioning a Let's Encrypt cert; acme.sh's
+# renewal cron also needs it open or renewals will fail silently.
+# Wire to stealth_vps_domain in inventory:
+#   stealth_hardening_ufw_acme_http_challenge: "{{ stealth_vps_domain is truthy }}"
+stealth_hardening_ufw_acme_http_challenge: false
+
 # ---- unattended-upgrades ----
 stealth_hardening_unattended_upgrades: true
 

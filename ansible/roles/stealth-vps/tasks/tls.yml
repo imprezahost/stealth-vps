@@ -1,0 +1,148 @@
+---
+# TLS — Let's Encrypt via acme.sh (HTTP-01 standalone).
+#
+# Only runs when stealth_vps_domain is set. Otherwise prints a note and
+# bails out — Hysteria2 will keep its self-signed cert and 3X-UI will
+# stay on HTTP, matching the v0.1.0 behaviour.
+#
+# Why acme.sh: the same client 3X-UI's upstream installer uses; shell
+# only (no Python deps); installs its own renewal cron. Standalone mode
+# means we don't need nginx/Caddy in front — acme.sh briefly listens
+# on port 80 to answer the challenge.
+#
+# UFW must allow inbound 80/tcp during issuance and renewal. The
+# hardening role's `stealth_hardening_ufw_acme_http_challenge` toggle
+# wires that up; if it's off, the issuance will time out.
+
+- name: TLS skipped (no stealth_vps_domain configured)
+  ansible.builtin.debug:
+    msg: >-
+      stealth_vps_domain is unset — Hysteria2 keeps its self-signed cert
+      and the 3X-UI panel stays on HTTP. To enable Let's Encrypt, set
+      stealth_vps_domain (and stealth_vps_tls_email) in inventory or via
+      -e on the command line, then re-apply with --tags tls.
+  when: not stealth_vps_domain
+  tags: [tls, acme]
+
+- name: Enable TLS via Let's Encrypt
+  when: stealth_vps_domain
+  tags: [tls, acme]
+  block:
+
+    - name: Assert TLS email is set
+      ansible.builtin.assert:
+        that: stealth_vps_tls_email | length > 0
+        fail_msg: >-
+          stealth_vps_tls_email is required when stealth_vps_domain is set.
+          Let's Encrypt rejects issuance without a contact email.
+
+    - name: Install acme.sh dependencies
+      ansible.builtin.apt:
+        name:
+          - curl
+          - socat
+          - cron
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Probe acme.sh installation
+      ansible.builtin.stat:
+        path: /root/.acme.sh/acme.sh
+      register: stealth_vps_acme_stat
+
+    - name: Install acme.sh (one-shot)
+      # The upstream installer drops itself in /root/.acme.sh/ and
+      # registers a daily cron. Curl-to-shell is the canonical entry
+      # point; pin to a tag if you need reproducibility.
+      ansible.builtin.shell: >-
+        curl -fsSL https://get.acme.sh
+        | sh -s email={{ stealth_vps_tls_email | quote }}
+      args:
+        creates: /root/.acme.sh/acme.sh
+      when: not stealth_vps_acme_stat.stat.exists
+
+    - name: Set Let's Encrypt as the default CA
+      ansible.builtin.command:
+        cmd: /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+      changed_when: false
+
+    - name: Ensure TLS directory exists
+      ansible.builtin.file:
+        path: "{{ stealth_vps_tls_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Probe existing live cert
+      ansible.builtin.stat:
+        path: "{{ stealth_vps_tls_dir }}/fullchain.pem"
+      register: stealth_vps_tls_cert_stat
+
+    - name: Issue cert via ACME HTTP-01 standalone
+      ansible.builtin.command:
+        cmd: >-
+          /root/.acme.sh/acme.sh --issue
+          --standalone --httpport {{ stealth_vps_acme_http_port }}
+          -d {{ stealth_vps_domain }}
+          --server letsencrypt
+          --keylength ec-256
+      when: not stealth_vps_tls_cert_stat.stat.exists
+      register: stealth_vps_acme_issue
+      # acme.sh returns rc=0 even when already issued recently — that's
+      # fine. Mark changed only when it actually wrote a new cert.
+      changed_when: >-
+        'Cert success' in (stealth_vps_acme_issue.stdout | default(''))
+        or 'Your cert is in' in (stealth_vps_acme_issue.stdout | default(''))
+      failed_when: >-
+        stealth_vps_acme_issue.rc != 0
+        and 'Domains not changed' not in (stealth_vps_acme_issue.stdout | default(''))
+
+    - name: Install cert into the TLS dir + register reload command for renewals
+      ansible.builtin.command:
+        cmd: >-
+          /root/.acme.sh/acme.sh --install-cert
+          -d {{ stealth_vps_domain }} --ecc
+          --fullchain-file {{ stealth_vps_tls_dir }}/fullchain.pem
+          --key-file       {{ stealth_vps_tls_dir }}/privkey.pem
+          --reloadcmd "systemctl restart hysteria-server 2>/dev/null || true; systemctl restart x-ui 2>/dev/null || true"
+      register: stealth_vps_acme_install
+      changed_when: >-
+        'Installing fullchain' in (stealth_vps_acme_install.stdout | default(''))
+        or 'Installing key' in (stealth_vps_acme_install.stdout | default(''))
+        or 'Run reload cmd' in (stealth_vps_acme_install.stdout | default(''))
+
+    - name: Set cert + key permissions (root-readable; key is 0640 for service groups later)
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ stealth_vps_tls_dir }}/fullchain.pem", mode: '0644' }
+        - { path: "{{ stealth_vps_tls_dir }}/privkey.pem", mode: '0640' }
+
+    - name: Verify acme.sh installed its renewal cron
+      ansible.builtin.command:
+        cmd: bash -c 'crontab -l 2>/dev/null | grep -q acme.sh'
+      register: stealth_vps_acme_cron
+      changed_when: false
+      failed_when: false
+
+    - name: Re-install cron if missing
+      ansible.builtin.command:
+        cmd: /root/.acme.sh/acme.sh --install-cronjob
+      when: stealth_vps_acme_cron.rc != 0
+
+    - name: Show issued cert details
+      ansible.builtin.command:
+        cmd: >-
+          openssl x509 -in {{ stealth_vps_tls_dir }}/fullchain.pem
+          -noout -subject -issuer -dates
+      register: stealth_vps_acme_cert_info
+      changed_when: false
+
+    - name: Cert summary
+      ansible.builtin.debug:
+        msg: "{{ stealth_vps_acme_cert_info.stdout_lines }}"

@@ -132,12 +132,25 @@
         mode: '0600'
       no_log: true
 
-# --- TLS self-signed cert -------------------------------------------------
+# --- TLS cert: Let's Encrypt (if domain set) or self-signed -------------
 
-- name: Probe existing TLS cert
+- name: Resolve effective TLS cert paths (LE vs self-signed)
+  ansible.builtin.set_fact:
+    stealth_vps_hysteria_effective_cert: >-
+      {{ (stealth_vps_tls_dir + '/fullchain.pem') if stealth_vps_domain
+         else (stealth_vps_hysteria_config_dir + '/cert.crt') }}
+    stealth_vps_hysteria_effective_key: >-
+      {{ (stealth_vps_tls_dir + '/privkey.pem') if stealth_vps_domain
+         else (stealth_vps_hysteria_config_dir + '/cert.key') }}
+    stealth_vps_hysteria_effective_sni: >-
+      {{ stealth_vps_domain if stealth_vps_domain else stealth_vps_hysteria_cert_cn }}
+  tags: [hysteria, hysteria2]
+
+- name: Probe self-signed cert (only relevant in no-domain mode)
   ansible.builtin.stat:
     path: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
   register: stealth_vps_hysteria_cert_stat
+  when: not stealth_vps_domain
   tags: [hysteria, hysteria2]
 
 - name: Generate self-signed TLS cert (CN={{ stealth_vps_hysteria_cert_cn }})
@@ -157,10 +170,12 @@
       - "{{ stealth_vps_hysteria_config_dir }}/cert.key"
       - -out
       - "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
-  when: not stealth_vps_hysteria_cert_stat.stat.exists
+  when:
+    - not stealth_vps_domain
+    - not stealth_vps_hysteria_cert_stat.stat.exists
   tags: [hysteria, hysteria2]
 
-- name: Set cert ownership + permissions
+- name: Set self-signed cert ownership + permissions
   ansible.builtin.file:
     path: "{{ item.path }}"
     owner: "{{ stealth_vps_hysteria_user }}"
@@ -169,6 +184,19 @@
   loop:
     - { path: "{{ stealth_vps_hysteria_config_dir }}/cert.crt", mode: '0644' }
     - { path: "{{ stealth_vps_hysteria_config_dir }}/cert.key", mode: '0600' }
+  when: not stealth_vps_domain
+  tags: [hysteria, hysteria2]
+
+- name: Grant hysteria user read access to the LE cert + key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: "{{ stealth_vps_hysteria_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ stealth_vps_tls_dir }}/fullchain.pem", mode: '0640' }
+    - { path: "{{ stealth_vps_tls_dir }}/privkey.pem", mode: '0640' }
+  when: stealth_vps_domain
   tags: [hysteria, hysteria2]
 
 # --- Install / upgrade the binary ----------------------------------------

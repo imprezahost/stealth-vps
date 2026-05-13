@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.2.0)
-- Let's Encrypt automation for Hysteria2 + 3X-UI panel (kill the self-signed `insecure=1` requirement)
+### Added
+- `stealth-vps` role: TLS / ACME task (`tasks/tls.yml`) — when `stealth_vps_domain` is set, issues a Let's Encrypt cert via `acme.sh --standalone --httpport 80`, persists it in `/etc/stealth-vps/tls/`, registers an auto-renewal `--reloadcmd` that restarts hysteria-server + x-ui. When the domain is unset, the role keeps the v0.1.0 self-signed cert path.
+- `stealth-vps` role: panel task now binds the Let's Encrypt cert to the 3X-UI panel via `x-ui cert -webCert -webCertKey` when a domain is configured (panel serves HTTPS).
+- `stealth-vps` role: hysteria task picks the right cert + SNI at apply time (Let's Encrypt fullchain when `stealth_vps_domain` is set; bing.com self-signed otherwise).
+- `stealth-hardening` role: ufw task gains the `stealth_hardening_ufw_acme_http_challenge` toggle that opens port 80/tcp for HTTP-01 challenges and renewals.
+- Operator credentials file now emits `https://` panel URLs and drops `insecure=1` from the Hysteria2 URI when TLS is real.
+
+### Planned (still in v0.2.0)
 - Spamhaus DROP/EDROP via ipset + UFW (modern replacement for legacy `hosts.deny`)
 - Hysteria2 port hopping (DNAT range rules)
 - Molecule integration test scenario

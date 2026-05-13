@@ -15,6 +15,10 @@
   ansible.builtin.include_tasks: kernel.yml
   tags: [kernel, sysctl]
 
+- name: Provision TLS cert (Let's Encrypt) when a domain is configured
+  ansible.builtin.include_tasks: tls.yml
+  tags: [tls, acme]
+
 - name: Install and configure 3X-UI panel
   ansible.builtin.include_tasks: panel.yml
   when: stealth_vps_panel_enabled | bool
