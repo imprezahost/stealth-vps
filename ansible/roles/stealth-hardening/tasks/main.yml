@@ -14,12 +14,10 @@
   ansible.builtin.include_tasks: ssh.yml
   tags: [ssh, hardening]
 
-# Sprint 2 follow-ups — uncomment each as the file is added:
-#
-# - name: Configure UFW firewall
-#   ansible.builtin.include_tasks: ufw.yml
-#   when: stealth_hardening_ufw_enabled | bool
-#   tags: [ufw, firewall, hardening]
+- name: Configure UFW firewall
+  ansible.builtin.include_tasks: ufw.yml
+  when: stealth_hardening_ufw_enabled | bool
+  tags: [ufw, firewall, hardening]
 #
 # - name: Configure fail2ban (including working 3X-UI jail)
 #   ansible.builtin.include_tasks: fail2ban.yml

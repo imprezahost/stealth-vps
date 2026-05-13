@@ -39,8 +39,18 @@ stealth_hardening_fail2ban_jails:
 stealth_hardening_ufw_enabled: true
 stealth_hardening_ufw_default_incoming: deny
 stealth_hardening_ufw_default_outgoing: allow
-stealth_hardening_ufw_allow_ports:
-  - "{{ stealth_hardening_ssh_port }}"
+# Whether to keep port 22 open while we transition. Same toggle as the SSH
+# block: set false in a follow-up apply to remove the legacy listener.
+stealth_hardening_ufw_keep_ssh_port_22: "{{ stealth_hardening_ssh_legacy_port_enabled }}"
+# Expose the 3X-UI panel to the public internet. Default false: operator
+# must `ssh -L` tunnel to the panel until TLS + admin VPN land.
+stealth_hardening_ufw_expose_panel: false
+# Static extra ports operators can add via inventory (TCP unless suffixed).
+# Example:
+#   stealth_hardening_ufw_extra_ports:
+#     - { port: 8080, proto: tcp }
+#     - { port: 51820, proto: udp }
+stealth_hardening_ufw_extra_ports: []
 
 # ---- unattended-upgrades ----
 stealth_hardening_unattended_upgrades: true

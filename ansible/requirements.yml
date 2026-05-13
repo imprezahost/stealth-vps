@@ -13,3 +13,8 @@ collections:
     # 1.6.x is the last line that supports ansible-core 2.14; ansible.posix
     # 2.x requires 2.16+. Pin the minor so renewals stay predictable.
     version: ">=1.6.0,<2.0.0"
+
+  - name: community.general
+    # 7.x is the last line that supports ansible-core 2.14. 8.x bumped
+    # to 2.15. Used for: community.general.ufw, community.general.modprobe.
+    version: ">=7.5.0,<8.0.0"
