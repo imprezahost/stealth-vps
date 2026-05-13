@@ -46,11 +46,12 @@ Override in inventory:
 
 ```yaml
 stealth_vps_observability_listen: "0.0.0.0:9100"
-stealth_hardening_ufw_extra_ports:
-  - { port: 9100, proto: tcp, comment: "node_exporter from prometheus host only" }
+stealth_vps_observability_allow_from:
+  - 198.51.100.42         # the central Prometheus host
+  - 192.0.2.0/24          # a whole admin VLAN
 ```
 
-…then on the firewall side, restrict source IP via `ufw allow from <prom-host-ip> to any port 9100`. (Future v0.3.0 will add a source-ip variant to the role.)
+The role auto-creates `ufw allow from <ip> to any port 9100 proto tcp` for each entry. No rule is added when `stealth_vps_observability_allow_from` is empty, so leaving it unset means the port is only reachable from loopback (default).
 
 ## Dashboards
 
