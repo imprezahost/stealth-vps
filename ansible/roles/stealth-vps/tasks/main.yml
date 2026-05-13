@@ -25,9 +25,7 @@
   when: stealth_vps_reality_enabled | bool
   tags: [xray, reality]
 
-# Sprint 1 follow-up — uncomment when the file is added:
-#
-# - name: Install and configure Hysteria2
-#   ansible.builtin.include_tasks: hysteria.yml
-#   when: stealth_vps_hysteria_enabled | bool
-#   tags: [hysteria, hysteria2]
+- name: Install and configure Hysteria2 server
+  ansible.builtin.include_tasks: hysteria.yml
+  when: stealth_vps_hysteria_enabled | bool
+  tags: [hysteria, hysteria2]

@@ -1,0 +1,39 @@
+# {{ ansible_managed }}
+# Edit ansible/roles/stealth-vps/templates/hysteria-config.yaml.j2 — local
+# edits are overwritten on the next playbook run.
+#
+# apernet/hysteria server config. Stealth-tuned per docs/internal/expansion-plan.md §2.4.
+
+listen: ":{{ stealth_vps_hysteria_state.port }}"
+
+tls:
+  cert: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
+  key: "{{ stealth_vps_hysteria_config_dir }}/cert.key"
+
+# Salamander wraps the QUIC handshake so deep inspection can't tell it
+# apart from random noise. Required for any chance of bypass in 2026.
+obfs:
+  type: salamander
+  salamander:
+    password: "{{ stealth_vps_hysteria_state.obfs_password }}"
+
+# Single-password auth — enough for one operator + per-user invites via
+# additional generated passwords (handled in a later sprint).
+auth:
+  type: password
+  password: "{{ stealth_vps_hysteria_state.auth_password }}"
+
+# Everything that hits this port without valid Hysteria2 auth + obfs
+# password is reverse-proxied to the masquerade URL, so an active probe
+# sees a real third-party site.
+masquerade:
+  type: proxy
+  proxy:
+    url: "{{ stealth_vps_hysteria_masquerade_url }}"
+    rewriteHost: true
+
+# Brutal congestion-control bandwidth hints. Over-declaring causes
+# queueing; under-declaring caps throughput.
+bandwidth:
+  up: "{{ stealth_vps_hysteria_bandwidth_up }}"
+  down: "{{ stealth_vps_hysteria_bandwidth_down }}"

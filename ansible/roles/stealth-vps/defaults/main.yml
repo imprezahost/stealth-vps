@@ -29,12 +29,34 @@ stealth_vps_reality_fingerprint: chrome
 
 # ---- Hysteria2 ----
 stealth_vps_hysteria_enabled: true
+# Real-internet site that probes get proxied to. Same logic as Reality's
+# `dest` — masquerade as a believable destination.
 stealth_vps_hysteria_masquerade_url: "https://news.ycombinator.com/"
+# Brutal congestion-control bandwidth hints. Match your link to get
+# realistic throughput; over-declaring causes queueing.
 stealth_vps_hysteria_bandwidth_up: "200 mbps"
 stealth_vps_hysteria_bandwidth_down: "1 gbps"
+# UDP port range — disjoint from the panel range (no protocol collision
+# with Reality since that one is TCP, but keep ranges segmented for
+# easier firewall rules later).
 stealth_vps_hysteria_port_min: 40000
 stealth_vps_hysteria_port_max: 60000
-stealth_vps_hysteria_port_hopping: true
+# Port hopping makes detection harder by spreading the same connection
+# across many ports. Requires firewall rules redirecting a port range
+# to the listener — wired up in sprint 2 alongside UFW.
+stealth_vps_hysteria_port_hopping: false
+# apernet/hysteria release pin. Last stable in maybe/2026; bumped together
+# with a security review.
+stealth_vps_hysteria_version: "app/v2.8.2"
+stealth_vps_hysteria_bin: /usr/local/bin/hysteria
+stealth_vps_hysteria_config_dir: /etc/hysteria
+stealth_vps_hysteria_user: hysteria
+# Self-signed TLS cert CN. Masquerade clients see a cert pretending to
+# be this host; pick a plausible name from the real internet.
+stealth_vps_hysteria_cert_cn: bing.com
+# Friendly remark used in the credentials file and in any future panel
+# integration. Don't reuse the Reality remark.
+stealth_vps_hysteria_remark: stealth-vps-hysteria2
 
 # ---- 3X-UI panel ----
 stealth_vps_panel_enabled: true

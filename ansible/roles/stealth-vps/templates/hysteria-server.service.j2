@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# Edit ansible/roles/stealth-vps/templates/hysteria-server.service.j2 instead.
+
+[Unit]
+Description=Hysteria 2 server (stealth-vps)
+Documentation=https://v2.hysteria.network/
+After=network.target
+
+[Service]
+Type=simple
+User={{ stealth_vps_hysteria_user }}
+Group={{ stealth_vps_hysteria_user }}
+WorkingDirectory={{ stealth_vps_hysteria_config_dir }}
+ExecStart={{ stealth_vps_hysteria_bin }} server --config {{ stealth_vps_hysteria_config_dir }}/config.yaml
+Environment=HYSTERIA_LOG_LEVEL=info
+
+# Bind UDP on a non-privileged port (>1024), but allow CAP_NET_BIND_SERVICE
+# in case the operator pins port < 1024 later.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+LimitNOFILE=1048576
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
