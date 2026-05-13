@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Probe-resistance test suite scaffolding** (`tests/probe-resistance/`):
+  - `README.md` with explicit threat model — which probe classes we test against, which we deliberately leave out of scope.
+  - 5 numbered scenario docs under `scenarios/` covering HTTPS direct probe (01), TLS JA3/JA4 fingerprint (02), active probe with no Reality key (03), port-scan baseline (04), and replay-resistance (05). Each doc states what we test, why it matters, the threat-model anchor, and the failure modes we've seen in the wild.
+  - 2 runnable scripts: `https_direct_probe.sh` (compares HTTP shape between dest and our VPS) and `port_scan_baseline.sh` (nmap against an allow-list driven by the role's defaults).
+  - 2 scaffolded scripts: `tls_fingerprint_compare.py` and `active_probe.py` — full env-var and exit-code contract locked, dest-side baseline already exercised; body lands in v0.5.
+  - 1 manual scenario (replay-resistance), documented with a recipe; automation in v1.0.
+  - `requirements.txt` (stdlib-only at v0.4.0; TLS-fingerprint lib shortlist in comments).
+  - GitLab CI `probe-resistance` job — manual-trigger only, requires `PROBE_TARGET` + `PROBE_REALITY_DEST` set per-pipeline. Does not gate normal pipelines (probe-resistance needs a real VPS, not a Docker runner).
 - **Reverse-mirror automation** (`.github/workflows/reverse-mirror.yml` + `.gitlab-ci.yml` `report` stage):
   - External PRs on the GitHub mirror are auto-pushed to internal GitLab as `ext/pr-<N>` and a tracking Merge Request is opened via the GitLab API. The workflow runs under `pull_request_target` but never checks out the untrusted PR code — only `git fetch` of `pull/N/head` + `git push` to GitLab, so secrets stay safe.
   - Force-pushes to the PR refresh the same MR (idempotent on `MR_IID`).

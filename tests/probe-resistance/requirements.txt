@@ -1,0 +1,13 @@
+# Python dependencies for the probe-resistance suite.
+#
+# v0.4.0 scaffold: stdlib-only. Scripts 02 and 03 use bisect / http.client /
+# ssl / socket from the Python 3.10+ standard library.
+#
+# v0.5 / v1.0 will pin the TLS fingerprinting libs once we choose them.
+# Candidates:
+#   - tlslite-ng     # pure-Python TLS handshake construction
+#   - scapy[basic]   # raw packet capture, layers.tls for ClientHello parsing
+#   - pyJA3 or ja3-python  # JA3 computation
+#   - ja4-python     # FoxIO reference impl for JA4 / JA4S / JA4H
+#
+# Adding them here as comments so the v0.5 picker has the shortlist ready.
