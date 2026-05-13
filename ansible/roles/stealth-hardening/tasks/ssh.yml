@@ -35,21 +35,50 @@
   register: stealth_hardening_ssh_dropin
   tags: [ssh, hardening]
 
+# `Port 22` lives in the main sshd_config, not in the drop-in (Port is
+# additive, so a drop-in cannot remove a port the main file declared).
+# To complete the dual-port transition, comment the line out in-place.
+
+- name: Keep 'Port 22' enabled in main sshd_config (transitional)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?\s*Port 22(\s.*)?$'
+    line: 'Port 22'
+    validate: sshd -t -f %s
+    backup: true
+  when: stealth_hardening_ssh_legacy_port_enabled | bool
+  register: stealth_hardening_ssh_legacy_on
+  tags: [ssh, hardening]
+
+- name: Disable 'Port 22' in main sshd_config (transition over)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?\s*Port 22(\s.*)?$'
+    line: '# Port 22  # disabled by stealth-vps hardening'
+    validate: sshd -t -f %s
+    backup: true
+  when: not (stealth_hardening_ssh_legacy_port_enabled | bool)
+  register: stealth_hardening_ssh_legacy_off
+  tags: [ssh, hardening]
+
 - name: Validate the merged sshd config (drop-in + main)
   ansible.builtin.command:
     cmd: sshd -t
   changed_when: false
   tags: [ssh, hardening]
 
-- name: Restart sshd to pick up the new drop-in
+- name: Restart sshd to pick up the new drop-in / legacy-port change
   # Explicit task instead of a handler — `meta: flush_handlers` inside an
   # include_tasks didn't fire reliably on ansible-core 2.14 in our test.
-  # An explicit restart-on-changed is determinstic and shows up in the
+  # An explicit restart-on-changed is deterministic and shows up in the
   # play recap, which makes debugging the listener trivial.
   ansible.builtin.systemd:
     name: ssh
     state: restarted
-  when: stealth_hardening_ssh_dropin.changed
+  when: >-
+    stealth_hardening_ssh_dropin.changed
+    or (stealth_hardening_ssh_legacy_on.changed | default(false))
+    or (stealth_hardening_ssh_legacy_off.changed | default(false))
   tags: [ssh, hardening]
 
 - name: Wait for the hardened SSH port to listen
