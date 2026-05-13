@@ -111,6 +111,29 @@
   when: stealth_vps_hysteria_state is defined
   tags: [ufw, firewall, hardening]
 
+# --- Observability scrape port (node_exporter), source-IP filtered ------
+
+- name: Compute observability host + port (for source-IP allow rules)
+  ansible.builtin.set_fact:
+    stealth_vps_observability_host: "{{ stealth_vps_observability_listen | regex_replace(':[0-9]+$', '') }}"
+    stealth_vps_observability_port: "{{ stealth_vps_observability_listen | regex_replace('^.*:', '') }}"
+  when: stealth_vps_observability_enabled | default(false) | bool
+  tags: [ufw, firewall, hardening, observability]
+
+- name: Allow node_exporter port from specific sources (when non-loopback + allow_from set)
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_vps_observability_port }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "stealth-vps node_exporter scrape from {{ item }}"
+  loop: "{{ stealth_vps_observability_allow_from | default([]) }}"
+  when:
+    - stealth_vps_observability_enabled | default(false) | bool
+    - stealth_vps_observability_host not in ['127.0.0.1', 'localhost', '::1']
+    - (stealth_vps_observability_allow_from | default([])) | length > 0
+  tags: [ufw, firewall, hardening, observability]
+
 # --- ACME HTTP-01 challenge port ----------------------------------------
 
 - name: Allow port 80 for ACME HTTP-01 challenge (Let's Encrypt)

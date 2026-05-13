@@ -136,3 +136,9 @@ stealth_vps_observability_listen: "127.0.0.1:9100"
 stealth_vps_metrics_enabled: true
 stealth_vps_metrics_textfile_dir: /var/lib/stealth-vps/metrics
 stealth_vps_metrics_refresh_interval_sec: 30
+# Exposure for node_exporter: if you set `stealth_vps_observability_listen`
+# to a non-loopback address, list the scraper's CIDR(s) here. UFW will
+# allow only those sources to reach the port. Empty list = no UFW rule;
+# either keep listen on 127.0.0.1 + tunnel, or open via
+# stealth_hardening_ufw_extra_ports yourself.
+stealth_vps_observability_allow_from: []

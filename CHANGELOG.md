@@ -25,9 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `tests/molecule/default/molecule.yml` now converges + verifies the role against **three platforms in one scenario**: Debian 12, Ubuntu 22.04, Ubuntu 24.04 (all geerlingguy/docker-*-ansible images, systemd-in-docker). `inventory.host_vars` per-platform replaced with `group_vars: all` so the same opt-outs apply uniformly. The matrix runs in the existing `molecule` CI job; no extra runner config needed.
 
+### Added
+- `stealth_vps_observability_allow_from` — list of CIDRs allowed to reach the node_exporter port when it's bound to a non-loopback address. `tasks/ufw.yml` creates one `ufw allow from <cidr> to any port <port> proto tcp` per entry; an empty list (default) means no UFW rule, so the port stays loopback-only and the SSH-tunnel pattern is the only way in. observability/README.md got the new snippet.
+
 ### Planned (still in v0.3.0)
 - Pen-tested iOS + macOS client walkthroughs (Shadowrocket, Hiddify, V2Box)
-- Source-IP filter variant for `stealth_vps_observability_listen` exposure
 - zh-CN README rewrite by a native speaker
 
 ## [0.2.0] - 2026-05-13
