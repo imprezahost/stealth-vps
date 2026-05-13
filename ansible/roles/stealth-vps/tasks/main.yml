@@ -11,6 +11,26 @@
       - ansible_facts['distribution'] in ['Debian', 'Ubuntu']
     fail_msg: "stealth-vps currently supports Debian 12+ and Ubuntu 22.04+ only."
 
+# CPU architecture is resolved once up front so per-component tasks can
+# reference `stealth_vps_arch` (amd64 / arm64) when building upstream
+# binary URLs and bundled-binary paths. Adding a new arch only requires
+# extending `stealth_vps_arch_map` in defaults — every consumer reads
+# from this fact.
+- name: Resolve target CPU architecture
+  ansible.builtin.set_fact:
+    stealth_vps_arch: "{{ stealth_vps_arch_map.get(ansible_facts.architecture, '__unsupported__') }}"
+
+- name: Assert supported CPU architecture
+  ansible.builtin.assert:
+    that:
+      - stealth_vps_arch != '__unsupported__'
+    fail_msg: >-
+      stealth-vps supports {{ stealth_vps_arch_map.values() | join(', ') }} only
+      (architecture detected: {{ ansible_facts.architecture }}).
+      Add a mapping under `stealth_vps_arch_map` in defaults/main.yml if you
+      want to try an unvalidated architecture — Xray-core, Hysteria2, and 3X-UI
+      all publish more variants than we currently smoke-test.
+
 - name: Apply kernel tuning (BBR, fq, TCP buffers)
   ansible.builtin.include_tasks: kernel.yml
   tags: [kernel, sysctl]

@@ -2,6 +2,19 @@
 # Defaults for the stealth-vps role.
 # Override in inventory or playbook vars.
 
+# ---- Architecture mapping ----
+# Maps ansible_facts.architecture (uname -m) to the GOARCH-style suffix
+# used by upstream release archives (Xray-core, Hysteria2, 3X-UI). Add a
+# mapping here if you want to try an architecture we haven't validated.
+#
+# Validated by upstream + smoke-tested by stealth-vps maintainers:
+#   x86_64 → amd64  (every Debian/Ubuntu VPS by default)
+#   aarch64 → arm64 (Oracle Ampere free tier, AWS Graviton, RPi-class
+#                    boards running Debian/Ubuntu 64-bit)
+stealth_vps_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+
 # ---- Reality (Xray-core) ----
 stealth_vps_reality_enabled: true
 # Real-internet site whose TLS handshake Reality "steals". Must be
