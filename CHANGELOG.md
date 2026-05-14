@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.x — later sprints, autonomous)
+- Proxmox Terraform example.
+- Pulumi reference.
+
+## [0.5.6] - 2026-05-14
+
+Thirteenth tagged release. Sole new feature: **Vultr Terraform example** — fourth worked example alongside Hetzner + AWS + DigitalOcean. Same v0.5.0 module underneath; only cloud-side resources differ. amd64-only on Vultr.
+
 ### Added
-- **Vultr Terraform example** (`terraform/examples/vultr/`). Fourth worked example alongside Hetzner + AWS + DigitalOcean. Same v0.5.0 module underneath; only cloud-side resources differ.
+- **Vultr Terraform example** (`terraform/examples/vultr/`):
   - `vultr_ssh_key` registering the local pubkey in Vultr's account-wide registry
   - `vultr_firewall_group` + per-IP-family `vultr_firewall_rule` resources (Vultr's firewall model emits one rule per (IPv4-or-IPv6, port, source CIDR) tuple — example emits both v4 + v6 for Reality + Hysteria2 + optional LE HTTP-01, and one rule per `allow_ssh_from` CIDR)
   - `vultr_instance` with `enable_ipv6 = true` by default, backups toggle off, `firewall_group_id` association, `lifecycle { ignore_changes = [user_data] }`
@@ -17,9 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`terraform/README.md` + `docs/terraform.md`** updated — four examples now: Hetzner + AWS + DigitalOcean + Vultr.
 - All 4 `.tf` files validated to parse cleanly via `python-hcl2`.
 
-### Planned (v0.5.x — later sprints, autonomous)
-- Proxmox Terraform example.
-- Pulumi reference.
+### Fixed
+- **Self-pinning bumped to v0.5.6** across `scripts/install.sh`, `cloud-init/stealth-vps.yaml`, the Terraform module + all four example defaults, every doc snippet, `README.zh-CN.md`. Same invariant: fetching at the v0.5.6 tag deploys v0.5.6.
 
 ## [0.5.5] - 2026-05-14
 

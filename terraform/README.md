@@ -10,9 +10,9 @@ The Terraform module here generates the cloud-init `user_data` dynamically from 
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.5"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.6"
 
-  stealth_version = "v0.5.5"   # which release the cloud-init bootstrap pins to
+  stealth_version = "v0.5.6"   # which release the cloud-init bootstrap pins to
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   ssh_port        = 22550      # matches stealth_hardening_ssh_port default
   domain          = "vpn.example.com"  # null for no LE
@@ -90,8 +90,8 @@ The module's release cycle matches the role's. To pin both together:
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.5"
-  stealth_version = "v0.5.5"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.6"
+  stealth_version = "v0.5.6"
   # ...
 }
 ```
