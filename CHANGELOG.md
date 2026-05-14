@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.x — later sprints, autonomous)
+- Pulumi reference.
+
+## [0.5.7] - 2026-05-14
+
+Fourteenth tagged release. Sole new feature: **Proxmox VE Terraform example** — fifth worked example, different model from the cloud providers (self-hosted hypervisor, not managed cloud).
+
 ### Added
 - **Proxmox VE Terraform example** (`terraform/examples/proxmox/`). Fifth worked example. Different model from the cloud providers: clones a pre-existing Debian 12 cloud-init template, delivers `user_data` via a snippet file written to the Proxmox node, uses the Telmate provider (`Telmate/proxmox ~> 3.0`) + `hashicorp/local` for the snippet write.
   - `local_file.userdata` writes the rendered cloud-init to `<snippets_storage>:/snippets/stealth-vps-<vmid>-userdata.yaml`. Works when Terraform runs on the Proxmox node OR when the snippets path is mounted on the controller; doc notes the `null_resource + remote-exec` alternative for fully remote controllers.
@@ -16,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`terraform/README.md` + `docs/terraform.md`** updated — five examples now: Hetzner + AWS + DigitalOcean + Vultr + Proxmox.
 - All 4 `.tf` files validated to parse cleanly via `python-hcl2`.
 
-### Planned (v0.5.x — later sprints, autonomous)
-- Pulumi reference.
+### Fixed
+- **Self-pinning bumped to v0.5.7** across all entry points (install.sh, cloud-init, Terraform module + all five example defaults, every doc snippet, README.zh-CN.md).
 
 ## [0.5.6] - 2026-05-14
 

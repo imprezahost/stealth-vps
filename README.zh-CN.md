@@ -53,14 +53,14 @@
 适合一台刚开通、只想跑起来的 VPS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.6/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.7/scripts/install.sh | bash
 ```
 
-这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.5.6 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
+这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.5.7 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.6/scripts/install.sh \
-  | STEALTH_VERSION=v0.5.6 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.7/scripts/install.sh \
+  | STEALTH_VERSION=v0.5.7 bash
 ```
 
 ### 2. Ansible(推荐用于可重复部署)
@@ -83,9 +83,9 @@ Provider-agnostic —— 从类型化的 HCL 输入(SSH 公钥、域名、版本
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.6"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.7"
 
-  stealth_version = "v0.5.6"
+  stealth_version = "v0.5.7"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
