@@ -30,9 +30,13 @@ App Store → search **Hiddify** → install (free). Confirm publisher is "Hiddi
 2. Tap the big toggle (or the Quick Connect button) → grant the **"Add VPN Configurations"** permission iOS asks for once.
 3. Status flips to **Connected** within a couple seconds. Latency shows in the row.
 
+> **Conflict with other VPN apps** — iOS allows only ONE active VPN profile at a time. If you have **NordLayer / NordVPN / Surfshark / ExpressVPN / WARP** or similar installed, Hiddify's profile install or first toggle will fail with `connection refused, errno = 61` (or similar) pointing at a local `127.0.0.1` port. Cause: iOS silently rejects the new VPN config because another VPN service is registered. Fix: **Settings → General → VPN & Device Management → VPN** → delete the unused config, OR uninstall the conflicting app. Then re-toggle Hiddify. Pen-tested 2026-05-14: NordLayer installed (even with the app closed) was enough to block Hiddify; removing it solved it instantly.
+
 ### Verify
 - Safari → `https://ifconfig.me` should show the VPS IP, not your carrier IP.
 - `https://dnsleaktest.com` → only the proxy's resolver (Cloudflare 1.1.1.1 or what Hiddify is set to), not your ISP DNS.
+
+> **IPv6 in the result is normal** — if your VPS is dual-stack (most are by default), `ifconfig.me` may show the VPS's IPv6 (`2a11:...` or similar) rather than the IPv4 (`103.106.228.154` for example). That's not a leak; IPv6 is just preferred when present. Cross-check by hitting `https://ipv4.ifconfig.me` instead, or by running `curl -4 ifconfig.me` from a desktop on the same VPN.
 
 ### Reality-specific checks (Hiddify → profile detail)
 - Type: `vless`
@@ -124,4 +128,10 @@ Subscription URLs let clients refresh on their own and you can revoke per-user b
 
 ## Validation status
 
-These walkthroughs are written from the apps' published behaviour and our own server-side validation; **per-screen pen-tested validation lands in v0.4.0** once an iOS device is in the QA rotation. If you hit something that doesn't match what's here, please open an issue with the app + iOS version + exact step.
+| App | Last tested | Status |
+|---|---|---|
+| Hiddify | 2026-05-14, iOS 19, iPhone in Brazil → Tokyo VPS | ✅ validated end-to-end. Reality URI imports from clipboard, VPN permission flow worked first try after removing a conflicting NordLayer install. `ifconfig.me` returns the VPS IPv6 (dual-stack). |
+| Shadowrocket | not yet | pending |
+| Streisand | not yet | pending |
+
+If you hit something that doesn't match what's here, file an issue with: app + iOS version + exact step + screenshot of the error. The two known sharp edges (other-VPN conflict, IPv6-in-`ifconfig.me`) are documented inline above with the steps that trigger them.
