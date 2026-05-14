@@ -7,8 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.5.x — later sprints, autonomous)
-- Pulumi reference.
+### Planned (v0.6.0+)
+- Additional Pulumi examples (AWS / DigitalOcean / Vultr / Proxmox — same shape as the Hetzner one).
+- Python / Go ports of the Pulumi cloud-init builder (TypeScript is the canonical reference at v0.5.8).
+- Publish `@imprezahost/stealth-vps` to npm so Pulumi examples can `npm install` instead of vendoring via relative path.
+
+### Planned (v1.0)
+- JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
+- Golden snapshots per Reality dest + quarterly refresh tooling.
+- Automated replay-resistance scenario (scenario 05).
+- GitLab shell-executor runner fix (`apt-get: Permission denied`).
+- zh-CN native-speaker review pass.
+- Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
+
+## [0.5.8] - 2026-05-14
+
+Fifteenth tagged release. Final v0.5.x release; the major work of v0.5.x — provider-agnostic IaC with five Terraform examples + a Pulumi reference — is now complete.
+
+Sole new feature: **Pulumi TypeScript reference** under `pulumi/`. Pure-TypeScript port of the Terraform `cloud-init` builder, with one worked example (Hetzner Cloud) wired through `@pulumi/hcloud`.
+
+### Added
+- **Pulumi TypeScript reference** (`pulumi/stealth-vps/`):
+  - Single exported function `buildCloudInit(args: StealthVpsArgs): string`. Pure function, no cloud-side resources. Same inputs + same output shape as the Terraform module — output byte-equivalent (modulo trailing whitespace) given identical inputs.
+  - Inline ~40-line YAML serializer that covers the subset stealth-vps needs (strings / numbers / booleans / arrays / nested maps). No `js-yaml` dependency.
+  - Validation mirrors Terraform's `validation { ... }` blocks one-to-one: SemVer regex on `stealthVersion`, key-type prefix on `sshPublicKey`, port range check on `sshPort`, email-shape on `letsencryptEmail` when set. Synchronous, throws on first failure.
+  - Helper `buildAll(args)` also returns the merged extra-vars YAML — useful for inspection / non-cloud-init bootstraps.
+  - `tsconfig.json` targets ES2022 + strict mode + declaration emit.
+- **Hetzner Cloud Pulumi example** (`pulumi/examples/hetzner/`):
+  - `hcloud.SshKey` + `hcloud.Server` mirroring the Terraform Hetzner example resource-for-resource. Same defaults (cax11 ARM, fsn1, IPv4 + IPv6 enabled, labels carry `stealth_version`).
+  - Config via `Pulumi.<stack>.yaml` + `pulumi config set --secret hcloudToken ...`. README walks through the full `pulumi stack init / config set / up / output` lifecycle.
+  - `package.json` uses `file:../../stealth-vps` to link the local builder package. Will switch to `@imprezahost/stealth-vps` when published to npm.
+- **`pulumi/README.md`** documents: why ship a Pulumi reference alongside Terraform (the Pulumi-shop story), TypeScript-only at v0.5.8 (Python / Go / .NET / Java SDKs port trivially since it's a string template), one example only at v0.5.8 (same pattern as Terraform's example tree filled over several sprints).
+- **`pulumi/stealth-vps/README.md`** documents: inputs reference, outputs, validation table mapping each Terraform check to its TypeScript equivalent, optional zod / io-ts wrapping for tighter validation at the call site, local compile / typecheck workflow.
+- **Top-level `README.md`** now references the Pulumi tree alongside the Terraform examples.
+
+### Fixed
+- **Self-pinning bumped to v0.5.8** across `scripts/install.sh`, `cloud-init/stealth-vps.yaml`, the Terraform module + all five Terraform example defaults, every doc snippet, `README.zh-CN.md`, and the Pulumi package + Hetzner example.
+
+### Deferred to v0.6.0 / v1.0
+- Additional Pulumi examples (AWS / DigitalOcean / Vultr / Proxmox).
+- Python / Go ports of the Pulumi builder.
+- npm publish for `@imprezahost/stealth-vps`.
+- JA4 / JA4S in the probe-resistance suite + golden snapshots + replay automation (v1.0).
+- GitLab runner fix.
+- zh-CN native review.
+- Remaining client pen-tests.
 
 ## [0.5.7] - 2026-05-14
 

@@ -1,0 +1,17 @@
+{
+  "name": "stealth-vps-hetzner",
+  "version": "0.5.8",
+  "description": "Pulumi stack provisioning one stealth-vps host on Hetzner Cloud.",
+  "main": "index.ts",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "@pulumi/pulumi": "^3.130.0",
+    "@pulumi/hcloud": "^1.21.0",
+    "stealth-vps": "file:../../stealth-vps"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0"
+  }
+}
