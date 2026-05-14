@@ -1,0 +1,66 @@
+# Copy to terraform.tfvars and fill in.
+# Prefer `export TF_VAR_pm_api_token_secret=...` over committing the secret.
+
+# Proxmox API ---------------------------------------------------------------
+
+pm_api_url          = "https://pve.example.local:8006/api2/json"
+pm_api_token_id     = "terraform@pve!main"
+pm_api_token_secret = "00000000-0000-0000-0000-000000000000"
+pm_tls_insecure     = true     # set false once you have a real (LE / internal CA) cert
+
+# Target node + IDs ---------------------------------------------------------
+
+target_node = "pve"            # single-node clusters: hostname; multi-node: pick one
+vmid        = 7100             # unique within the cluster
+
+# Cloud-init template -------------------------------------------------------
+# Must be a Debian 12 cloud-init template already created on the node.
+# Quick how-to:
+#   wget https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+#   qm create 9012 --name debian-12-cloudinit --memory 1024 --net0 virtio,bridge=vmbr0
+#   qm importdisk 9012 debian-12-genericcloud-amd64.qcow2 local-lvm
+#   qm set 9012 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9012-disk-0
+#   qm set 9012 --ide2 local-lvm:cloudinit
+#   qm set 9012 --boot c --bootdisk scsi0
+#   qm set 9012 --serial0 socket --vga serial0
+#   qm set 9012 --agent enabled=1
+#   qm template 9012
+
+template_name = "debian-12-cloudinit"
+
+# Snippets storage ----------------------------------------------------------
+# `local` storage on a stock Proxmox install has the `snippets` content
+# type enabled. Verify with `pvesm status` + `pvesm content-list local`.
+
+snippets_storage    = "local"
+snippets_local_path = "/var/lib/vz/snippets"
+
+# VM resources --------------------------------------------------------------
+
+server_name    = "stealth-vps"
+cores          = 2
+memory_mb      = 2048
+disk_gb        = 10
+disk_storage   = "local-lvm"
+network_bridge = "vmbr0"
+
+# SSH key (lands in cloud-init authorized_keys for root)
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# SSH port the hardening role will move to
+ssh_port = 22550
+
+# Release pin
+stealth_version = "v0.5.6"
+
+# Optional: Let's Encrypt ---------------------------------------------------
+# Proxmox doesn't manage DNS; you point your domain at whatever public IP
+# the VM ends up with (port-forwarded from the hypervisor / direct on a
+# bridged interface).
+# domain            = "vpn.example.com"
+# letsencrypt_email = "ops@example.com"
+
+# Reality config ------------------------------------------------------------
+
+reality_dest        = "www.microsoft.com:443"
+reality_servernames = ["www.microsoft.com"]

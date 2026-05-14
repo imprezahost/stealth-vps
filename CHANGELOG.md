@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Proxmox VE Terraform example** (`terraform/examples/proxmox/`). Fifth worked example. Different model from the cloud providers: clones a pre-existing Debian 12 cloud-init template, delivers `user_data` via a snippet file written to the Proxmox node, uses the Telmate provider (`Telmate/proxmox ~> 3.0`) + `hashicorp/local` for the snippet write.
+  - `local_file.userdata` writes the rendered cloud-init to `<snippets_storage>:/snippets/stealth-vps-<vmid>-userdata.yaml`. Works when Terraform runs on the Proxmox node OR when the snippets path is mounted on the controller; doc notes the `null_resource + remote-exec` alternative for fully remote controllers.
+  - `proxmox_vm_qemu.vps` — clones the template (full clone), sized disk on configurable storage, virtio-scsi-single + iothread + discard for performance, QEMU guest agent enabled so Proxmox reports the DHCP IP back via `default_ipv4_address`. Bridge configurable (`vmbr0` default).
+  - `lifecycle { ignore_changes = [cicustom, ciuser, cipassword, disk] }` so cloud-init re-rendering doesn't trigger VM recreation — same pattern as the cloud examples.
+- **`terraform/examples/proxmox/README.md`** explicitly enumerates what Proxmox does NOT abstract that the cloud providers do (firewall, DNS, automated template creation), the `qm create + importdisk + template` recipe to build the prerequisite Debian 12 cloud-init template, the three Terraform-vs-snippets-path setups (run on node / NFS-mount / remote-exec fallback), network model variations (NAT'd vs direct WAN bridge vs VLAN), and a "vs cloud examples" comparison table.
+- **`terraform/README.md` + `docs/terraform.md`** updated — five examples now: Hetzner + AWS + DigitalOcean + Vultr + Proxmox.
+- All 4 `.tf` files validated to parse cleanly via `python-hcl2`.
+
 ### Planned (v0.5.x — later sprints, autonomous)
-- Proxmox Terraform example.
 - Pulumi reference.
 
 ## [0.5.6] - 2026-05-14
