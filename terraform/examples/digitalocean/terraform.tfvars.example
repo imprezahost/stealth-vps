@@ -1,0 +1,72 @@
+# Copy to terraform.tfvars and fill in.
+#
+# Prefer `export TF_VAR_do_token=...` in your shell over committing the
+# token here, even with .gitignore.
+
+# Required ------------------------------------------------------------------
+
+do_token = "GENERATE-AT-cloud.digitalocean.com--Account--API--Tokens"
+
+# Region --------------------------------------------------------------------
+# nyc1, nyc3   — NYC, US east
+# sfo3         — San Francisco, US west
+# tor1         — Toronto, Canada
+# lon1         — London, UK
+# fra1         — Frankfurt, Germany
+# ams3         — Amsterdam, NL
+# sgp1         — Singapore (best for mainland CN routing on DO)
+# blr1         — Bangalore, India
+# syd1         — Sydney, Australia
+
+region = "sfo3"
+
+# Server --------------------------------------------------------------------
+
+server_name = "stealth-vps-sfo3"
+
+# Size:
+#   s-1vcpu-1gb     ~ US$6/mo  — single-user, tight
+#   s-1vcpu-2gb     ~ US$12/mo — recommended for multi-user (the role
+#                                 idles at ~250 MB, leaving 1.5+ GB free)
+#   s-2vcpu-2gb     ~ US$18/mo — handles bursts, more CPU for TLS handshakes
+#   s-2vcpu-4gb     ~ US$24/mo — comfortable for ~50 active clients
+
+size = "s-1vcpu-2gb"
+
+# Image (Debian 12 is the role's primary target; ubuntu-22-04-x64 also works)
+image = "debian-12-x64"
+
+# SSH key (the contents land in both DO's account-wide SSH registry and
+# the droplet's /root/.ssh/authorized_keys via cloud-init)
+
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+ssh_key_name        = "stealth-vps"
+
+# SSH port the hardening role will move to
+ssh_port = 22550
+
+# Release pin
+stealth_version = "v0.5.4"
+
+# Optional: Let's Encrypt ---------------------------------------------------
+# Point a DNS A record at the ipv4 output BEFORE running apply.
+# domain            = "vpn.example.com"
+# letsencrypt_email = "ops@example.com"
+
+# Reality + Hysteria2 -------------------------------------------------------
+
+reality_dest        = "www.microsoft.com:443"
+reality_servernames = ["www.microsoft.com"]
+
+hysteria_udp_range_min = 20000
+hysteria_udp_range_max = 50000
+
+# Firewall — SSH source CIDRs ---------------------------------------------
+# Lock down to your ops IPs if they're stable:
+# allow_ssh_from = ["203.0.113.42/32", "198.51.100.0/24"]
+allow_ssh_from = ["0.0.0.0/0", "::/0"]
+
+# DO add-ons --------------------------------------------------------------
+
+enable_monitoring = true   # free; CPU/memory/disk graphs in console
+enable_backups    = false  # +20% of droplet price for weekly backups
