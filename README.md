@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.5.1 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI; `stealth-vps/gitlab-ci` status reports back. Provider-agnostic Terraform module + Hetzner example. Probe-resistance test suite: **4 of 5 scenarios runnable**, scenario 02 now with **real byte-level JA3 + JA3S** via stdlib `ssl.MemoryBIO` (v0.5.1). See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.5.2 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS (Tahoe Hiddify-via-"Designed for iPad" path documented after pen-test). Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI; `stealth-vps/gitlab-ci` status reports back. Provider-agnostic Terraform module + Hetzner example. Probe-resistance test suite: **5 of 5 scenarios** have runnable scripts — scenario 02 with byte-level JA3 + JA3S, scenario 03 with HTTP/1 response shape + HTTP/2 SETTINGS-frame comparison (v0.5.2). See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -47,14 +47,14 @@ Pick the one that matches your workflow. All four apply the same configuration.
 For a fresh VPS where you just want it done:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.1/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.2/scripts/install.sh | bash
 ```
 
-This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.5.1 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
+This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.5.2 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.1/scripts/install.sh \
-  | STEALTH_VERSION=v0.5.1 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.2/scripts/install.sh \
+  | STEALTH_VERSION=v0.5.2 bash
 ```
 
 ### 2. Ansible (recommended for repeatable use)
@@ -77,9 +77,9 @@ Provider-agnostic — generates the cloud-init `user_data` from typed HCL inputs
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.1"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.2"
 
-  stealth_version = "v0.5.1"
+  stealth_version = "v0.5.2"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
@@ -128,9 +128,11 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 | v0.4.2 | Hotfix: replace dead `get.imprezahost.com/stealth` URL with release-pinned raw GitHub URL; bump `STEALTH_VERSION` default `v0.1.0 → v0.4.2` so one-shot install actually deploys the current stack | shipped 2026-05-13 |
 | v0.4.3 | iOS + macOS walkthroughs validated end-to-end against real hardware (iPhone iOS 19 + M2 Pro Tahoe); Hiddify-MacOS.dmg flagged as broken on macOS 15+ (Network Extension not notarized) — "Designed for iPad" path documented as working alternative; troubleshooting blocks for other-VPN conflicts on both iOS and macOS; machine-assisted zh-CN README draft + translator's glossary | shipped 2026-05-14 |
 | v0.5.0 | Provider-agnostic Terraform module (`terraform/modules/stealth-vps/`) + Hetzner Cloud worked example; cloud-init drift fix (`v0.1.0 → v0.5.0`); README "Three ways" → "Four" with the Terraform path | shipped 2026-05-13 |
-| **v0.5.1** | Byte-level **JA3 + JA3S** in `tls_fingerprint_compare.py` via stdlib `ssl.MemoryBIO` (no scapy / tlslite-ng dep); pure-stdlib TLS record + handshake parser; scenario 02 docs spell out JA3-vs-JA3S semantics + the TLS 1.3 `EncryptedExtensions` limitation | **shipped 2026-05-14** |
-| v0.5.x | JA4 + JA4S (FoxIO 2023+ spec), HTTP/2 SETTINGS-frame comparison, more Terraform examples (AWS / DigitalOcean / Vultr / Proxmox), Pulumi reference | planned |
-| v1.0.0 | Probe-resistance CI suite (full), signed releases, security audit | roadmap |
+| v0.5.1 | Byte-level **JA3 + JA3S** in `tls_fingerprint_compare.py` via stdlib `ssl.MemoryBIO` (no scapy / tlslite-ng dep); pure-stdlib TLS record + handshake parser; scenario 02 docs spell out JA3-vs-JA3S semantics + the TLS 1.3 `EncryptedExtensions` limitation | shipped 2026-05-14 |
+| **v0.5.2** | **HTTP/2 SETTINGS-frame comparison** as scenario-03 companion (`h2_settings_compare.py`); pure-stdlib HTTP/2 preface + SETTINGS parser inline; all 5 probe-resistance scenarios now have at least one runnable script | **shipped 2026-05-14** |
+| v0.5.3 | Split `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` across all suite scripts (mechanical refactor) | planned |
+| v0.5.x | More Terraform examples (AWS / DigitalOcean / Vultr / Proxmox), Pulumi reference | planned |
+| v1.0.0 | Probe-resistance CI suite (full, with JA4 + JA4S + golden snapshots), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.
 

@@ -7,17 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.3 — next mechanical sprint)
+- Split `PROBE_REALITY_PORT` (port on the VPS being probed) from `PROBE_DEST_PORT` (port on the real dest) across all four scenario scripts. Mechanical refactor; unblocks testing against VPSes that run Reality on a non-443 port.
+
+### Planned (v0.5.x — later sprints, autonomous)
+- AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
+- Pulumi reference.
+
+## [0.5.2] - 2026-05-14
+
+Ninth tagged release. Sole new feature: HTTP/2 `SETTINGS`-frame comparison as scenario 03 companion (`h2_settings_compare.py`). Pure-stdlib HTTP/2 preface + SETTINGS frame parser inline — no `h2` / `hyper` dependency added; `requirements.txt` stays stdlib-only. Scenario 03 now covers both HTTP/1 (via `active_probe.py`) and HTTP/2 (via the new script). 5 of 5 probe-resistance scenarios have at least one runnable script.
+
 ### Added
 - **HTTP/2 SETTINGS-frame comparison** (`tests/probe-resistance/scripts/h2_settings_compare.py`, scenario 03 companion). Pure-stdlib script that opens TLS with `ALPN=h2`, sends the HTTP/2 connection preface (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`) and an empty `SETTINGS` frame from us, then parses the server's first SETTINGS frame inline — list of (uint16 identifier, uint32 value) pairs per RFC 7540 §6.5.1. Compares dest vs VPS. **No `h2` or `hyper` dependency added** — `requirements.txt` stays stdlib-only.
   - Smoke-tested positive (target=dest=`www.microsoft.com` → SETTINGS collide on same Akamai backend), negative against same CDN (target=`www.apple.com`, dest=`www.microsoft.com` → SETTINGS still match because both are behind Akamai — a documented limitation), negative across CDNs (target=`www.google.com`, dest=`www.microsoft.com` → 4 `WHY:` lines: `HEADER_TABLE_SIZE` missing, `INITIAL_WINDOW_SIZE` 65535 vs 1048576, `MAX_FRAME_SIZE` missing, `MAX_HEADER_LIST_SIZE` 32768 vs 65536 — exactly the divergence a broken Reality fallback letting Xray's Go-based h2 stack terminate would produce).
 - `scenarios/03-active-probe-no-key.md` gains an "HTTP/2 sub-scenario" section explaining what `h2_settings_compare.py` catches, including a table comparing Akamai's typical SETTINGS vs Go `x/net/http2` defaults — the divergence pattern that a misconfigured Reality would show.
 - GitLab CI `probe-resistance` job now runs the new script in sequence with 01 + 02 + 03 + 04. 03 + 03h2 are wrapped in `|| [ "$?" -eq 2 ]` so an inconclusive (h2-not-supported dest, etc.) doesn't fail the manual pipeline.
 
+### Fixed
+- **Self-pinning bumped to v0.5.2 across all entry points** — `scripts/install.sh` URL + `STEALTH_VERSION` default, `cloud-init/stealth-vps.yaml` `ansible-pull -C` arg, `terraform/modules/stealth-vps` `stealth_version` default, the Hetzner example, and every doc example all now reference `v0.5.2`. Same invariant as v0.4.2 onwards: fetching at the v0.5.2 tag deploys v0.5.2.
+
 ### Known limitation surfaced
 - All suite scripts (HTTPS direct probe, TLS shape, active probe HTTP/1, HTTP/2 SETTINGS) share a single `PROBE_REALITY_PORT` env var between dest and probe. If your Reality listener runs on a non-443 port (e.g. 43338 in the Tokyo test VPS), the baseline-to-dest leg fails because nothing on the dest is listening on that port. Splitting `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` is queued for v0.5.3; until then, test against a VPS that runs Reality on 443.
 
-### Planned (v0.5.x — later sprints, autonomous)
-- Split `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` across all four scenario scripts (v0.5.3, mechanical refactor).
+### Deferred to v0.5.x (later sprints)
+- JA4 + JA4S (now scheduled for v1.0 alongside golden snapshots — needs cross-validation against `ja4-python`).
 - AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
 - Pulumi reference.
 
