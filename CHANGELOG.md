@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.x — later sprints, autonomous)
+- Vultr / Proxmox Terraform examples.
+- Pulumi reference.
+
+## [0.5.5] - 2026-05-14
+
+Twelfth tagged release. Sole new feature: **DigitalOcean Terraform example** under `terraform/examples/digitalocean/` — third worked example alongside Hetzner + AWS. Same v0.5.0 module underneath; only the cloud-side resources differ. DO is amd64-only as of Q2/2026; ARM coverage stays with the Hetzner + AWS examples.
+
 ### Added
 - **DigitalOcean Terraform example** (`terraform/examples/digitalocean/`). Third worked example alongside Hetzner + AWS. Same v0.5.0 module underneath; only the cloud-side resources differ.
   - `digitalocean_ssh_key` registering the local pubkey in DO's account-wide registry
@@ -18,9 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`terraform/README.md` + `docs/terraform.md`** layout block + quickstart section extended — example tree is now Hetzner + AWS + DigitalOcean.
 - All 4 `.tf` files validated to parse cleanly via `python-hcl2`.
 
-### Planned (v0.5.x — later sprints, autonomous)
-- Vultr / Proxmox Terraform examples.
-- Pulumi reference.
+### Fixed
+- **Self-pinning bumped to v0.5.5** across `scripts/install.sh`, `cloud-init/stealth-vps.yaml`, the Terraform module + all three example defaults, every doc snippet, `README.zh-CN.md`. Same invariant: fetching at the v0.5.5 tag deploys v0.5.5.
 
 ## [0.5.4] - 2026-05-14
 
