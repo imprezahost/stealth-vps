@@ -1,6 +1,6 @@
 # Terraform
 
-> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. Two concrete worked examples: **Hetzner Cloud** (ARM-by-default, flat pricing) and **AWS EC2** (ARM Graviton or x86, pay-as-you-go). DigitalOcean / Vultr / Proxmox examples land as the module proves itself in the field.
+> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. Three concrete worked examples: **Hetzner Cloud** (ARM-by-default, flat €3.79/mo), **AWS EC2** (ARM Graviton or x86, pay-as-you-go), and **DigitalOcean** (amd64 droplets, flat $6+/mo with 1 TB transfer included). Vultr / Proxmox examples land as the module proves itself in the field.
 
 ## What this is
 
@@ -53,12 +53,19 @@ terraform/
     │   ├── variables.tf                 # hcloud token, server_type, location
     │   ├── outputs.tf                   # IP + SSH command
     │   └── terraform.tfvars.example     # fill in + rename to .tfvars
-    └── aws/                             # end-to-end worked example (AWS EC2)
+    ├── aws/                             # end-to-end worked example (AWS EC2)
+    │   ├── README.md
+    │   ├── main.tf                      # aws_key_pair + aws_security_group + aws_instance + Debian 12 AMI lookup
+    │   ├── variables.tf                 # region, instance_type, architecture (arm64/amd64), allow_ssh_from CIDRs
+    │   ├── outputs.tf                   # public IP + SSH command + AMI ID resolved
+    │   ├── versions.tf                  # required_providers aws ~> 5.70
+    │   └── terraform.tfvars.example
+    └── digitalocean/                    # end-to-end worked example (DigitalOcean)
         ├── README.md
-        ├── main.tf                      # aws_key_pair + aws_security_group + aws_instance + Debian 12 AMI lookup
-        ├── variables.tf                 # region, instance_type, architecture (arm64/amd64), allow_ssh_from CIDRs
-        ├── outputs.tf                   # public IP + SSH command + AMI ID resolved
-        ├── versions.tf                  # required_providers aws ~> 5.70
+        ├── main.tf                      # digitalocean_ssh_key + digitalocean_firewall + digitalocean_droplet
+        ├── variables.tf                 # region, size (amd64 only on DO), allow_ssh_from CIDRs, monitoring/backups toggles
+        ├── outputs.tf                   # IPv4 + IPv6 + SSH command + DO console URL
+        ├── versions.tf                  # required_providers digitalocean ~> 2.40
         └── terraform.tfvars.example
 ```
 

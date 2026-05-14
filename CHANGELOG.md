@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **DigitalOcean Terraform example** (`terraform/examples/digitalocean/`). Third worked example alongside Hetzner + AWS. Same v0.5.0 module underneath; only the cloud-side resources differ.
+  - `digitalocean_ssh_key` registering the local pubkey in DO's account-wide registry
+  - `digitalocean_firewall` with surgical opens — SSH non-default port from configurable CIDRs, Reality TCP 443, Hysteria2 UDP port-hop range, optional TCP 80 for LE HTTP-01 when `var.domain` is set, ICMP allowed for troubleshooting; fully open egress
+  - `digitalocean_droplet` with `ipv6 = true`, free monitoring agent on by default, backups toggle off by default (+20% of size price for weekly backups)
+  - `lifecycle { ignore_changes = [user_data] }` — same pattern as Hetzner + AWS
+  - Firewall bound to droplet ID directly (not via tag) for the single-droplet case; doc snippet shows how to switch to tag-based binding for fleets
+- **`terraform/examples/digitalocean/README.md`** documents: amd64-only on DO (no arm64 droplets as of Q2/2026 — Hetzner cax11 / AWS t4g.small carry the arm64 examples instead), the DO price table (s-1vcpu-2gb at US$12/mo recommended baseline), 1 TB included transfer (vs AWS ~$90/TB egress), `for_each`-over-regions multi-region pattern note.
+- **`terraform/README.md` + `docs/terraform.md`** layout block + quickstart section extended — example tree is now Hetzner + AWS + DigitalOcean.
+- All 4 `.tf` files validated to parse cleanly via `python-hcl2`.
+
 ### Planned (v0.5.x — later sprints, autonomous)
-- DigitalOcean / Vultr / Proxmox Terraform examples.
+- Vultr / Proxmox Terraform examples.
 - Pulumi reference.
 
 ## [0.5.4] - 2026-05-14
