@@ -124,10 +124,12 @@ probe-resistance:
     - pip install --quiet -r requirements.txt
     - echo "--- 01-https-direct-probe ---"
     - bash scripts/https_direct_probe.sh
-    - echo "--- 02-tls-fingerprint (scaffold; exits 2) ---"
-    - python3 scripts/tls_fingerprint_compare.py || [ "$?" -eq 2 ]
-    - echo "--- 03-active-probe (scaffold; exits 2) ---"
+    - echo "--- 02-tls-fingerprint (JA3+JA3S, since v0.5.1) ---"
+    - python3 scripts/tls_fingerprint_compare.py
+    - echo "--- 03-active-probe HTTP/1 ---"
     - python3 scripts/active_probe.py || [ "$?" -eq 2 ]
+    - echo "--- 03h2-h2-settings (since v0.5.2) ---"
+    - python3 scripts/h2_settings_compare.py || [ "$?" -eq 2 ]
     - echo "--- 04-port-scan-baseline ---"
     - bash scripts/port_scan_baseline.sh
   rules:

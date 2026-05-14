@@ -1,6 +1,6 @@
 # Probe-resistance test suite
 
-> **4 of 5 scenarios runnable as of v0.5.1.** Scenario 02 now computes real JA3 + JA3S byte-level fingerprints via stdlib `ssl.MemoryBIO`. Scenario 05 (replay-resistance) stays manual; v0.5.2 picks up JA4/JA4S, v1.0 picks up automated replay + golden snapshots.
+> **5 of 5 scenarios have at least one runnable script as of v0.5.2.** Scenario 02 includes real JA3 + JA3S byte-level fingerprints. Scenario 03 gained an HTTP/2 sub-scenario (`h2_settings_compare.py`) — pure stdlib, captures the server's first `SETTINGS` frame and compares dest vs VPS. Scenario 05 (replay-resistance) is the only one still manual; v1.0 picks up automated replay + golden snapshots + JA4/JA4S.
 
 A focused, evolving set of tests that exercise the *probe-resistance* properties of a deployed stealth-vps host. These tests do not validate that the role installs — that's what Molecule covers. They validate that the *running server* presents to active probers as something benign (the `dest` site Reality borrows from) rather than as a proxy.
 
@@ -49,6 +49,7 @@ tests/probe-resistance/
 │   ├── https_direct_probe.sh
 │   ├── tls_fingerprint_compare.py
 │   ├── active_probe.py
+│   ├── h2_settings_compare.py      # scenario 03 HTTP/2 companion (v0.5.2)
 │   └── port_scan_baseline.sh
 └── requirements.txt                # Python deps for the scripted scenarios
 ```
@@ -79,19 +80,20 @@ Each script exits 0 on pass, non-zero on fail, and prints a one-line summary plu
 
 ### From CI
 
-A manual-trigger GitLab CI job (`probe-resistance`) runs scenarios 01 + 02 + 03 against a staging deploy. It is **not** part of the default pipeline — probe-resistance tests need a live VPS, not a Docker runner, and we don't want a network blip flaking the release pipeline. Trigger it from the GitLab UI on demand.
+A manual-trigger GitLab CI job (`probe-resistance`) runs scenarios 01 + 02 + 03 + 03-h2 + 04 against a staging deploy. It is **not** part of the default pipeline — probe-resistance tests need a live VPS, not a Docker runner, and we don't want a network blip flaking the release pipeline. Trigger it from the GitLab UI on demand.
 
-## Scenario status (v0.5.1)
+## Scenario status (v0.5.2)
 
 | # | Scenario | Doc | Script | Status |
 |---|---|---|---|---|
 | 01 | HTTPS direct probe → must return `dest`-shaped HTML | ✅ | ✅ | runnable |
-| 02 | TLS shape + **JA3/JA3S** comparison (9 features total) | ✅ | ✅ | runnable (v0.5.1; JA4/JA4S → v0.5.2; goldens → v1.0) |
-| 03 | Active probe with no Reality key → response shape | ✅ | ✅ | runnable (h1; h2 frame check deferred to v0.5.x) |
+| 02 | TLS shape + **JA3/JA3S** comparison (9 features total) | ✅ | ✅ | runnable (v0.5.1; JA4/JA4S → v1.0; goldens → v1.0) |
+| 03 | Active probe with no Reality key → HTTP/1 response shape | ✅ | ✅ | runnable (h1 via `active_probe.py`) |
+| 03h2 | Active probe with no Reality key → HTTP/2 SETTINGS frame | ✅ | ✅ | runnable (v0.5.2 via `h2_settings_compare.py`) |
 | 04 | Port-scan baseline (only expected ports open) | ✅ | ✅ | runnable |
 | 05 | Replay-resistance | ✅ | manual | manual — v1.0 automation |
 
-Scripts 02 and 03 use Python stdlib only (no third-party deps). Script 02 captures handshake bytes via `ssl.MemoryBIO`, parses ClientHello / ServerHello in-process, and computes JA3 + JA3S inline. The contract is locked so a v0.5.2 / v1.0 JA4 plug-in lands without changing CI.
+All scripts use Python stdlib only (no third-party deps). Script 02 captures handshake bytes via `ssl.MemoryBIO`, parses ClientHello / ServerHello in-process, and computes JA3 + JA3S inline. Script 03h2 (`h2_settings_compare.py`) speaks the HTTP/2 connection preface inline and parses SETTINGS frames inline. The contract is locked so a v1.0 JA4/JA4S plug-in (or golden snapshots) lands without changing CI.
 
 ## Contributing a scenario
 
