@@ -50,12 +50,13 @@ The module owns no cloud-side resources. Its only output is a string. The user p
 
 ## Quickstart (worked examples)
 
-Four end-to-end examples ship in `terraform/examples/`:
+Five end-to-end examples ship in `terraform/examples/`:
 
 - **[`hetzner/`](../terraform/examples/hetzner)** — Hetzner Cloud, ARM `cax11` by default. Flat pricing (~€3.79/mo), good EU coverage, 20 TB egress included.
-- **[`aws/`](../terraform/examples/aws)** — AWS EC2, ARM `t4g.small` by default (Graviton 2v/2GB, ~US$12/mo on-demand in us-west-2). Pay-as-you-go; data egress is the cost gotcha (~$90/TB outbound after 1 GB). Best when integrating with existing AWS infrastructure.
-- **[`digitalocean/`](../terraform/examples/digitalocean)** — DigitalOcean droplet (amd64 only on DO as of Q2/2026), `s-1vcpu-2gb` recommended (US$12/mo, 1 TB transfer included). Simplest provider in this set — single firewall resource bound to droplet ID, no VPC required.
-- **[`vultr/`](../terraform/examples/vultr)** — Vultr instance (amd64 only on Vultr as of Q2/2026), `vc2-1c-2gb` recommended (US$12/mo). Multi-resource firewall rules (one per IP family + port). `sgp` region has the best mainland-CN routing on Vultr's network.
+- **[`aws/`](../terraform/examples/aws)** — AWS EC2, ARM `t4g.small` by default. Pay-as-you-go; data egress is the cost gotcha. Best when integrating with existing AWS infrastructure.
+- **[`digitalocean/`](../terraform/examples/digitalocean)** — DigitalOcean droplet (amd64), `s-1vcpu-2gb` recommended. Simplest cloud provider in this set.
+- **[`vultr/`](../terraform/examples/vultr)** — Vultr instance (amd64), `vc2-1c-2gb` recommended. `sgp` region has the best mainland-CN routing on Vultr's network.
+- **[`proxmox/`](../terraform/examples/proxmox)** — Proxmox VE self-hosted hypervisor. Clones a pre-existing Debian 12 cloud-init template; user_data delivered via snippet file. Free + your own hardware; fits home labs and colo setups.
 
 Each example ships its own README, `terraform.tfvars.example`, and per-output hints (`ssh_command`, `bootstrap_log_hint`, `credentials_hint`). End-to-end quickstart (Hetzner):
 
@@ -155,7 +156,7 @@ The Terraform module doesn't have its own CI yet. `terraform fmt -check` + `terr
 
 ## Limitations
 
-- The example tree is **Hetzner + AWS + DigitalOcean + Vultr** as of v0.5.6. Proxmox example lands next; the module itself works against any provider whose Terraform resource accepts a string user_data.
+- The example tree is **Hetzner + AWS + DigitalOcean + Vultr + Proxmox** as of v0.5.7. Pulumi reference lands next; the module itself works against any provider whose Terraform resource accepts a string user_data.
 - `extra_role_vars` is `map(any)` — no per-key validation. Override surface is wide; misnames are silently ignored by Ansible.
 - No support for *multi-server fleet* state in the example. The pattern (`for_each` over a regions map) works but is out of scope for the minimal example.
 - The `hcloud` provider version pin is `~> 1.49` (Q2/2026). Bump explicitly in the example's `versions.tf` if you want newer.

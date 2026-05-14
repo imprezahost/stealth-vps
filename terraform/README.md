@@ -1,6 +1,6 @@
 # Terraform
 
-> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. Four concrete worked examples: **Hetzner Cloud** (ARM-by-default, flat €3.79/mo), **AWS EC2** (ARM Graviton or x86, pay-as-you-go), **DigitalOcean** (amd64, flat $6+/mo, 1 TB transfer included), and **Vultr** (amd64, flat $6+/mo, regions optimised for Asia/CN routing). Proxmox example for self-hosted infra lands next.
+> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. **Five concrete worked examples**: **Hetzner Cloud** (ARM-by-default, flat €3.79/mo), **AWS EC2** (ARM Graviton or x86, pay-as-you-go), **DigitalOcean** (amd64, flat $6+/mo, 1 TB transfer included), **Vultr** (amd64, flat $6+/mo, regions optimised for Asia/CN routing), and **Proxmox VE** (self-hosted, cloud-init via snippet file, free + your own hardware). Pulumi reference lands next.
 
 ## What this is
 
@@ -67,13 +67,20 @@ terraform/
     │   ├── outputs.tf                   # IPv4 + IPv6 + SSH command + DO console URL
     │   ├── versions.tf                  # required_providers digitalocean ~> 2.40
     │   └── terraform.tfvars.example
-    └── vultr/                           # end-to-end worked example (Vultr)
+    ├── vultr/                           # end-to-end worked example (Vultr)
+    │   ├── README.md
+    │   ├── main.tf                      # vultr_ssh_key + vultr_firewall_group + per-IP-family rules + vultr_instance
+    │   ├── variables.tf                 # region (sgp = best CN routing), plan, allow_ssh_from CIDRs, enable_ipv6/backups
+    │   ├── outputs.tf                   # IPv4 + IPv6 + Vultr console URL
+    │   ├── versions.tf                  # required_providers vultr ~> 2.21
+    │   └── terraform.tfvars.example
+    └── proxmox/                         # end-to-end worked example (Proxmox VE, self-hosted)
         ├── README.md
-        ├── main.tf                      # vultr_ssh_key + vultr_firewall_group + per-IP-family rules + vultr_instance
-        ├── variables.tf                 # region (sgp = best CN routing), plan, allow_ssh_from CIDRs, enable_ipv6/backups
-        ├── outputs.tf                   # IPv4 + IPv6 + Vultr console URL
-        ├── versions.tf                  # required_providers vultr ~> 2.21
-        └── terraform.tfvars.example
+        ├── main.tf                      # local_file (cloud-init snippet) + proxmox_vm_qemu (cloned from a Debian 12 cloud-init template)
+        ├── variables.tf                 # pm_api_* auth, target_node, vmid, template_name, snippets storage + path, cores/memory/disk
+        ├── outputs.tf                   # vmid + default_ipv4 (via QEMU guest agent)
+        ├── versions.tf                  # required_providers Telmate/proxmox ~> 3.0 + hashicorp/local ~> 2.5
+        └── terraform.tfvars.example     # includes the qm template-creation recipe inline
 ```
 
 ## Why a module, not a root config?
