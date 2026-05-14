@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Vultr Terraform example** (`terraform/examples/vultr/`). Fourth worked example alongside Hetzner + AWS + DigitalOcean. Same v0.5.0 module underneath; only cloud-side resources differ.
+  - `vultr_ssh_key` registering the local pubkey in Vultr's account-wide registry
+  - `vultr_firewall_group` + per-IP-family `vultr_firewall_rule` resources (Vultr's firewall model emits one rule per (IPv4-or-IPv6, port, source CIDR) tuple — example emits both v4 + v6 for Reality + Hysteria2 + optional LE HTTP-01, and one rule per `allow_ssh_from` CIDR)
+  - `vultr_instance` with `enable_ipv6 = true` by default, backups toggle off, `firewall_group_id` association, `lifecycle { ignore_changes = [user_data] }`
+  - Pinned `os_id = 477` for Debian 12 x64 with a doc note that Vultr renumbers IDs occasionally — query current via `curl https://api.vultr.com/v2/os | jq '.os[] | select(.name | test("Debian 12"))'`
+- **`terraform/examples/vultr/README.md`** documents: amd64-only on Vultr (no arm64 plans yet — ARM coverage stays with Hetzner + AWS), the price table (vc2-1c-2gb at US$12/mo recommended baseline, vhf-* for high-frequency CPU), region notes for CN routing (sgp / Singapore is the strongest on Vultr's network), Vultr-specific quirks (per-IP-family firewall rules, OS ID renumbering, no outbound firewall resource).
+- **`terraform/README.md` + `docs/terraform.md`** updated — four examples now: Hetzner + AWS + DigitalOcean + Vultr.
+- All 4 `.tf` files validated to parse cleanly via `python-hcl2`.
+
 ### Planned (v0.5.x — later sprints, autonomous)
-- Vultr / Proxmox Terraform examples.
+- Proxmox Terraform example.
 - Pulumi reference.
 
 ## [0.5.5] - 2026-05-14

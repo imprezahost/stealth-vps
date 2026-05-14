@@ -1,6 +1,6 @@
 # Terraform
 
-> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. Three concrete worked examples: **Hetzner Cloud** (ARM-by-default, flat €3.79/mo), **AWS EC2** (ARM Graviton or x86, pay-as-you-go), and **DigitalOcean** (amd64 droplets, flat $6+/mo with 1 TB transfer included). Vultr / Proxmox examples land as the module proves itself in the field.
+> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. Four concrete worked examples: **Hetzner Cloud** (ARM-by-default, flat €3.79/mo), **AWS EC2** (ARM Graviton or x86, pay-as-you-go), **DigitalOcean** (amd64, flat $6+/mo, 1 TB transfer included), and **Vultr** (amd64, flat $6+/mo, regions optimised for Asia/CN routing). Proxmox example for self-hosted infra lands next.
 
 ## What this is
 
@@ -60,12 +60,19 @@ terraform/
     │   ├── outputs.tf                   # public IP + SSH command + AMI ID resolved
     │   ├── versions.tf                  # required_providers aws ~> 5.70
     │   └── terraform.tfvars.example
-    └── digitalocean/                    # end-to-end worked example (DigitalOcean)
+    ├── digitalocean/                    # end-to-end worked example (DigitalOcean)
+    │   ├── README.md
+    │   ├── main.tf                      # digitalocean_ssh_key + digitalocean_firewall + digitalocean_droplet
+    │   ├── variables.tf                 # region, size (amd64 only on DO), allow_ssh_from CIDRs, monitoring/backups toggles
+    │   ├── outputs.tf                   # IPv4 + IPv6 + SSH command + DO console URL
+    │   ├── versions.tf                  # required_providers digitalocean ~> 2.40
+    │   └── terraform.tfvars.example
+    └── vultr/                           # end-to-end worked example (Vultr)
         ├── README.md
-        ├── main.tf                      # digitalocean_ssh_key + digitalocean_firewall + digitalocean_droplet
-        ├── variables.tf                 # region, size (amd64 only on DO), allow_ssh_from CIDRs, monitoring/backups toggles
-        ├── outputs.tf                   # IPv4 + IPv6 + SSH command + DO console URL
-        ├── versions.tf                  # required_providers digitalocean ~> 2.40
+        ├── main.tf                      # vultr_ssh_key + vultr_firewall_group + per-IP-family rules + vultr_instance
+        ├── variables.tf                 # region (sgp = best CN routing), plan, allow_ssh_from CIDRs, enable_ipv6/backups
+        ├── outputs.tf                   # IPv4 + IPv6 + Vultr console URL
+        ├── versions.tf                  # required_providers vultr ~> 2.21
         └── terraform.tfvars.example
 ```
 
