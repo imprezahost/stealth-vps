@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **AWS EC2 Terraform example** (`terraform/examples/aws/`). End-to-end deploy:
+  - `aws_key_pair` registering the local pubkey
+  - `aws_security_group` with surgical opens — SSH non-default port from configurable CIDRs, Reality TCP 443 from anywhere, Hysteria2 UDP port-hop range from anywhere, optional TCP 80 for LE HTTP-01 when `var.domain` is set
+  - `aws_instance` in the default VPC, public IPv4 + IPv6 enabled, IMDSv2 required, gp3 encrypted root volume
+  - Dynamic Debian 12 AMI lookup via the official Debian owner ID (`136693071363`) — no region-specific AMI IDs hardcoded
+  - `architecture` variable gates the AMI filter so `arm64` (Graviton t4g/m6g) and `amd64` (t3/m5) both work; mismatched arch + instance type fails at apply
+  - `lifecycle { ignore_changes = [user_data] }` so cloud-init re-rendering doesn't force instance replacement — config changes after first boot flow through `ansible-pull -C <new_version>` over SSH, not Terraform destroy/create
+- **`terraform/examples/aws/README.md`** documents the cost trade-offs (AWS data egress is the gotcha at ~$90/TB; Hetzner/OVH/DO ship 1-20 TB free in their flat plans), ARM-vs-AMD guidance, multi-region fleet hint via `provider alias`, and the EIP note for users who need a stable IP.
+- **`terraform/README.md` + `docs/terraform.md` layout sections** updated — the example tree is now Hetzner + AWS as of this sprint, with DigitalOcean / Vultr / Proxmox queued for later v0.5.x sprints.
+- All 4 `.tf` files validated to parse cleanly via `python-hcl2` (local `terraform` binary not on the dev box; `terraform fmt` + `terraform validate` will land in CI as soon as the GitLab runner is unblocked).
+
 ### Planned (v0.5.x — later sprints, autonomous)
-- AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
+- DigitalOcean / Vultr / Proxmox Terraform examples.
 - Pulumi reference.
 
 ## [0.5.3] - 2026-05-14

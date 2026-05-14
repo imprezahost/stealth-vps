@@ -48,9 +48,14 @@ The Terraform path replaces the static cloud-init for users who:
 
 The module owns no cloud-side resources. Its only output is a string. The user picks the provider.
 
-## Quickstart (Hetzner Cloud)
+## Quickstart (worked examples)
 
-The worked example lives in [`terraform/examples/hetzner/`](../terraform/examples/hetzner). End-to-end:
+Two end-to-end examples ship in `terraform/examples/`:
+
+- **[`hetzner/`](../terraform/examples/hetzner)** — Hetzner Cloud, ARM `cax11` by default. Flat pricing (~€3.79/mo), good EU coverage, 20 TB egress included.
+- **[`aws/`](../terraform/examples/aws)** — AWS EC2, ARM `t4g.small` by default (Graviton 2v/2GB, ~US$12/mo on-demand in us-west-2). Pay-as-you-go; data egress is the cost gotcha (~$90/TB outbound after 1 GB). Best when integrating with existing AWS infrastructure.
+
+Each example ships its own README, `terraform.tfvars.example`, and per-output hints (`ssh_command`, `bootstrap_log_hint`, `credentials_hint`). End-to-end quickstart (Hetzner):
 
 ```bash
 cd terraform/examples/hetzner
@@ -148,7 +153,7 @@ The Terraform module doesn't have its own CI yet. `terraform fmt -check` + `terr
 
 ## Limitations
 
-- The example is Hetzner-only at v0.5.0/v0.5.1. AWS / DigitalOcean / Vultr / Proxmox examples land in later v0.5.x sprints; the module itself works against all of them today.
+- The example tree is **Hetzner + AWS** as of v0.5.4. DigitalOcean / Vultr / Proxmox examples land in later v0.5.x sprints; the module itself works against all of them today.
 - `extra_role_vars` is `map(any)` — no per-key validation. Override surface is wide; misnames are silently ignored by Ansible.
 - No support for *multi-server fleet* state in the example. The pattern (`for_each` over a regions map) works but is out of scope for the minimal example.
 - The `hcloud` provider version pin is `~> 1.49` (Q2/2026). Bump explicitly in the example's `versions.tf` if you want newer.
