@@ -1,6 +1,6 @@
 # Probe-resistance test suite
 
-> **5 of 5 scenarios have at least one runnable script as of v0.5.2.** Scenario 02 includes real JA3 + JA3S byte-level fingerprints. Scenario 03 gained an HTTP/2 sub-scenario (`h2_settings_compare.py`) — pure stdlib, captures the server's first `SETTINGS` frame and compares dest vs VPS. Scenario 05 (replay-resistance) is the only one still manual; v1.0 picks up automated replay + golden snapshots + JA4/JA4S.
+> **5 of 5 scenarios have at least one runnable script as of v0.5.2; first end-to-end pen-test against a real stealth-vps deploy passed in v0.5.3.** Scenario 02 includes real JA3 + JA3S byte-level fingerprints. Scenario 03 has both HTTP/1 (`active_probe.py`) and HTTP/2 (`h2_settings_compare.py`) sub-scenarios. v0.5.3 split `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` so the suite can hit VPSes running Reality on non-443 ports. Scenario 05 (replay-resistance) is the only one still manual; v1.0 picks up automated replay + golden snapshots + JA4/JA4S.
 
 A focused, evolving set of tests that exercise the *probe-resistance* properties of a deployed stealth-vps host. These tests do not validate that the role installs — that's what Molecule covers. They validate that the *running server* presents to active probers as something benign (the `dest` site Reality borrows from) rather than as a proxy.
 
@@ -86,7 +86,7 @@ Each script exits 0 on pass, non-zero on fail, and prints a one-line summary plu
 
 A manual-trigger GitLab CI job (`probe-resistance`) runs scenarios 01 + 02 + 03 + 03-h2 + 04 against a staging deploy. It is **not** part of the default pipeline — probe-resistance tests need a live VPS, not a Docker runner, and we don't want a network blip flaking the release pipeline. Trigger it from the GitLab UI on demand.
 
-## Scenario status (v0.5.2)
+## Scenario status (v0.5.3)
 
 | # | Scenario | Doc | Script | Status |
 |---|---|---|---|---|

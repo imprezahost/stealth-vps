@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.x — later sprints, autonomous)
+- AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
+- Pulumi reference.
+
+## [0.5.3] - 2026-05-14
+
+Tenth tagged release. Closes the sharp edge surfaced during sprint 9: the four probe-resistance scenario scripts shared a single `PROBE_REALITY_PORT` between dest and probe, which broke testing against VPSes running Reality on non-443 ports. Splitting `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` unblocked the **first end-to-end pen-test of the suite against a real stealth-vps deploy** (Tokyo VPS, Reality on port 43338); Reality reverse-proxy fallback validated under TLS shape + JA3 + JA3S + HTTP/1 + HTTP/2 SETTINGS-frame comparators.
+
 ### Added
 - **`PROBE_REALITY_PORT` split from `PROBE_DEST_PORT`** across all four probe-resistance scenario scripts (`https_direct_probe.sh`, `tls_fingerprint_compare.py`, `active_probe.py`, `h2_settings_compare.py`). Until v0.5.2 they shared a single `PROBE_REALITY_PORT` env var between dest and probe — testing against a VPS running Reality on a non-443 port required nothing on the dest side. Now:
   - `PROBE_REALITY_PORT` (default 443) → port on the VPS being probed.
@@ -16,20 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`getent` replaced with portable `python3 -c socket`** in `https_direct_probe.sh`. `getent` isn't available on macOS or Git Bash, and `set -o pipefail` propagated its 127 exit code on those platforms. The Python one-liner works wherever the suite's other scripts run.
 
 ### First end-to-end pen-test of the suite against a real stealth-vps deploy
-Tokyo test VPS (`103.106.228.154`) at v0.5.1, Reality on UDP-hopping disabled + TCP port `43338`, `dest = www.microsoft.com:443`. With the v0.5.3 port-split, all three TLS-layer scripts run cleanly against it:
+Tokyo test VPS (`103.106.228.154`) at v0.5.1, Reality on TCP port `43338`, `dest = www.microsoft.com:443`. With the v0.5.3 port-split, all three TLS-layer scripts run cleanly against it:
 
 | Scenario | Result |
 |---|---|
 | `tls_fingerprint_compare.py` (9 features: TLS shape + cert + **JA3 + JA3S**) | ✅ all match dest |
 | `active_probe.py` (HTTP/1 status + header-set + body-bucket) | ✅ status=302, 9 headers, body_bucket=0 — match dest |
 | `h2_settings_compare.py` (HTTP/2 SETTINGS frame) | ✅ Akamai SETTINGS match — `HEADER_TABLE_SIZE=4096, MAX_CONCURRENT_STREAMS=100, INITIAL_WINDOW_SIZE=65535, MAX_FRAME_SIZE=16384, MAX_HEADER_LIST_SIZE=32768` |
-| `https_direct_probe.sh` | inconclusive — `www.microsoft.com` rate-limited the baseline-side IP after many probes (HTTP 000). Not a VPS-side defect; happens to the controller IP under heavy testing. |
+| `https_direct_probe.sh` | inconclusive — `www.microsoft.com` rate-limited the baseline-side IP after many probes (HTTP 000). Not a VPS-side defect. |
 
-Bottom line: **Reality reverse-proxy fallback is integrally validated at TLS handshake + JA3 + JA3S + HTTP/1 response shape + HTTP/2 SETTINGS-frame layers** against a real deploy. An active prober without a Reality key sees the dest's behaviour verbatim across every observable surface we measure.
+Bottom line: **Reality reverse-proxy fallback is integrally validated at TLS handshake + JA3 + JA3S + HTTP/1 response shape + HTTP/2 SETTINGS-frame layers** against a real deploy. An active prober without a Reality key sees the dest's behaviour verbatim across every observable surface the suite measures.
 
-### Planned (v0.5.x — later sprints, autonomous)
-- AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
-- Pulumi reference.
+### Fixed
+- **Self-pinning bumped to v0.5.3 across all entry points** — `scripts/install.sh` URL + `STEALTH_VERSION` default, `cloud-init/stealth-vps.yaml` `ansible-pull -C` arg, `terraform/modules/stealth-vps` `stealth_version` default, the Hetzner example, every doc example, `README.zh-CN.md`. Same invariant as v0.4.2 onwards: fetching at the v0.5.3 tag deploys v0.5.3.
 
 ## [0.5.2] - 2026-05-14
 
