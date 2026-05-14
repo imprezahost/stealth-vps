@@ -1,0 +1,59 @@
+# Copy to terraform.tfvars and fill in.
+#
+# AWS credentials: the example uses the standard provider auth chain
+# (env vars AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY, OR `aws configure`
+# profile in ~/.aws/credentials, OR an instance role if running from
+# inside AWS). Do NOT put credentials in this file.
+
+# Region ---------------------------------------------------------------------
+# us-west-2  — Oregon (good CN routing via west-coast peers)
+# us-east-1  — N. Virginia (cheapest, broad coverage, weakest CN routes)
+# ap-northeast-1 — Tokyo (excellent for mainland CN, costs ~20% more)
+# eu-central-1 — Frankfurt (EU baseline)
+# eu-west-1  — Ireland (EU baseline alt)
+
+aws_region = "us-west-2"
+
+# SSH key --------------------------------------------------------------------
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+key_pair_name       = "stealth-vps"
+
+# Server ---------------------------------------------------------------------
+server_name = "stealth-vps-uswest2"
+
+# Instance type + arch:
+#   ARM (Graviton, cheaper): t4g.small (~$12/mo), t4g.medium (~$24/mo)
+#   AMD: t3.small (~$15/mo), t3.medium (~$30/mo)
+# Match architecture below to the type!
+instance_type = "t4g.small"
+architecture  = "arm64"     # set to "amd64" for t3.*, m5.*, etc.
+
+# Root volume (gp3, encrypted)
+root_volume_gb = 10
+
+# SSH port the hardening role will move to
+ssh_port = 22550
+
+# Release pin
+stealth_version = "v0.5.3"
+
+# Optional: enable Let's Encrypt --------------------------------------------
+# Point a DNS A record at the public_ip output BEFORE running apply,
+# otherwise HTTP-01 challenge fails on first boot.
+
+# domain            = "vpn.example.com"
+# letsencrypt_email = "ops@example.com"
+
+# Reality config ------------------------------------------------------------
+reality_dest        = "www.microsoft.com:443"
+reality_servernames = ["www.microsoft.com"]
+
+# Hysteria2 UDP port-hopping range ------------------------------------------
+hysteria_udp_range_min = 20000
+hysteria_udp_range_max = 50000
+
+# SSH source CIDRs ----------------------------------------------------------
+# Default is anywhere (relies on hardening role for safety). Lock down to
+# your office / VPN if your ops IPs are stable.
+# allow_ssh_from = ["203.0.113.42/32", "198.51.100.0/24"]
+allow_ssh_from = ["0.0.0.0/0"]

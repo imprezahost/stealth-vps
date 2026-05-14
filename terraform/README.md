@@ -1,6 +1,6 @@
 # Terraform
 
-> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. One concrete worked example (Hetzner Cloud). DigitalOcean / AWS / Vultr / Proxmox examples land as the module proves itself in the field.
+> **v0.5.x (alpha).** Provider-agnostic module that generates the cloud-init `user_data` string for any cloud Terraform supports. Two concrete worked examples: **Hetzner Cloud** (ARM-by-default, flat pricing) and **AWS EC2** (ARM Graviton or x86, pay-as-you-go). DigitalOcean / Vultr / Proxmox examples land as the module proves itself in the field.
 
 ## What this is
 
@@ -47,12 +47,19 @@ terraform/
 │       └── templates/
 │           └── stealth-vps.cloud-init.tftpl   # the cloud-init template
 └── examples/
-    └── hetzner/                         # end-to-end worked example
+    ├── hetzner/                         # end-to-end worked example (Hetzner Cloud)
+    │   ├── README.md
+    │   ├── main.tf                      # hcloud_server + the module
+    │   ├── variables.tf                 # hcloud token, server_type, location
+    │   ├── outputs.tf                   # IP + SSH command
+    │   └── terraform.tfvars.example     # fill in + rename to .tfvars
+    └── aws/                             # end-to-end worked example (AWS EC2)
         ├── README.md
-        ├── main.tf                      # hcloud_server + the module
-        ├── variables.tf                 # h cloud token, server_type, location
-        ├── outputs.tf                   # IP + SSH command
-        └── terraform.tfvars.example     # fill in + rename to .tfvars
+        ├── main.tf                      # aws_key_pair + aws_security_group + aws_instance + Debian 12 AMI lookup
+        ├── variables.tf                 # region, instance_type, architecture (arm64/amd64), allow_ssh_from CIDRs
+        ├── outputs.tf                   # public IP + SSH command + AMI ID resolved
+        ├── versions.tf                  # required_providers aws ~> 5.70
+        └── terraform.tfvars.example
 ```
 
 ## Why a module, not a root config?
