@@ -78,9 +78,9 @@ The module has no `required_providers`. Drop it into any Terraform config:
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.0"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.1"
 
-  stealth_version = "v0.5.0"
+  stealth_version = "v0.5.1"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   ssh_port        = 22550
   domain          = "vpn.example.com"
@@ -125,8 +125,8 @@ Full reference in [`terraform/modules/stealth-vps/README.md`](../terraform/modul
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source          = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.0"
-  stealth_version = "v0.5.0"
+  source          = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.1"
+  stealth_version = "v0.5.1"
   # ...
 }
 ```
@@ -140,7 +140,7 @@ The two can drift (a newer module + an older role) but it's unusual; pinning the
 
 ## Pulumi
 
-Pulumi reference is on the v0.5.0 roadmap but lands as a separate sprint. The mechanism is identical (typed inputs → cloud-init string → provider's create-server call); the language is TypeScript / Python / Go instead of HCL. The same `templates/stealth-vps.cloud-init.tftpl` can be ported to a Pulumi `pulumi.asset.StringAsset` + interpolations.
+Pulumi reference is on the v0.5.x roadmap but lands as a separate sprint. The mechanism is identical (typed inputs → cloud-init string → provider's create-server call); the language is TypeScript / Python / Go instead of HCL. The same `templates/stealth-vps.cloud-init.tftpl` can be ported to a Pulumi `pulumi.asset.StringAsset` + interpolations.
 
 ## CI
 
@@ -148,7 +148,7 @@ The Terraform module doesn't have its own CI yet. `terraform fmt -check` + `terr
 
 ## Limitations
 
-- The example is Hetzner-only at v0.5.0. AWS / DigitalOcean / Vultr examples land in v0.5.1+; the module itself works against all of them today.
+- The example is Hetzner-only at v0.5.0/v0.5.1. AWS / DigitalOcean / Vultr / Proxmox examples land in later v0.5.x sprints; the module itself works against all of them today.
 - `extra_role_vars` is `map(any)` — no per-key validation. Override surface is wide; misnames are silently ignored by Ansible.
 - No support for *multi-server fleet* state in the example. The pattern (`for_each` over a regions map) works but is out of scope for the minimal example.
 - The `hcloud` provider version pin is `~> 1.49` (Q2/2026). Bump explicitly in the example's `versions.tf` if you want newer.

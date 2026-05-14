@@ -27,7 +27,7 @@ ssh_public_key_path = "~/.ssh/id_ed25519.pub"
 ssh_port = 22550
 
 # Release pin
-stealth_version = "v0.5.0"
+stealth_version = "v0.5.1"
 
 # Optional: enable Let's Encrypt --------------------------------------------
 # Point a DNS A record at the IPv4 output BEFORE running `terraform apply`,

@@ -5,9 +5,9 @@
 # Designed for fresh Debian 12 / Ubuntu 22.04+ VPS instances.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.0/scripts/install.sh | bash
-#   curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.0/scripts/install.sh \
-#     | STEALTH_VERSION=v0.5.0 bash
+#   curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.1/scripts/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.1/scripts/install.sh \
+#     | STEALTH_VERSION=v0.5.1 bash
 #
 # The URL is pinned to a release tag so the installer code you fetch matches the
 # version it deploys. To install a different release, change the tag in the URL
@@ -32,7 +32,7 @@ BANNER
 # ---------------------------------------------------------------------------
 # Config (override via env)
 # ---------------------------------------------------------------------------
-STEALTH_VERSION="${STEALTH_VERSION:-v0.5.0}"
+STEALTH_VERSION="${STEALTH_VERSION:-v0.5.1}"
 STEALTH_REPO="${STEALTH_REPO:-https://github.com/imprezahost/stealth-vps.git}"
 STEALTH_LOG_DIR="${STEALTH_LOG_DIR:-/var/log/stealth-vps}"
 

@@ -7,11 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Byte-level JA3 + JA3S in `tls_fingerprint_compare.py`** (scenario 02). Captures raw handshake bytes via stdlib `ssl.MemoryBIO` (no scapy / tlslite-ng dependency added), parses the TLS record + handshake layers in-process, and computes the Salesforce 2017 JA3 / JA3S md5s with GREASE values (RFC 8701) excluded. Adds `ja3`, `ja3_raw`, `ja3s`, `ja3s_raw`, and per-fingerprint `parse_state` to the `TlsShape` dataclass; `diff_shapes()` picks them up automatically.
-  - Smoke-tested positive (target=dest=`www.microsoft.com` → matching JA3 `304734bb1c086c3453b387400cf83f11`, JA3S `15af977ce25de452b96affa2addb1036`) and negative (target=`www.apple.com`, dest=`www.microsoft.com` → cert fields diverge as in v0.4.1; JA3/JA3S match because (a) client TLS stack is the same for both probes and (b) TLS 1.3 ServerHello carries very few clear-text extensions).
-  - Honest naming: scenario doc 02 now spells out what JA3 catches (controller-side sanity), what JA3S catches (server-side mirroring), and the TLS 1.3 limitation that most ServerHello extensions migrated to `EncryptedExtensions` (so JA3S is a weaker signal in 2026 than it was in 2017). JA4 / JA4S land in v0.5.2 with cross-validation against `ja4-python`.
-
 ### Planned (v0.5.x — later sprints)
 - JA4 + JA4S (FoxIO 2023+ spec) in `tls_fingerprint_compare.py` — needs cross-validation against `ja4-python` reference impl before claiming compliance.
 - HTTP/2 SETTINGS-frame comparison in `active_probe.py`.
@@ -19,9 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pulumi reference (same mechanism as Terraform, TypeScript/Python/Go instead of HCL).
 
 ### Planned (v0.4.3 — still blocked on externals)
-- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 / v0.4.2 / v0.5.0 — needs iOS + macOS hardware in the QA rotation)
+- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 / v0.4.2 / v0.5.0 / v0.5.1 — needs iOS + macOS hardware in the QA rotation)
 - zh-CN README rewrite by a native speaker (deferred — needs reviewer)
 - Fix the GitLab shell-executor runner so `lint` + `molecule` + `mirror-to-github` jobs actually run on push instead of failing with "apt-get: Permission denied".
+
+## [0.5.1] - 2026-05-14
+
+Seventh tagged release. Sole new feature: real byte-level JA3 + JA3S fingerprinting in the probe-resistance suite's scenario 02. The v0.4.1 7-feature TLS shape comparator gains two byte-level fingerprints, computed inline via stdlib `ssl.MemoryBIO` — no scapy / tlslite-ng dependency added; `requirements.txt` stays stdlib-only. JA4 + JA4S (FoxIO 2023+ spec) carry forward to v0.5.2.
+
+### Added
+- **Byte-level JA3 + JA3S in `tls_fingerprint_compare.py`** (scenario 02). Captures raw handshake bytes via stdlib `ssl.MemoryBIO` (no scapy / tlslite-ng dependency added), parses the TLS record + handshake layers in-process, and computes the Salesforce 2017 JA3 / JA3S md5s with GREASE values (RFC 8701) excluded. Adds `ja3`, `ja3_raw`, `ja3s`, `ja3s_raw`, and per-fingerprint `parse_state` to the `TlsShape` dataclass; `diff_shapes()` picks them up automatically.
+  - Smoke-tested positive (target=dest=`www.microsoft.com` → matching JA3 `304734bb1c086c3453b387400cf83f11`, JA3S `15af977ce25de452b96affa2addb1036`) and negative (target=`www.apple.com`, dest=`www.microsoft.com` → cert fields diverge as in v0.4.1; JA3/JA3S match because (a) client TLS stack is the same for both probes and (b) TLS 1.3 ServerHello carries very few clear-text extensions).
+  - Honest naming: scenario doc 02 now spells out what JA3 catches (controller-side sanity), what JA3S catches (server-side mirroring), and the TLS 1.3 limitation that most ServerHello extensions migrated to `EncryptedExtensions` (so JA3S is a weaker signal in 2026 than it was in 2017). JA4 / JA4S land in v0.5.2 with cross-validation against `ja4-python`.
+
+### Fixed
+- **Self-pinning bumped to v0.5.1 across all entry points** — `scripts/install.sh` URL + `STEALTH_VERSION` default, `cloud-init/stealth-vps.yaml` `ansible-pull -C` arg, `terraform/modules/stealth-vps` `stealth_version` default, the Hetzner example, and every doc example all now reference `v0.5.1`. Same invariant as v0.4.2 onwards: fetching at the v0.5.1 tag deploys v0.5.1.
+
+### Deferred to v0.5.x (later sprints)
+- JA4 + JA4S.
+- HTTP/2 SETTINGS-frame comparison.
+- AWS / DigitalOcean / Vultr / Proxmox Terraform examples.
+- Pulumi reference.
 
 ## [0.5.0] - 2026-05-13
 
