@@ -33,7 +33,9 @@ HTTP/2 stack.
 Env vars:
     PROBE_TARGET            VPS hostname or IP (required)
     PROBE_REALITY_DEST      dest hostname (required)
-    PROBE_REALITY_PORT      dest port (default: 443)
+    PROBE_REALITY_PORT      VPS port where Reality listens (default: 443).
+                            Set to e.g. 43338 when Reality runs on a non-443 port.
+    PROBE_DEST_PORT         port on the public dest (default: 443; rarely changed).
     PROBE_TIMEOUT           per-handshake timeout in seconds (default: 15)
     PROBE_VERBOSE           any value → dump full settings on diff
 
@@ -181,7 +183,9 @@ def fmt_settings(s: dict[int, int]) -> str:
 def main() -> int:
     target = os.environ.get("PROBE_TARGET")
     dest = os.environ.get("PROBE_REALITY_DEST")
-    port = int(os.environ.get("PROBE_REALITY_PORT", "443"))
+    # v0.5.3: split dest port from probe port. Both default to 443.
+    reality_port = int(os.environ.get("PROBE_REALITY_PORT", "443"))
+    dest_port = int(os.environ.get("PROBE_DEST_PORT", "443"))
     timeout = int(os.environ.get("PROBE_TIMEOUT", "15"))
 
     if not target:
@@ -194,25 +198,29 @@ def main() -> int:
 
     try:
         baseline, baseline_state = capture_h2_settings(
-            dest_ip, sni=dest, port=port, timeout=timeout
+            dest_ip, sni=dest, port=dest_port, timeout=timeout
         )
     except (OSError, ssl.SSLError) as exc:
-        fail_inconclusive(f"baseline h2 capture from dest failed: {exc}")
+        fail_inconclusive(
+            f"baseline h2 capture from dest {dest_ip}:{dest_port} failed: {exc}"
+        )
         return 2  # for type checker
 
     if baseline_state != "ok":
         fail_inconclusive(
-            f"baseline state={baseline_state} — dest {dest} ({dest_ip}) "
+            f"baseline state={baseline_state} — dest {dest}({dest_ip}):{dest_port} "
             f"is not h2-capable or rejected our preface; cannot compare"
         )
         return 2
 
     try:
         probe, probe_state = capture_h2_settings(
-            target_ip, sni=dest, port=port, timeout=timeout
+            target_ip, sni=dest, port=reality_port, timeout=timeout
         )
     except (OSError, ssl.SSLError) as exc:
-        fail_inconclusive(f"probe h2 capture from vps failed: {exc}")
+        fail_inconclusive(
+            f"probe h2 capture from vps {target_ip}:{reality_port} failed: {exc}"
+        )
         return 2
 
     if probe_state != "ok":

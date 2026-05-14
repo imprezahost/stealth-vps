@@ -122,6 +122,7 @@ A Reality fallback that returns the *dest's* SETTINGS will match. A "fake fallba
 | `target=dest=www.microsoft.com` | OK — settings collide (same Akamai backend) |
 | `target=www.apple.com`, `dest=www.microsoft.com` | OK — both behind Akamai with the same h2 config |
 | `target=www.google.com`, `dest=www.microsoft.com` | FAIL with 4 WHY: lines — Akamai SETTINGS ≠ Google SETTINGS, exactly what would happen if Reality fallback were leaking a non-dest h2 stack |
+| **`PROBE_REALITY_PORT=43338`, `PROBE_TARGET=<tokyo-vps-ip>`, `PROBE_REALITY_DEST=www.microsoft.com`** (real stealth-vps deploy at v0.5.1, Reality on port 43338) | **OK — SETTINGS collide.** First end-to-end pen-test of the suite against an actual stealth-vps Reality deployment. Confirms reverse-proxy fallback is intact at the HTTP/2 layer: an active prober without a Reality key sees the dest's h2 SETTINGS verbatim. |
 
 ### Known limitations
 
