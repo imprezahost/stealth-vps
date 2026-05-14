@@ -1,0 +1,69 @@
+# Copy to terraform.tfvars and fill in.
+# Prefer `export TF_VAR_vultr_api_key=...` over committing to this file.
+
+# Required ------------------------------------------------------------------
+
+vultr_api_key = "GENERATE-AT-my.vultr.com/settings/#settingsapi"
+
+# Region --------------------------------------------------------------------
+# US:   ewr (NJ), atl, dfw, ord (Chicago), lax, mia, sea
+# EU:   lhr (London), fra (Frankfurt), ams, mad (Madrid), waw (Warsaw)
+# Asia: nrt (Tokyo), sgp (Singapore — best CN routing), icn (Seoul),
+#       blr (Bangalore), del (Delhi)
+# Pac:  syd, mel
+# SA:   gru (São Paulo), bog (Bogotá), scl (Santiago), mex (Mexico)
+# AF:   jnb (Johannesburg)
+# ME:   tlv (Tel Aviv)
+
+region = "lax"
+
+# Server --------------------------------------------------------------------
+
+server_name = "stealth-vps-lax"
+
+# Plan:
+#   vc2-1c-1gb    — 1 vCPU / 1 GB / 25 GB SSD, ~US$6/mo (tight)
+#   vc2-1c-2gb    — 1 vCPU / 2 GB / 55 GB SSD, ~US$12/mo (recommended)
+#   vc2-2c-2gb    — 2 vCPU / 2 GB / 60 GB SSD, ~US$18/mo
+#   vc2-2c-4gb    — 2 vCPU / 4 GB / 80 GB SSD, ~US$24/mo (multi-user comfort)
+# Vultr also has vhf-* (high-frequency CPU, +30-50% price) and
+# vbm-* (bare metal). amd64 only — Vultr does not yet ship arm64.
+
+plan = "vc2-1c-2gb"
+
+# OS — 477 = Debian 12 x64
+os_id = 477
+
+# SSH key (lands in Vultr's account-wide registry + cloud-init authorized_keys)
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+ssh_key_label       = "stealth-vps"
+
+# SSH port the hardening role will move to
+ssh_port = 22550
+
+# Release pin
+stealth_version = "v0.5.5"
+
+# Optional: Let's Encrypt ---------------------------------------------------
+# Point a DNS A record at the ipv4 output BEFORE running apply.
+# domain            = "vpn.example.com"
+# letsencrypt_email = "ops@example.com"
+
+# Reality + Hysteria2 -------------------------------------------------------
+
+reality_dest        = "www.microsoft.com:443"
+reality_servernames = ["www.microsoft.com"]
+
+hysteria_udp_range_min = 20000
+hysteria_udp_range_max = 50000
+
+# Firewall — SSH source CIDRs (v4 only by default; Vultr firewall rules
+# are per IP family). Add ::/0 entries if you want SSH over IPv6.
+# allow_ssh_from = ["203.0.113.42/32", "198.51.100.0/24"]
+allow_ssh_from = ["0.0.0.0/0"]
+
+# Networking
+enable_ipv6 = true
+
+# Backups (~+20% of plan)
+enable_backups = false
