@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.5.x — later sprints, autonomous)
+- DigitalOcean / Vultr / Proxmox Terraform examples.
+- Pulumi reference.
+
+## [0.5.4] - 2026-05-14
+
+Eleventh tagged release. Sole new feature: **AWS EC2 Terraform example** under `terraform/examples/aws/` — the second worked example alongside Hetzner. Same v0.5.0 module underneath; only the cloud-side resources differ. Dynamic Debian 12 AMI lookup via the official Debian owner ID; ARM (Graviton) and AMD instance types both validated through the `architecture` input.
+
 ### Added
 - **AWS EC2 Terraform example** (`terraform/examples/aws/`). End-to-end deploy:
   - `aws_key_pair` registering the local pubkey
@@ -16,12 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `architecture` variable gates the AMI filter so `arm64` (Graviton t4g/m6g) and `amd64` (t3/m5) both work; mismatched arch + instance type fails at apply
   - `lifecycle { ignore_changes = [user_data] }` so cloud-init re-rendering doesn't force instance replacement — config changes after first boot flow through `ansible-pull -C <new_version>` over SSH, not Terraform destroy/create
 - **`terraform/examples/aws/README.md`** documents the cost trade-offs (AWS data egress is the gotcha at ~$90/TB; Hetzner/OVH/DO ship 1-20 TB free in their flat plans), ARM-vs-AMD guidance, multi-region fleet hint via `provider alias`, and the EIP note for users who need a stable IP.
-- **`terraform/README.md` + `docs/terraform.md` layout sections** updated — the example tree is now Hetzner + AWS as of this sprint, with DigitalOcean / Vultr / Proxmox queued for later v0.5.x sprints.
+- **`terraform/README.md` + `docs/terraform.md` layout sections** updated — the example tree is now Hetzner + AWS as of this release, with DigitalOcean / Vultr / Proxmox queued for later v0.5.x sprints.
 - All 4 `.tf` files validated to parse cleanly via `python-hcl2` (local `terraform` binary not on the dev box; `terraform fmt` + `terraform validate` will land in CI as soon as the GitLab runner is unblocked).
 
-### Planned (v0.5.x — later sprints, autonomous)
-- DigitalOcean / Vultr / Proxmox Terraform examples.
-- Pulumi reference.
+### Fixed
+- **Self-pinning bumped to v0.5.4 across all entry points** — `scripts/install.sh` URL + `STEALTH_VERSION` default, `cloud-init/stealth-vps.yaml` `ansible-pull -C` arg, `terraform/modules/stealth-vps` `stealth_version` default, both Hetzner and AWS example defaults, every doc snippet, `README.zh-CN.md`. Same invariant: fetching at the v0.5.4 tag deploys v0.5.4.
 
 ## [0.5.3] - 2026-05-14
 

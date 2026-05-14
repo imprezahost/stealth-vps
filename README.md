@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.5.3 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS (Tahoe Hiddify-via-"Designed for iPad" path documented after pen-test). Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI; `stealth-vps/gitlab-ci` status reports back. Provider-agnostic Terraform module + Hetzner example. Probe-resistance test suite: **5 of 5 scenarios** have runnable scripts (byte-level JA3 + JA3S, HTTP/1 + HTTP/2 SETTINGS comparators). **v0.5.3**: first end-to-end pen-test against a real deploy — Reality reverse-proxy fallback integrally validated under all four comparators. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.5.4 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100` (single scrape target), drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS (Tahoe Hiddify-via-"Designed for iPad" path documented after pen-test). Multi-platform Molecule scenario (Debian 12 + Ubuntu 22.04 + 24.04). External contributor PRs on GitHub auto-mirror to the internal GitLab CI. Provider-agnostic Terraform module with two end-to-end worked examples — **Hetzner Cloud** (ARM cax11 default, flat €3.79/mo) and **AWS EC2** (Graviton t4g.small default, ~$12/mo + data egress). Probe-resistance test suite: 5 of 5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -47,14 +47,14 @@ Pick the one that matches your workflow. All four apply the same configuration.
 For a fresh VPS where you just want it done:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.3/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.4/scripts/install.sh | bash
 ```
 
-This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.5.3 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
+This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.5.4 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.3/scripts/install.sh \
-  | STEALTH_VERSION=v0.5.3 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.4/scripts/install.sh \
+  | STEALTH_VERSION=v0.5.4 bash
 ```
 
 ### 2. Ansible (recommended for repeatable use)
@@ -77,9 +77,9 @@ Provider-agnostic — generates the cloud-init `user_data` from typed HCL inputs
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.3"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.4"
 
-  stealth_version = "v0.5.3"
+  stealth_version = "v0.5.4"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
@@ -91,7 +91,7 @@ resource "hcloud_server" "vps" {  # or aws_instance, digitalocean_droplet, vultr
 }
 ```
 
-End-to-end worked example for Hetzner Cloud in [`terraform/examples/hetzner/`](terraform/examples/hetzner/). See [`docs/terraform.md`](docs/terraform.md) for the full reference.
+End-to-end worked examples for [Hetzner Cloud](terraform/examples/hetzner/) and [AWS EC2](terraform/examples/aws/). See [`docs/terraform.md`](docs/terraform.md) for the full reference and adapter snippets for DigitalOcean / Proxmox / Vultr.
 
 ---
 
@@ -130,8 +130,9 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 | v0.5.0 | Provider-agnostic Terraform module (`terraform/modules/stealth-vps/`) + Hetzner Cloud worked example; cloud-init drift fix (`v0.1.0 → v0.5.0`); README "Three ways" → "Four" with the Terraform path | shipped 2026-05-13 |
 | v0.5.1 | Byte-level **JA3 + JA3S** in `tls_fingerprint_compare.py` via stdlib `ssl.MemoryBIO` (no scapy / tlslite-ng dep); pure-stdlib TLS record + handshake parser; scenario 02 docs spell out JA3-vs-JA3S semantics + the TLS 1.3 `EncryptedExtensions` limitation | shipped 2026-05-14 |
 | v0.5.2 | HTTP/2 SETTINGS-frame comparison as scenario-03 companion (`h2_settings_compare.py`); pure-stdlib HTTP/2 preface + SETTINGS parser inline; all 5 probe-resistance scenarios now have at least one runnable script | shipped 2026-05-14 |
-| **v0.5.3** | Split `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` across all suite scripts; `--resolve → --connect-to` + portable `getent` replacement; **first end-to-end pen-test against a real stealth-vps deploy** (Tokyo VPS, Reality on port 43338) — TLS shape + JA3 + JA3S + HTTP/1 + HTTP/2 SETTINGS all match dest microsoft.com | **shipped 2026-05-14** |
-| v0.5.x | More Terraform examples (AWS / DigitalOcean / Vultr / Proxmox), Pulumi reference | planned |
+| v0.5.3 | Split `PROBE_REALITY_PORT` from `PROBE_DEST_PORT` across all suite scripts; `--resolve → --connect-to` + portable `getent` replacement; first end-to-end pen-test against a real stealth-vps deploy (Tokyo VPS, Reality on port 43338) — TLS shape + JA3 + JA3S + HTTP/1 + HTTP/2 SETTINGS all match dest microsoft.com | shipped 2026-05-14 |
+| **v0.5.4** | **AWS EC2 Terraform example** (`terraform/examples/aws/`) — second worked example alongside Hetzner; ARM Graviton + AMD support via `architecture` input; dynamic Debian 12 AMI lookup; IMDSv2-required, gp3 encrypted root; `lifecycle ignore_changes = [user_data]` to keep cloud-init from triggering instance replacement | **shipped 2026-05-14** |
+| v0.5.x | DigitalOcean / Vultr / Proxmox Terraform examples, Pulumi reference | planned |
 | v1.0.0 | Probe-resistance CI suite (full, with JA4 + JA4S + golden snapshots), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.

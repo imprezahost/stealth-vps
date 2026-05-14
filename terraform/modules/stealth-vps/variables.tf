@@ -1,11 +1,11 @@
 variable "stealth_version" {
   description = "Release tag of stealth-vps to pin the cloud-init bootstrap to. Must be a tag that exists on https://github.com/imprezahost/stealth-vps."
   type        = string
-  default     = "v0.5.3"
+  default     = "v0.5.4"
 
   validation {
     condition     = can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[a-z0-9.]+)?$", var.stealth_version))
-    error_message = "stealth_version must be a SemVer tag like 'v0.5.3' or 'v0.5.3-rc.1'."
+    error_message = "stealth_version must be a SemVer tag like 'v0.5.4' or 'v0.5.4-rc.1'."
   }
 }
 
