@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **iOS + macOS walkthroughs validated end-to-end** against a real Tokyo VPS (deployed at `v0.5.1`). Hardware: iPhone running iOS 19, M2 Pro MacBook running macOS Tahoe. Real-world findings folded back into the docs:
+  - `docs/client-setup/ios.md` — new troubleshooting section on **other-VPN conflict** (NordLayer / NordVPN / Surfshark / WARP / etc. block Hiddify silently with `errno = 61` `127.0.0.1:<port> connection refused` because iOS allows only one active VPN config). Reproduced once with NordLayer installed (even when its app was closed); removing it solved the issue instantly. New note that an IPv6 in `ifconfig.me` is normal output when the VPS is dual-stack — not a leak.
+  - `docs/client-setup/macos.md` — **two new sharp edges on macOS Tahoe (15+)** documented:
+    1. **`right-click → Open` for unidentified-developer apps was removed** — the dialog now offers only "Move to Trash". Workaround documented: use **Privacy & Security → Open Anyway** OR `xattr -d com.apple.quarantine /Applications/<App>.app`.
+    2. **`Hiddify-MacOS.dmg` is broken on macOS Tahoe** — Network Extension is silently rejected because the build isn't notarized with an Apple Developer ID. `systemextensionsctl list` shows 0 extensions; `networksetup -listallnetworkservices` shows no VPN; `route -n get default` keeps pointing at `en0`. No popup, no error in the app. **New recommended path on Apple Silicon**: install **Hiddify iOS via "Designed for iPad"** from the Mac App Store — uses the iOS VPN model, sidesteps the macOS Network Extension issue entirely. Validated end-to-end on M2 Pro / Tahoe. Hiddify Desktop kept in the doc as a "broken / for reference" section.
+  - Both walkthroughs' "Validation status" tables now list per-app last-tested date and result.
+- **`README.zh-CN.md` machine-assisted draft (v0.4.3)** — full re-translation of the current `README.md` (covering everything from v0.1.0 through v0.5.1). Marked at the top as **"machine-quality draft, pending native review"** with a Chinese-language note pointing readers to the authoritative English version. Includes a translator's glossary table at the end mapping technical terms (VLESS-Reality, Hysteria2, JA3, idempotent, hardening, port hopping, …) to suggested Chinese renderings + notes on when to keep the English term. The placeholder zh-CN page from v0.1.0 (which still said "pre-alpha") is replaced. Native-speaker review still needed before claiming this fully ships; community contributors welcome.
+
 ### Planned (v0.5.x — later sprints)
 - JA4 + JA4S (FoxIO 2023+ spec) in `tls_fingerprint_compare.py` — needs cross-validation against `ja4-python` reference impl before claiming compliance.
 - HTTP/2 SETTINGS-frame comparison in `active_probe.py`.
@@ -14,9 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pulumi reference (same mechanism as Terraform, TypeScript/Python/Go instead of HCL).
 
 ### Planned (v0.4.3 — still blocked on externals)
-- Pen-tested iOS + macOS validation pass against the v0.3.0 walkthroughs (deferred from v0.4.0 / v0.4.1 / v0.4.2 / v0.5.0 / v0.5.1 — needs iOS + macOS hardware in the QA rotation)
-- zh-CN README rewrite by a native speaker (deferred — needs reviewer)
+- zh-CN README **native-speaker review pass** on the v0.4.3 draft (the machine-assisted draft is now in the repo; community review and final polish pending).
 - Fix the GitLab shell-executor runner so `lint` + `molecule` + `mirror-to-github` jobs actually run on push instead of failing with "apt-get: Permission denied".
+- Pen-test the remaining clients still listed as "pending" in the walkthrough validation tables: Shadowrocket / Streisand on iOS; Shadowrocket / V2Box / NekoBox on macOS.
 
 ## [0.5.1] - 2026-05-14
 
