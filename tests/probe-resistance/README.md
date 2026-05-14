@@ -67,7 +67,11 @@ pip install -r requirements.txt
 # Set the target host (matches the dest expected behind Reality)
 export PROBE_TARGET="my-vps.example.com"
 export PROBE_REALITY_DEST="www.microsoft.com"        # whatever you configured
-export PROBE_REALITY_PORT=443
+
+# Ports (v0.5.3+): two independent values, both defaulting to 443.
+# Set PROBE_REALITY_PORT when Reality runs on a non-443 port:
+export PROBE_REALITY_PORT=443    # VPS port — change to 43338 etc. if needed
+export PROBE_DEST_PORT=443       # public dest port — rarely changed
 
 # Run individual scenarios:
 bash scripts/https_direct_probe.sh

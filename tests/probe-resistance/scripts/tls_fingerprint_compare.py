@@ -37,7 +37,9 @@ script contract (env vars + exit codes) stays stable.
 Env vars:
     PROBE_TARGET            VPS hostname or IP (required)
     PROBE_REALITY_DEST      dest hostname configured on the panel (required)
-    PROBE_REALITY_PORT      dest port (default: 443)
+    PROBE_REALITY_PORT      VPS port where Reality listens (default: 443).
+                            Set to e.g. 43338 when Reality runs on a non-443 port.
+    PROBE_DEST_PORT         port on the public dest (default: 443; rarely changed).
     PROBE_TIMEOUT           per-handshake timeout in seconds (default: 15)
     PROBE_ALPN              comma-separated ALPN to offer (default: "h2,http/1.1")
     PROBE_VERBOSE           any value → dump full baseline + probe on diff
@@ -531,7 +533,12 @@ def diff_shapes(baseline: TlsShape, probe: TlsShape) -> list[str]:
 def main() -> int:
     target = os.environ.get("PROBE_TARGET")
     dest = os.environ.get("PROBE_REALITY_DEST")
-    port = int(os.environ.get("PROBE_REALITY_PORT", "443"))
+    # v0.5.3: split dest port (public site) from probe port (our VPS).
+    # Both default to 443, so legacy usage that only set PROBE_REALITY_PORT
+    # continues to work as long as the dest also listens on 443 (which is
+    # the universal case for the role's default Reality dests).
+    reality_port = int(os.environ.get("PROBE_REALITY_PORT", "443"))
+    dest_port = int(os.environ.get("PROBE_DEST_PORT", "443"))
     timeout = int(os.environ.get("PROBE_TIMEOUT", "15"))
     alpn_csv = os.environ.get("PROBE_ALPN", "h2,http/1.1")
     alpn_offer = [a.strip() for a in alpn_csv.split(",") if a.strip()]
@@ -545,17 +552,21 @@ def main() -> int:
     dest_ip = resolve(dest)
 
     try:
-        baseline = capture_shape(dest_ip, sni=dest, port=port,
+        baseline = capture_shape(dest_ip, sni=dest, port=dest_port,
                                  timeout=timeout, alpn_offer=alpn_offer)
     except (OSError, ssl.SSLError) as exc:
-        fail_inconclusive(f"baseline handshake to dest {dest_ip}:{port} failed: {exc}")
+        fail_inconclusive(
+            f"baseline handshake to dest {dest_ip}:{dest_port} failed: {exc}"
+        )
         return 2  # for type checker
 
     try:
-        probe = capture_shape(target_ip, sni=dest, port=port,
+        probe = capture_shape(target_ip, sni=dest, port=reality_port,
                               timeout=timeout, alpn_offer=alpn_offer)
     except (OSError, ssl.SSLError) as exc:
-        fail_inconclusive(f"probe handshake to vps {target_ip}:{port} failed: {exc}")
+        fail_inconclusive(
+            f"probe handshake to vps {target_ip}:{reality_port} failed: {exc}"
+        )
         return 2
 
     why = diff_shapes(baseline, probe)

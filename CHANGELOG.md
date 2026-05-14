@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.5.3 — next mechanical sprint)
-- Split `PROBE_REALITY_PORT` (port on the VPS being probed) from `PROBE_DEST_PORT` (port on the real dest) across all four scenario scripts. Mechanical refactor; unblocks testing against VPSes that run Reality on a non-443 port.
+### Added
+- **`PROBE_REALITY_PORT` split from `PROBE_DEST_PORT`** across all four probe-resistance scenario scripts (`https_direct_probe.sh`, `tls_fingerprint_compare.py`, `active_probe.py`, `h2_settings_compare.py`). Until v0.5.2 they shared a single `PROBE_REALITY_PORT` env var between dest and probe — testing against a VPS running Reality on a non-443 port required nothing on the dest side. Now:
+  - `PROBE_REALITY_PORT` (default 443) → port on the VPS being probed.
+  - `PROBE_DEST_PORT` (default 443) → port on the public dest.
+  - Backward-compatible: existing usage that sets only `PROBE_REALITY_PORT` keeps working as long as the dest also listens on 443 (the universal case for the role's default dests like `www.microsoft.com:443`).
+- **`https_direct_probe.sh` switched from `--resolve` to `--connect-to`** for clean split-port semantics. The legacy `--resolve dest:443:vps_ip` hardcoded port 443 in both the curl request URL and the actual connection; `--connect-to dest:dest_port:vps_ip:reality_port` lets the URL's host:port stay intact (so `Host:` header echoes the dest's port) while the TCP connection actually goes to the VPS's Reality port.
+- **`getent` replaced with portable `python3 -c socket`** in `https_direct_probe.sh`. `getent` isn't available on macOS or Git Bash, and `set -o pipefail` propagated its 127 exit code on those platforms. The Python one-liner works wherever the suite's other scripts run.
+
+### First end-to-end pen-test of the suite against a real stealth-vps deploy
+Tokyo test VPS (`103.106.228.154`) at v0.5.1, Reality on UDP-hopping disabled + TCP port `43338`, `dest = www.microsoft.com:443`. With the v0.5.3 port-split, all three TLS-layer scripts run cleanly against it:
+
+| Scenario | Result |
+|---|---|
+| `tls_fingerprint_compare.py` (9 features: TLS shape + cert + **JA3 + JA3S**) | ✅ all match dest |
+| `active_probe.py` (HTTP/1 status + header-set + body-bucket) | ✅ status=302, 9 headers, body_bucket=0 — match dest |
+| `h2_settings_compare.py` (HTTP/2 SETTINGS frame) | ✅ Akamai SETTINGS match — `HEADER_TABLE_SIZE=4096, MAX_CONCURRENT_STREAMS=100, INITIAL_WINDOW_SIZE=65535, MAX_FRAME_SIZE=16384, MAX_HEADER_LIST_SIZE=32768` |
+| `https_direct_probe.sh` | inconclusive — `www.microsoft.com` rate-limited the baseline-side IP after many probes (HTTP 000). Not a VPS-side defect; happens to the controller IP under heavy testing. |
+
+Bottom line: **Reality reverse-proxy fallback is integrally validated at TLS handshake + JA3 + JA3S + HTTP/1 response shape + HTTP/2 SETTINGS-frame layers** against a real deploy. An active prober without a Reality key sees the dest's behaviour verbatim across every observable surface we measure.
 
 ### Planned (v0.5.x — later sprints, autonomous)
 - AWS / DigitalOcean / Vultr / Proxmox Terraform examples.

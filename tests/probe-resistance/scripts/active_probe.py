@@ -10,7 +10,9 @@ handshake layer.
 Env vars:
     PROBE_TARGET            VPS hostname or IP (required)
     PROBE_REALITY_DEST      dest hostname (required)
-    PROBE_REALITY_PORT      dest port (default: 443)
+    PROBE_REALITY_PORT      VPS port where Reality listens (default: 443).
+                            Set to e.g. 43338 when Reality runs on a non-443 port.
+    PROBE_DEST_PORT         port on the public dest (default: 443; rarely changed).
     PROBE_TIMEOUT           per-request timeout in seconds (default: 15)
     PROBE_VERBOSE           any value → dump full baseline + probe on diff
 
@@ -153,7 +155,9 @@ def diff_shapes(baseline: ProbeShape, probe: ProbeShape) -> list[str]:
 def main() -> int:
     target = os.environ.get("PROBE_TARGET")
     dest = os.environ.get("PROBE_REALITY_DEST")
-    port = int(os.environ.get("PROBE_REALITY_PORT", "443"))
+    # v0.5.3: split dest port from probe port. Both default to 443.
+    reality_port = int(os.environ.get("PROBE_REALITY_PORT", "443"))
+    dest_port = int(os.environ.get("PROBE_DEST_PORT", "443"))
     timeout = int(os.environ.get("PROBE_TIMEOUT", "15"))
 
     if not target:
@@ -165,15 +169,19 @@ def main() -> int:
     dest_ip = resolve(dest)
 
     try:
-        baseline = http_probe(dest_ip, sni=dest, port=port, timeout=timeout)
+        baseline = http_probe(dest_ip, sni=dest, port=dest_port, timeout=timeout)
     except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
-        fail_inconclusive(f"baseline probe to dest {dest_ip}:{port} failed: {exc}")
+        fail_inconclusive(
+            f"baseline probe to dest {dest_ip}:{dest_port} failed: {exc}"
+        )
         return 2
 
     try:
-        probe = http_probe(target_ip, sni=dest, port=port, timeout=timeout)
+        probe = http_probe(target_ip, sni=dest, port=reality_port, timeout=timeout)
     except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
-        fail_inconclusive(f"probe to vps {target_ip}:{port} failed: {exc}")
+        fail_inconclusive(
+            f"probe to vps {target_ip}:{reality_port} failed: {exc}"
+        )
         return 2
 
     why = diff_shapes(baseline, probe)
