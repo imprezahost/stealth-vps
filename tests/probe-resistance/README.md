@@ -1,6 +1,6 @@
 # Probe-resistance test suite
 
-> **4 of 5 scenarios runnable as of v0.4.1.** Scenario 05 (replay-resistance) stays manual; v1.0 will plug in raw-packet JA4/JA4S + automated replay.
+> **4 of 5 scenarios runnable as of v0.5.1.** Scenario 02 now computes real JA3 + JA3S byte-level fingerprints via stdlib `ssl.MemoryBIO`. Scenario 05 (replay-resistance) stays manual; v0.5.2 picks up JA4/JA4S, v1.0 picks up automated replay + golden snapshots.
 
 A focused, evolving set of tests that exercise the *probe-resistance* properties of a deployed stealth-vps host. These tests do not validate that the role installs — that's what Molecule covers. They validate that the *running server* presents to active probers as something benign (the `dest` site Reality borrows from) rather than as a proxy.
 
@@ -81,17 +81,17 @@ Each script exits 0 on pass, non-zero on fail, and prints a one-line summary plu
 
 A manual-trigger GitLab CI job (`probe-resistance`) runs scenarios 01 + 02 + 03 against a staging deploy. It is **not** part of the default pipeline — probe-resistance tests need a live VPS, not a Docker runner, and we don't want a network blip flaking the release pipeline. Trigger it from the GitLab UI on demand.
 
-## Scenario status (v0.4.1)
+## Scenario status (v0.5.1)
 
 | # | Scenario | Doc | Script | Status |
 |---|---|---|---|---|
 | 01 | HTTPS direct probe → must return `dest`-shaped HTML | ✅ | ✅ | runnable |
-| 02 | TLS shape comparison (server vs dest, 7 features) | ✅ | ✅ | runnable (v0.4.1; true JA3/JA4 deferred to v1.0) |
-| 03 | Active probe with no Reality key → response shape | ✅ | ✅ | runnable (h1; h2 frame check deferred to v1.0) |
+| 02 | TLS shape + **JA3/JA3S** comparison (9 features total) | ✅ | ✅ | runnable (v0.5.1; JA4/JA4S → v0.5.2; goldens → v1.0) |
+| 03 | Active probe with no Reality key → response shape | ✅ | ✅ | runnable (h1; h2 frame check deferred to v0.5.x) |
 | 04 | Port-scan baseline (only expected ports open) | ✅ | ✅ | runnable |
 | 05 | Replay-resistance | ✅ | manual | manual — v1.0 automation |
 
-Scripts 02 and 03 compare TLS handshake + HTTP response shapes using Python stdlib only (no third-party deps yet); the contract is locked so a v1.0 plug-in for byte-level JA3/JA4 can subsume the scenario without changing how CI calls it.
+Scripts 02 and 03 use Python stdlib only (no third-party deps). Script 02 captures handshake bytes via `ssl.MemoryBIO`, parses ClientHello / ServerHello in-process, and computes JA3 + JA3S inline. The contract is locked so a v0.5.2 / v1.0 JA4 plug-in lands without changing CI.
 
 ## Contributing a scenario
 
