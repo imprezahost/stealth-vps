@@ -1,10 +1,10 @@
-# 02 — TLS shape comparison
+# 02 — TLS shape + JA3/JA3S fingerprint comparison
 
 ## What we're testing
 
-The TLS handshake response shape from our VPS — when responding to a probe that does **not** carry a valid Reality key — must match the shape of the real `dest` site for every feature the probe can read from a stdlib TLS handshake.
+The TLS handshake response shape from our VPS — when responding to a probe that does **not** carry a valid Reality key — must match the shape of the real `dest` site across:
 
-We compare seven features:
+**Stdlib-readable features (7):**
 
 1. Negotiated TLS protocol version (e.g. `TLSv1.3`)
 2. Chosen cipher suite (e.g. `TLS_AES_256_GCM_SHA384`)
@@ -12,21 +12,28 @@ We compare seven features:
 4. Peer cert subject CN
 5. Peer cert SAN list (sorted)
 6. Peer cert issuer CN
-7. Peer cert signature algorithm + public-key algorithm
+7. Peer cert signature + public-key algorithms
+
+**Byte-level fingerprints (2, since v0.5.1):**
+
+8. **JA3** — Salesforce 2017 spec. md5 of `version,ciphers,extensions,curves,formats` from ClientHello bytes captured via `ssl.MemoryBIO`. GREASE values (RFC 8701) excluded.
+9. **JA3S** — md5 of `version,cipher,extensions` from ServerHello bytes. Same byte-level capture path.
 
 If Reality's reverse-proxy fallback is working, every one of these collides with the real dest, because Reality is literally returning the dest's TLS response. Divergence pinpoints which layer leaks — most commonly a cert-mismatch (we presented our own cert instead of mirroring dest's).
 
-## What this is *not* (yet)
+## JA3 versus JA3S — what each catches
 
-This is **not** a true JA3 / JA4 fingerprint. Those compute over the raw `ClientHello` / `ServerHello` byte stream — extension order, supported-groups list, key-share preferences — which Python's stdlib `ssl` module abstracts away. Computing real JA3/JA4 needs raw-packet capture (scapy) or a pure-Python TLS implementation (tlslite-ng).
+**JA3 fingerprints the *client*.** Both our probes use the same Python stdlib `ssl` client, so the dest-side JA3 and the VPS-side JA3 are *expected to be identical* in this scenario. JA3 is exposed in the output for two reasons: (a) it lets you confirm the probe is well-behaved before you start triaging server-side issues, and (b) if the JA3s ever DO differ between probes, something interfered with the controller-side TLS stack (Python upgrade, OpenSSL library swap, MITM CA installed) and the test is invalid.
 
-We chose the seven-feature shape comparison because:
+**JA3S fingerprints the *server*.** This is the value you actually care about for Reality-fallback detection. A working Reality returns the dest's ServerHello bytes verbatim → JA3S collision. A broken Reality returns Xray's own ServerHello → JA3S divergence.
 
-- In practice it catches every Reality misconfiguration we've seen in production. The hard failure modes (own cert leaked, wrong cipher chosen, ALPN mismatch) all show up in features 1-7.
-- It's pure stdlib + one shell-out to `openssl x509`. No third-party deps; works on any Debian/Ubuntu host.
-- The fail output names every divergent feature with a `WHY:` line so triage is direct.
+### JA3S in TLS 1.3 — a real limitation
 
-A future v1.0 plug-in that uses scapy or tlslite-ng for byte-level JA3/JA4 can subsume this scenario without changing the script contract (env vars + exit codes are stable).
+RFC 8446 moved most ServerHello extensions into the `EncryptedExtensions` message, which is encrypted with the key derived from the handshake's earlier `key_share`. JA3S therefore captures only `version`, `cipher`, and the *clear-text* portion of extensions — typically just `supported_versions` and `key_share`.
+
+In practice this means: two completely different TLS 1.3 servers that happen to negotiate the same cipher (which is common — `TLS_AES_256_GCM_SHA384` dominates) and present a similar bare ServerHello can produce *identical* JA3S strings even though everything else about them differs. **JA3S is a much weaker signal in TLS 1.3 than it was in TLS 1.2.** The seven stdlib-readable features above (especially cert subject_cn / SAN / issuer) remain the primary discriminators.
+
+The v0.5.x roadmap picks up JA4 + JA4S (FoxIO 2023+ spec). JA4 captures more pre-encryption bytes (signature_algorithms list ordering, ALPN value, etc.) and JA4S includes a small extension hash that's more discriminating than JA3S's md5 of clear-only extensions.
 
 ## Why it matters
 
@@ -66,15 +73,21 @@ A collision on JA3 alone is not enough in 2026. Both must match.
 
 `scripts/tls_fingerprint_compare.py`:
 
-**v0.4.1 (runnable):**
+**v0.5.1 (runnable, JA3+JA3S added):**
 
-- Opens two TLS handshakes (dest, then VPS-with-dest-SNI) via stdlib `ssl.SSLContext`. ALPN offer defaults to `h2,http/1.1` (override via `PROBE_ALPN`).
-- Reads protocol version + chosen cipher + selected ALPN directly from the wrapped socket.
-- Captures the peer cert in DER form, writes it to a temp file, shells out to `openssl x509 -inform DER -text` to parse subject CN, SAN list, issuer CN, signature algorithm, and public-key algorithm.
-- Diffs the seven features. Exits 0 on collision, 1 with one `WHY:` line per diverging feature, 2 on inconclusive (target unreachable, openssl missing, etc.).
-- `PROBE_VERBOSE=1` dumps both shapes for triage.
+- Opens two TLS handshakes (dest, then VPS-with-dest-SNI) via stdlib `ssl.SSLContext` wrapped over an `ssl.MemoryBIO` pair. The MemoryBIO setup lets us capture every byte that crosses the socket in either direction without losing the convenience of a normal handshake.
+- `_extract_handshake_message()` walks the TLS record layer in the captured byte streams and returns the body of the first ClientHello / ServerHello it finds.
+- `parse_client_hello()` and `parse_server_hello()` are pure-stdlib parsers (no `scapy` / `tlslite-ng` dependency at v0.5.1): they decode version, cipher list, extension list, supported_groups, ec_point_formats, signature_algorithms.
+- `compute_ja3()` / `compute_ja3s()` apply the Salesforce 2017 spec: GREASE values (RFC 8701) filtered out, fields joined by commas with `-` between list elements, md5 hex digest taken.
+- Reads protocol version + chosen cipher + selected ALPN directly from the wrapped socket (stdlib-readable features 1-3).
+- Captures the peer cert in DER form, writes it to a temp file, shells out to `openssl x509 -inform DER -text` to parse subject CN, SAN list, issuer CN, signature algorithm, and public-key algorithm (features 4-7).
+- Diffs all 9 features. Exits 0 on collision, 1 with one `WHY:` line per diverging feature, 2 on inconclusive (target unreachable, openssl missing, parse failure).
+- `PROBE_VERBOSE=1` dumps both shapes (including JA3 raw strings) for triage.
+- `parse_state` dict on each shape carries `"ok"` / `"parse-error: ..."` per fingerprint so a parser regression on one side doesn't silently produce a fake match.
 
-**v1.0 (planned):** plug in scapy or tlslite-ng to capture raw `ServerHello` bytes and compute true JA3S + JA4S strings; check golden JA4S into the repo per dest with a `scripts/update_golden.py` helper for the quarterly cipher-preference rotations upstream sites do.
+**v0.5.2 (planned):** JA4 + JA4S (FoxIO 2023+ spec). The contract is stable, so adding `ja4` / `ja4s` to `TlsShape` + extending `diff_shapes()` is a localized change. Will need a reference implementation (`ja4-python`) for golden-string cross-validation before claiming spec compliance.
+
+**v1.0 (planned):** snapshot tests with golden JA3 / JA3S / JA4 / JA4S checked into the repo per dest; `scripts/update_golden.py` helper for the quarterly cipher-preference rotations upstream sites do.
 
 ## Failure modes (expected once implemented)
 
