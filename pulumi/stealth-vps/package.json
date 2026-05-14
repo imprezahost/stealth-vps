@@ -1,0 +1,17 @@
+{
+  "name": "stealth-vps",
+  "version": "0.5.8",
+  "description": "Cloud-init builder for stealth-vps deployments. Pure-TypeScript port of terraform/modules/stealth-vps/.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imprezahost/stealth-vps"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0"
+  }
+}

@@ -1,0 +1,18 @@
+# Copy to Pulumi.dev.yaml (NOT committed — already in .gitignore by Pulumi)
+# and fill in. Prefer `pulumi config set --secret hcloudToken <value>`
+# over editing this file directly.
+
+config:
+  stealth-vps-hetzner:hcloudToken:
+    secure: REPLACE-WITH-pulumi-config-set--secret-hcloudToken
+  stealth-vps-hetzner:serverName: stealth-vps-fsn1
+  stealth-vps-hetzner:serverType: cax11           # ARM 2v/4GB
+  stealth-vps-hetzner:location: fsn1              # fsn1/nbg1/hel1 EU; ash/hil US; sin SG
+  stealth-vps-hetzner:image: debian-12
+  stealth-vps-hetzner:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
+  stealth-vps-hetzner:sshPort: 22550
+  stealth-vps-hetzner:stealthVersion: v0.5.8
+  # Optional LE — uncomment to enable:
+  # stealth-vps-hetzner:domain: vpn.example.com
+  # stealth-vps-hetzner:letsencryptEmail: ops@example.com
+  stealth-vps-hetzner:realityDest: www.microsoft.com:443

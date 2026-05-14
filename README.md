@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.5.7 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS (Tahoe Hiddify-via-"Designed for iPad" path documented after pen-test). Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04). External GitHub PRs auto-mirror to internal GitLab CI. Provider-agnostic Terraform module with **five end-to-end worked examples** — Hetzner Cloud, AWS EC2 (with Graviton), DigitalOcean, Vultr, and Proxmox VE (self-hosted). Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.5.8 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS (Tahoe Hiddify-via-"Designed for iPad" path documented after pen-test). Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04). External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + a TypeScript Pulumi reference. Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. See [CHANGELOG.md](CHANGELOG.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
 
@@ -91,7 +91,7 @@ resource "hcloud_server" "vps" {  # or aws_instance, digitalocean_droplet, vultr
 }
 ```
 
-End-to-end worked examples for [Hetzner Cloud](terraform/examples/hetzner/) and [AWS EC2](terraform/examples/aws/). See [`docs/terraform.md`](docs/terraform.md) for the full reference and adapter snippets for DigitalOcean / Proxmox / Vultr.
+End-to-end worked examples for [Hetzner Cloud](terraform/examples/hetzner/), [AWS EC2](terraform/examples/aws/), [DigitalOcean](terraform/examples/digitalocean/), [Vultr](terraform/examples/vultr/), and [Proxmox VE](terraform/examples/proxmox/) (self-hosted). Pulumi TypeScript port lives in [`pulumi/`](pulumi/) with a Hetzner example as the canonical reference. See [`docs/terraform.md`](docs/terraform.md) for the full Terraform reference.
 
 ---
 
@@ -134,8 +134,8 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 | v0.5.4 | AWS EC2 Terraform example — second worked example alongside Hetzner; ARM Graviton + AMD via `architecture` input; dynamic Debian 12 AMI lookup; IMDSv2-required, gp3 encrypted root | shipped 2026-05-14 |
 | v0.5.5 | DigitalOcean Terraform example — third worked example; `digitalocean_droplet` + `digitalocean_firewall` + `digitalocean_ssh_key`; amd64-only on DO | shipped 2026-05-14 |
 | v0.5.6 | Vultr Terraform example — fourth worked example; `vultr_instance` + `vultr_firewall_group` + per-IP-family firewall rules; amd64-only on Vultr | shipped 2026-05-14 |
-| **v0.5.7** | **Proxmox VE Terraform example** — fifth worked example; `proxmox_vm_qemu` clones a Debian 12 cloud-init template; `local_file` writes user_data as a snippet; Telmate provider; covers home-lab + colo self-hosted setups | **shipped 2026-05-14** |
-| v0.5.x | Pulumi reference | planned |
+| v0.5.7 | Proxmox VE Terraform example — fifth worked example; `proxmox_vm_qemu` clones a Debian 12 cloud-init template; `local_file` writes user_data as a snippet | shipped 2026-05-14 |
+| **v0.5.8** | **Pulumi TypeScript reference** (`pulumi/stealth-vps/` + `pulumi/examples/hetzner/`) — pure-TS port of the Terraform module's cloud-init builder; output byte-equivalent to Terraform's; Hetzner example wires it through `@pulumi/hcloud` | **shipped 2026-05-14** |
 | v1.0.0 | Probe-resistance CI suite (full, with JA4 + JA4S + golden snapshots), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.
