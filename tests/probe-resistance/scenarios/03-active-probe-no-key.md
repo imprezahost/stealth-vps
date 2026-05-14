@@ -86,3 +86,45 @@ The h1-only forcing is deliberate: we lose the ability to inspect HTTP/2 frame s
 - Some dests rotate their pages on a few-hour cadence (microsoft.com homepage A/B tests). A tiny size diff is normal; the bucketing absorbs that.
 - This test runs over IPv4 by default. Reality with IPv6 dest reachability is identical in principle but worth running separately if you've configured a v6 dest.
 - A truly motivated adversary will *also* probe with random URLs, malformed HTTP, and weird ALPN values. Those are scenario-05 territory.
+- All suite scripts (including this one's HTTP/2 companion below) assume **dest and probe listen on the same port** — `PROBE_REALITY_PORT`, default 443. If Reality is on a non-443 port on your VPS (e.g. 43338), the baseline-to-dest leg fails because nothing on the dest is listening on 43338. Folding `PROBE_REALITY_PORT` apart from `PROBE_DEST_PORT` is a v0.5.3 follow-up; for now, the workaround is to test against a VPS that runs Reality on 443.
+
+## HTTP/2 sub-scenario — `scripts/h2_settings_compare.py` (v0.5.2)
+
+Companion script that captures the server's first `SETTINGS` frame over a real HTTP/2 connection and compares dest vs VPS. Pure stdlib — no `h2` library or `hyper` dependency.
+
+### What it does
+
+1. Opens TLS with `ALPN = ["h2"]` (not the more permissive `h2, http/1.1` of `active_probe.py`).
+2. Refuses to proceed if the server didn't select `h2` (exit 2 — most dests do speak h2, but not all).
+3. Sends the HTTP/2 connection preface (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n` — exactly 24 bytes per RFC 7540 §3.5).
+4. Sends an empty `SETTINGS` frame from us (length=0, type=0x4, flags=0).
+5. Reads up to 20 frames from the server, looking for the first `SETTINGS` frame **without the ACK flag** — that's the server's actual SETTINGS, not the one acknowledging ours.
+6. Parses the SETTINGS payload — list of (uint16 identifier, uint32 value) pairs per RFC 7540 §6.5.1.
+7. Returns a dict mapping identifier → value. Compares dest's vs VPS's.
+
+### What divergence catches
+
+Reality's reverse-proxy fallback must hand the dest's `SETTINGS` frame through verbatim. If Xray is terminating h2 itself (a Reality misconfiguration), Xray's Go-based h2 stack (`golang.org/x/net/http2`) picks different defaults from whatever the dest uses:
+
+| Setting | Akamai dest typical | Go x/net/http2 default | Catches? |
+|---|---|---|---|
+| `HEADER_TABLE_SIZE` | 4096 | not sent (Go uses 4096 implicitly) | yes — missing key |
+| `INITIAL_WINDOW_SIZE` | 65535 | 1048576 | yes — value diff |
+| `MAX_FRAME_SIZE` | 16384 | not sent | yes |
+| `MAX_HEADER_LIST_SIZE` | 32768 | 65536 | yes |
+
+A Reality fallback that returns the *dest's* SETTINGS will match. A "fake fallback" that just lets Xray's h2 server handle the connection will diverge on 3-4 settings.
+
+### Smoke-tested 2026-05-14
+
+| Probe | Result |
+|---|---|
+| `target=dest=www.microsoft.com` | OK — settings collide (same Akamai backend) |
+| `target=www.apple.com`, `dest=www.microsoft.com` | OK — both behind Akamai with the same h2 config |
+| `target=www.google.com`, `dest=www.microsoft.com` | FAIL with 4 WHY: lines — Akamai SETTINGS ≠ Google SETTINGS, exactly what would happen if Reality fallback were leaking a non-dest h2 stack |
+
+### Known limitations
+
+- Same single-port limitation as the rest of the suite (see Known gaps above).
+- A dest behind a CDN (Akamai, Cloudflare, Fastly) shares h2 SETTINGS with every other site on that CDN — collision tells you "your VPS is acting like *some* host on this CDN", not "specifically this dest". The cert subject_cn check in scenario 02 is still the discriminator that binds the response to *this* dest.
+- v0.5.2 doesn't yet parse PRIORITY / WINDOW_UPDATE / GOAWAY for additional signal. Those land in v1.0 alongside golden snapshots.
