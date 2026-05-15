@@ -1,0 +1,7 @@
+---
+# Placeholder — filled in v0.6.0 Block 2 (s-vps shell wrapper).
+
+- name: CLI wrapper task stub (Block 2 not yet applied)
+  ansible.builtin.debug:
+    msg: "cli_wrapper.yml stub — v0.6.0 Block 2 fills this in."
+  when: false

@@ -1,0 +1,98 @@
+---
+# users.index.json — operator's source of truth for "who is authorised".
+#
+# In v0.6.x panel mode: bot/CLI double-write (panel API + this file) so
+# the panel keeps working as the runtime fact-of-record AND we have a
+# native record outside it. In v0.7.x headless mode the panel goes
+# away; the index becomes the only fact and Xray reads it directly.
+#
+# Schema (version 1):
+#   {
+#     "version": 1,
+#     "users": {
+#       "<label>": {
+#         "reality_uuid":     "<uuid4>",
+#         "hysteria_password":"<random 32-char>",   # v0.6: same for all users (3X-UI limitation), v0.7: per-user
+#         "sub_token":        "<32-byte url-safe base64>",
+#         "created_at":       "<iso8601 UTC>",
+#         "enabled":          true
+#       }
+#     }
+#   }
+#
+# Label validation: ^[a-zA-Z0-9_-]{1,32}$, "stealth-vps-*" namespace reserved.
+
+- name: Probe existing users.index.json
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_users_index_path }}"
+  register: stealth_vps_users_index_stat
+  tags: [users, index]
+
+- name: Seed users.index.json from reality.state.yml + hysteria.state.yml (first run only)
+  when: not stealth_vps_users_index_stat.stat.exists
+  tags: [users, index]
+  block:
+
+    - name: Load reality state for seeding the index
+      ansible.builtin.include_vars:
+        file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+        name: stealth_vps_reality_state
+      # `xray.yml` runs before us in main.yml, so the file exists by now.
+
+    - name: Load hysteria state for seeding the index
+      ansible.builtin.include_vars:
+        file: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+        name: stealth_vps_hysteria_state
+      when: stealth_vps_hysteria_enabled | bool
+      # When Hysteria2 isn't enabled, the index still gets seeded for
+      # the Reality client; hysteria_password just stays empty.
+
+    - name: Generate subscription token for the default client (first run only)
+      ansible.builtin.set_fact:
+        # 32 bytes (256 bits) of randomness, URL-safe base64 encoded.
+        # The trailing `==` from b64 padding gets stripped — sub_token
+        # is used as a URL path segment.
+        stealth_vps_default_sub_token: >-
+          {{ lookup('password', '/dev/null length=43 chars=ascii_letters,digits') }}
+      no_log: true
+
+    - name: Compose initial users.index.json content
+      ansible.builtin.set_fact:
+        stealth_vps_users_index: "{{ {
+          'version': 1,
+          'users': {
+            stealth_vps_reality_default_client_email: {
+              'reality_uuid': stealth_vps_reality_state.client_uuid,
+              'hysteria_password': (stealth_vps_hysteria_state.auth_password
+                | default('') if stealth_vps_hysteria_enabled else ''),
+              'sub_token': stealth_vps_default_sub_token,
+              'created_at': ('%Y-%m-%dT%H:%M:%SZ' | strftime(ansible_date_time.epoch | int)),
+              'enabled': true,
+            },
+          },
+        } }}"
+      no_log: true
+
+    - name: Persist users.index.json
+      ansible.builtin.copy:
+        # to_nice_json keeps the file human-editable for emergency
+        # recovery (e.g. operator wants to flip `enabled: false` by hand).
+        content: "{{ stealth_vps_users_index | to_nice_json(indent=2, sort_keys=true) }}\n"
+        dest: "{{ stealth_vps_users_index_path }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+- name: Ensure subscription directory exists (sub_token file materialised here)
+  # The bot writes `<sub_token>.txt` files under this dir on `/user add`
+  # and `/sub`. Caddy serves them at /.well-known/stealth-vps-sub/<token>.
+  # Created here so the dir exists even before the bot is configured
+  # (the credentials.txt template can reference it deterministically).
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps/subscriptions
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: [users, index, subscription]

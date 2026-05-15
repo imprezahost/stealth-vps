@@ -1,0 +1,7 @@
+---
+# Placeholder — filled in v0.6.0 Block 3 (Caddy + subscription endpoint).
+
+- name: Subscription task stub (Block 3 not yet applied)
+  ansible.builtin.debug:
+    msg: "subscription.yml stub — v0.6.0 Block 3 fills this in."
+  when: false
