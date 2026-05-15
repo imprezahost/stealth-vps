@@ -46,7 +46,8 @@ _hc_check_unit() {
 # Check a TCP port is listening. Uses `ss` (preferred — preinstalled on
 # Debian 12). Pass = listening, fail = not listening.
 _hc_check_port() {
-  local port="$1" label="${2:-port ${port}}"
+  local port="$1"
+  local label="${2:-port ${port}}"
   if ! command -v ss >/dev/null 2>&1; then
     _hc_warn "ss not available — cannot verify ${label}"
     return 0
@@ -61,7 +62,8 @@ _hc_check_port() {
 # Check a TLS cert's days-until-expiry. Pass ≥30 days, warn 7-30, fail <7.
 # Usage: _hc_check_cert <cert-path> [<label>]
 _hc_check_cert() {
-  local cert="$1" label="${2:-${cert}}"
+  local cert="$1"
+  local label="${2:-${cert}}"
   if [[ ! -r "${cert}" ]]; then
     _hc_warn "cert not readable: ${cert} (skipping expiry check)"
     return 0
@@ -87,7 +89,8 @@ _hc_check_cert() {
 # (the panel returning a 401/302 still proves it's alive), fail on connection
 # refused / timeout.
 _hc_check_https() {
-  local url="$1" label="${2:-${url}}"
+  local url="$1"
+  local label="${2:-${url}}"
   local code
   code=$(curl -sko /dev/null --max-time 5 -w '%{http_code}' "${url}" 2>/dev/null || echo "000")
   if [[ "${code}" =~ ^[234][0-9][0-9]$ ]]; then
@@ -149,13 +152,13 @@ health_check_run() {
   echo
 
   if (( _HC_SAW_FAIL )); then
-    printf "${_HC_RED}Health check: FAIL${_HC_RESET} — see ✗ items above.\n"
+    printf '%sHealth check: FAIL%s — see ✗ items above.\n' "${_HC_RED}" "${_HC_RESET}"
     return 1
   elif (( _HC_SAW_WARN )); then
-    printf "${_HC_YELLOW}Health check: PASS with warnings${_HC_RESET}\n"
+    printf '%sHealth check: PASS with warnings%s\n' "${_HC_YELLOW}" "${_HC_RESET}"
     return 2
   else
-    printf "${_HC_GREEN}Health check: all systems nominal${_HC_RESET}\n"
+    printf '%sHealth check: all systems nominal%s\n' "${_HC_GREEN}" "${_HC_RESET}"
     return 0
   fi
 }

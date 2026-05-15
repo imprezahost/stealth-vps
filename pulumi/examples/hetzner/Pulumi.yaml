@@ -1,3 +1,4 @@
+---
 name: stealth-vps-hetzner
 runtime: nodejs
 description: Provisions one stealth-vps host on Hetzner Cloud using the shared cloud-init builder.

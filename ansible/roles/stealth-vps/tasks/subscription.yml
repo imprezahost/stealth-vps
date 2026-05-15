@@ -63,10 +63,14 @@
 
 - name: Add Caddy APT repository
   ansible.builtin.copy:
+    # yamllint disable rule:line-length
+    # apt sources.list lines are mandated single-line — wrapping changes
+    # semantics. Disable line-length just for this content block.
     content: |
       # Cloudsmith Caddy stable repo — managed by stealth-vps.
       deb [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
       deb-src [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+    # yamllint enable rule:line-length
     dest: /etc/apt/sources.list.d/caddy-stable.list
     owner: root
     group: root
@@ -105,7 +109,7 @@
     group: caddy
     mode: '0640'
     validate: 'caddy validate --config %s --adapter caddyfile'
-  notify: reload caddy
+  notify: Reload caddy
   tags: [subscription, caddy]
 
 # --- UFW + firewall ------------------------------------------------------

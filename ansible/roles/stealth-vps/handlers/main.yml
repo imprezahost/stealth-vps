@@ -22,24 +22,24 @@
   changed_when: false
 
 # v0.6.0 — Telegram bot
-- name: reload systemd
+- name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true
 
-- name: restart stealth-vps-bot
+- name: Restart stealth-vps-bot
   ansible.builtin.systemd:
     name: stealth-vps-bot.service
     state: restarted
     daemon_reload: true
 
 # v0.6.0 — Caddy subscription endpoint
-- name: restart caddy
+- name: Restart caddy
   ansible.builtin.systemd:
     name: caddy.service
     state: restarted
     daemon_reload: true
 
-- name: reload caddy
+- name: Reload caddy
   ansible.builtin.systemd:
     name: caddy.service
     state: reloaded

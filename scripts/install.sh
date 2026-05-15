@@ -161,14 +161,23 @@ prompt_tui() {
   # --- Optional services -------------------------------------------------
   # `--checklist` returns a quoted, space-separated list of the items
   # whose status is ON. Default selection: panel + hysteria on, bot + sub off.
+  # Helper to map true/false → ON/OFF without an inline command substitution
+  # (which shellcheck flags SC2046 for "word splitting" on the unquoted result).
+  _on_off() { [[ "$1" == "true" ]] && echo ON || echo OFF; }
+  local panel_default hysteria_default bot_default sub_default
+  panel_default=$(_on_off "${STEALTH_PANEL_ENABLED}")
+  hysteria_default=$(_on_off "${STEALTH_HYSTERIA_ENABLED}")
+  bot_default=$(_on_off "${STEALTH_BOT_ENABLED}")
+  sub_default=$(_on_off "${STEALTH_SUBSCRIPTION_ENABLED}")
+
   local selected
   selected=$(whiptail --title "${title}" \
     --checklist "Optional services\n\nSpace to toggle. Recommended: keep the first two on, leave the others off until you've verified your install." \
     16 75 6 \
-      "panel"        "3X-UI web panel (recommended)"        $([[ "${STEALTH_PANEL_ENABLED}" == "true" ]] && echo ON || echo OFF) \
-      "hysteria"     "Hysteria2 (UDP, fast — recommended)"  $([[ "${STEALTH_HYSTERIA_ENABLED}" == "true" ]] && echo ON || echo OFF) \
-      "bot"          "Telegram bot for ops (opt-in)"        $([[ "${STEALTH_BOT_ENABLED}" == "true" ]] && echo ON || echo OFF) \
-      "sub"          "Subscription endpoint via Caddy"      $([[ "${STEALTH_SUBSCRIPTION_ENABLED}" == "true" ]] && echo ON || echo OFF) \
+      "panel"        "3X-UI web panel (recommended)"        "${panel_default}" \
+      "hysteria"     "Hysteria2 (UDP, fast — recommended)"  "${hysteria_default}" \
+      "bot"          "Telegram bot for ops (opt-in)"        "${bot_default}" \
+      "sub"          "Subscription endpoint via Caddy"      "${sub_default}" \
     3>&1 1>&2 2>&3) || selected=""
 
   # Reset to false first; flip on for each selected tag.
