@@ -1,0 +1,33 @@
+---
+# Molecule `prepare` playbook — runs once after the test containers come
+# up, before `converge` (which applies the real role). Used to install
+# host-side tooling the role expects to exist but Docker's minimal
+# Debian/Ubuntu base images don't ship.
+#
+# Today: openssh-server. The stealth-hardening role drops sshd config
+# fragments and validates them with `sshd -t -f %s`. Without the binary
+# every converge fails with `No such file or directory: b'sshd'`.
+
+- name: Prepare molecule containers
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install openssh-server so the role's `sshd -t` validation works
+      ansible.builtin.apt:
+        name: openssh-server
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create sshd privsep dir (/run is tmpfs-mounted, /run/sshd absent)
+      # `sshd -t` errors out with "Missing privilege separation directory:
+      # /run/sshd" if the dir isn't pre-created. molecule.yml mounts /run
+      # as a clean tmpfs (needed for systemd), wiping any /run/sshd that
+      # openssh-server's postinst would have made.
+      ansible.builtin.file:
+        path: /run/sshd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'

@@ -23,7 +23,7 @@
           - stealth_vps_sysctl_stat.stat.pw_name == 'root'
           - stealth_vps_sysctl_stat.stat.mode == '0644'
 
-    - name: Read effective sysctl values
+    - name: Read effective sysctl values (best-effort in containers)
       ansible.builtin.command:
         cmd: "sysctl -n {{ item }}"
       register: stealth_vps_sysctl_values
@@ -34,11 +34,14 @@
         - net.ipv4.tcp_fastopen
         - net.core.rmem_max
         - fs.file-max
-      # In a Docker container, /proc/sys is mounted from the host, so
-      # net.* may not actually flip to bbr/fq. Don't make the assertion
-      # strict — verify the *file* content instead, which is what the
-      # role actually controls.
-      failed_when: false
+      # In a Docker container, /proc/sys/net/* and /proc/sys/fs/* may be
+      # masked or read-only, and `sysctl -n` errors with "cannot stat".
+      # We don't make the assertion strict — verify the *file* content
+      # below instead, which is what the role actually controls. The
+      # `ignore_errors` is broader than `failed_when: false` because the
+      # loop variant of failed_when sometimes still fatals when sysctl
+      # exits non-zero on the very first item.
+      ignore_errors: true
 
     - name: Assert sysctl file contents match the template
       # `grep -E` doesn't need shell features — use `command` (argv form

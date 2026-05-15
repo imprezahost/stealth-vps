@@ -28,7 +28,14 @@
   ansible.builtin.command:
     cmd: modprobe tcp_bbr
   changed_when: false
-  when: stealth_vps_kernel_bbr | bool
+  when:
+    - stealth_vps_kernel_bbr | bool
+    # Skip inside containers — the host kernel decides the module set,
+    # `modprobe` either isn't installed (geerlingguy/docker-*-ansible)
+    # or refuses to operate from inside an unprivileged container. The
+    # persistent /etc/modules-load.d/ drop-in above is still written so
+    # a real boot picks up tcp_bbr; that's the part that matters.
+    - ansible_facts.virtualization_type | default('') != 'docker'
   tags: [kernel, sysctl]
 
 - name: Render /etc/sysctl.d/99-stealth.conf
@@ -52,6 +59,12 @@
   register: stealth_vps_cc
   changed_when: false
   check_mode: false
+  # Inside Docker containers /proc/sys/net/* is often masked or
+  # read-only — sysctl returns rc=1 with "cannot stat". We don't
+  # gate the role on values we can't observe; the assertion below
+  # is skipped for containers via the same `virtualization_type`
+  # guard used elsewhere.
+  failed_when: false
   tags: [kernel, sysctl]
 
 - name: Read effective default qdisc
@@ -59,6 +72,7 @@
   register: stealth_vps_qdisc
   changed_when: false
   check_mode: false
+  failed_when: false
   tags: [kernel, sysctl]
 
 - name: Assert BBR + fq are active
@@ -72,5 +86,10 @@
       default_qdisc={{ stealth_vps_qdisc.stdout }}).
       Verify the kernel exposes tcp_bbr and the module loaded successfully.
     success_msg: "BBR + fq active."
-  when: stealth_vps_kernel_bbr | bool
+  when:
+    - stealth_vps_kernel_bbr | bool
+    # Skip the assertion in containers (where the reads above couldn't
+    # observe live values). On a real VPS the assertion still gates
+    # the role — it's the production safety net.
+    - ansible_facts.virtualization_type | default('') != 'docker'
   tags: [kernel, sysctl]
