@@ -86,6 +86,12 @@
     host: 127.0.0.1
     port: "{{ stealth_hardening_ssh_port }}"
     timeout: 15
+  # Skip inside Docker containers — sshd may be installed but it's not
+  # started as a systemd service in the test image (geerlingguy/docker-
+  # *-ansible runs only what's needed for the molecule lifecycle). On a
+  # real VPS the systemd-reload-or-restart of ssh.socket / ssh.service
+  # above brings the port up, and the wait_for verifies it.
+  when: ansible_facts.virtualization_type | default('') != 'docker'
   tags: [ssh, hardening]
 
 - name: Probe listening SSH sockets (status report)

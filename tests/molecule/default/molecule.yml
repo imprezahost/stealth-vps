@@ -71,6 +71,7 @@ platforms:
 provisioner:
   name: ansible
   playbooks:
+    prepare: prepare.yml
     converge: ../../../ansible/playbooks/site.yml
     verify: verify.yml
   inventory:

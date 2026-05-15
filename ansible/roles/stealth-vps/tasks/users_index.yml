@@ -29,7 +29,14 @@
   tags: [users, index]
 
 - name: Seed users.index.json from reality.state.yml + hysteria.state.yml (first run only)
-  when: not stealth_vps_users_index_stat.stat.exists
+  # Skip when Reality is disabled — there's no reality.state.yml to seed
+  # from, and a Reality-less install doesn't have a default client to
+  # record in the index. In v0.7 headless mode the seed source moves
+  # but the gate stays: users.index.json only exists when there's at
+  # least one protocol to issue credentials for.
+  when:
+    - not stealth_vps_users_index_stat.stat.exists
+    - stealth_vps_reality_enabled | bool
   tags: [users, index]
   block:
 
