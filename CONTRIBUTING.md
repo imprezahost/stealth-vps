@@ -66,7 +66,7 @@ yamllint .
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+```text
 feat(ansible): add support for shadowsocks-2022 inbound
 fix(install): handle missing dpkg-reconfigure on minimal images
 docs(client): add Hiddify setup for Android

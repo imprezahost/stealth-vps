@@ -1,8 +1,8 @@
 # stealth-vps
 
-> **Status: v0.6.1 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04). External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + a TypeScript Pulumi reference. Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. **v0.6.0 ships Caminho C "full UX"**: interactive whiptail installer with sane defaults (press-Enter-to-install on bare IP), terminal QR for the default Reality URI, DNS pre-flight before LE, post-deploy ✓/✗/⚠ health check, human-friendly error wrapping, `s-vps` operator CLI (`update`/`diagnose`/`status`), opt-in Telegram bot for `/user` CRUD + `/sub` rotation, and an opt-in Caddy subscription endpoint. `users.index.json` is now the operator's portable source-of-truth — the structural change that turns v0.7 headless mode into a flag flip. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.6.1 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04). External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + a TypeScript Pulumi reference. Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. **v0.6 ships Caminho C "full UX"**: interactive whiptail installer with sane defaults (press-Enter-to-install on bare IP), terminal QR for the default Reality URI, DNS pre-flight before LE, post-deploy ✓/✗/⚠ health check, human-friendly error wrapping, `s-vps` operator CLI (`update`/`diagnose`/`status`), opt-in Telegram bot for `/user` CRUD + `/sub` rotation, and an opt-in Caddy subscription endpoint. `users.index.json` is the operator's portable source-of-truth — the structural change that turns v0.7 headless mode into a flag flip. v0.6.1 cleared the bugs that v0.6.0's first Tokyo smoke-test surfaced (panel-scheme auto-detection, `\| bool \| ternary` on env-var flags, real-port detection in the health check). See [CHANGELOG.md](CHANGELOG.md).
 
-A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability.
+A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability. Comes with an interactive installer that you can press Enter through and an operator CLI (`s-vps`) for everything afterwards.
 
 Designed for people who want a setup they can audit, version-pin, redeploy, and trust — not another opaque `bash <(curl ...)` script.
 
@@ -17,7 +17,8 @@ The space already has good shell installers (`mack-a/v2ray-agent`, `3x-ui`, `Hid
 - You want **fail2ban that actually works** with 3X-UI (a recurring pain point upstream).
 - You want a **permissive MIT license** (not AGPL viral) so providers and operators can adopt without legal friction.
 - You want **semver releases** and a changelog you can read.
-- A **Prometheus + Grafana** observability bundle is on the v0.2.0 roadmap.
+- You want **first-class observability** out of the box — node\_exporter + per-protocol Prometheus metrics + a drop-in Grafana dashboard + alert rules, all on a single `:9100` scrape target (shipped in v0.3.0).
+- You want an **operator CLI** (`s-vps update`, `s-vps diagnose`, `s-vps status`) so day-2 ops aren't another shell ritual.
 
 If you'd rather paste a one-liner and move on, those other projects serve you better.
 
@@ -25,16 +26,29 @@ If you'd rather paste a one-liner and move on, those other projects serve you be
 
 ## What it installs
 
+Always-on:
+
 - **Xray-core** with VLESS-Reality (steals TLS handshake from a real site; resists active probing)
 - **Hysteria2** (QUIC-based, masquerades as HTTP/3 traffic to a real site; **port-hopping over a configurable UDP range**)
-- **3X-UI** panel (multi-user, traffic limits, expiry, subscription links)
+- **3X-UI** panel (multi-user, traffic limits, expiry, subscription links) — in v0.7 this becomes optional via `stealth_vps_panel_enabled=false`
 - **TLS**: optional **Let's Encrypt** issuance via `acme.sh` (HTTP-01 standalone) when you set `stealth_vps_domain` — Hysteria2 + 3X-UI panel both use the real cert; falls back to self-signed if unset
 - **Kernel tuning**: BBR + fq qdisc, larger socket buffers, TCP Fast Open
 - **Hardening**: SSH on non-default port, key-only auth, fail2ban with a *working* 3X-UI filter, UFW (deny-incoming default)
 - **Reputation drop**: **Spamhaus DROP** loaded into an ipset, dropped at the top of UFW's INPUT chain, refreshed daily
 - **Patching**: `unattended-upgrades` with security-origin filter and Package-Blacklist hook
-- **Observability**: `prometheus-node-exporter` baseline (loopback only by default; expose / tunnel as needed)
+- **Observability**: `prometheus-node-exporter` + per-protocol stealth-vps metrics on `:9100` (loopback by default; expose / tunnel as needed), drop-in Grafana dashboard, Prometheus alert rules
 - **IPv6 dual-stack** by default
+
+Operator tooling (v0.6+):
+
+- **`s-vps` shell wrapper** at `/usr/local/bin/s-vps` — verbs: `update` (re-run ansible-pull at the pinned tag, preserves your original install choices), `diagnose` (post-deploy ✓/✗/⚠ health check), `status` (`systemctl is-active` summary), `version`, `help`.
+- **`users.index.json`** at `/etc/stealth-vps/` — the operator's portable source-of-truth for "who is authorised", schema v1. In v0.6 the bot and CLI double-write panel API + this file; in v0.7 the index becomes authoritative.
+- **Shared Python pkg** `stealth_vps` at `/usr/local/lib/stealth_vps/` — pure stdlib, no third-party deps. Bot, metrics updater, and (v0.7+) full Python CLI all import from here.
+
+Opt-in (`STEALTH_BOT_ENABLED=true` / `STEALTH_SUBSCRIPTION_ENABLED=true`):
+
+- **Telegram bot** running `python-telegram-bot` under a hardened systemd unit. Commands: `/start` (auto-pair on first message), `/help`, `/status`, `/diagnose`, `/creds`, `/user add|list|revoke <label>`, `/sub <label>|revoke <label>`.
+- **Caddy subscription endpoint** serving `/.well-known/stealth-vps-sub/<token>` from `/var/lib/stealth-vps/subscriptions/`. Two bind modes: loopback `127.0.0.1:8443` (default, fetch via SSH tunnel) or `:443` with Let's Encrypt auto-TLS (when `STEALTH_SUBSCRIPTION_EXPOSE=true` + a domain).
 
 ---
 
@@ -42,22 +56,38 @@ If you'd rather paste a one-liner and move on, those other projects serve you be
 
 Pick the one that matches your workflow. All four apply the same configuration.
 
-### 1. One-shot install (`install.sh`)
+### 1. Interactive installer (recommended for first-time deploys)
 
-For a fresh VPS where you just want it done:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.4/scripts/install.sh | bash
-```
-
-This is a thin wrapper that bootstraps Ansible and runs `ansible-pull` against this repo. The URL is pinned to the v0.5.4 release tag, so you get exactly the code that ships in this changelog. To install a different version, swap the tag in the URL **and** pass `STEALTH_VERSION` to match:
+Download then run with a TTY — you get a whiptail prompt sequence (domain optional, services checklist, bot token if you want it, summary confirm). Pressing Enter through every prompt produces a working install on the VPS's public IP.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.5.4/scripts/install.sh \
-  | STEALTH_VERSION=v0.5.4 bash
+curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.1/scripts/install.sh -o install.sh
+sudo bash install.sh
 ```
 
-### 2. Ansible (recommended for repeatable use)
+After it finishes you get an ANSI QR code for the default Reality URI, a post-deploy ✓/✗/⚠ health check, and `s-vps` installed at `/usr/local/bin/s-vps` for everything afterwards. Full prompt sequence + env-var contract documented in [`docs/installer-ux.md`](docs/installer-ux.md).
+
+### 2. Headless one-shot (`curl | bash`)
+
+For cloud-init / Terraform user-data / scripted deploys that don't have a TTY. Byte-compatible with v0.5.x — same `STEALTH_*` env vars.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.1/scripts/install.sh | sudo bash
+```
+
+Override defaults with env vars before the pipe:
+
+```bash
+STEALTH_DOMAIN=vpn.example.com \
+STEALTH_TLS_EMAIL=ops@example.com \
+STEALTH_BOT_ENABLED=true \
+STEALTH_BOT_TOKEN=12345:abc... \
+  curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.1/scripts/install.sh | sudo bash
+```
+
+Full env-var list in [`docs/installer-ux.md`](docs/installer-ux.md). Re-run any time with `s-vps update` — your original choices stay pinned to `/etc/stealth-vps/installer.env`.
+
+### 3. Ansible directly (when you control inventory)
 
 ```bash
 git clone https://github.com/imprezahost/stealth-vps.git
@@ -67,21 +97,19 @@ cp ansible/inventory/example.yml ansible/inventory/hosts.yml
 ansible-playbook -i ansible/inventory/hosts.yml ansible/playbooks/site.yml
 ```
 
-### 3. Cloud-init (for hypervisors)
+### 4. Cloud-init / Terraform / Pulumi (IaC)
 
-Drop `cloud-init/stealth-vps.yaml` as user-data when creating the VPS. Works with Proxmox, any cloud that supports cloud-init, and any modern hypervisor.
+Drop [`cloud-init/stealth-vps.yaml`](cloud-init/stealth-vps.yaml) as user-data when creating the VPS. Works with Proxmox, any cloud that supports cloud-init, and any modern hypervisor.
 
-### 4. Terraform module (`v0.5.0`+)
-
-Provider-agnostic — generates the cloud-init `user_data` from typed HCL inputs (SSH key, domain, release pin, Reality dest, free-form Ansible vars). Pass the output to any provider's create-server resource.
+For provider-agnostic Terraform, [`terraform/modules/stealth-vps/`](terraform/modules/stealth-vps/) generates the cloud-init `user_data` from typed HCL inputs (SSH key, domain, release pin, Reality dest, free-form Ansible vars):
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.5.4"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.1"
 
-  stealth_version = "v0.5.4"
-  ssh_public_key  = file("~/.ssh/id_ed25519.pub")
-  domain          = "vpn.example.com"
+  stealth_version   = "v0.6.1"
+  ssh_public_key    = file("~/.ssh/id_ed25519.pub")
+  domain            = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
 }
 
@@ -150,7 +178,8 @@ Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.
 
 - [Architecture](docs/architecture.md) — what gets installed, how the pieces fit
 - [Operations](docs/operations.md) — day-to-day: rotate creds, add users, upgrade
-- [Terraform](docs/terraform.md) — provider-agnostic module + Hetzner example (v0.5.0+)
+- [Installer UX contract](docs/installer-ux.md) — every prompt, every env var, every exit code (v0.6+)
+- [Terraform](docs/terraform.md) — provider-agnostic module + worked examples (v0.5.0+)
 - Client setup guides: [Android](docs/client-setup/android.md) · [iOS](docs/client-setup/ios.md) · [Windows](docs/client-setup/windows.md) · [macOS](docs/client-setup/macos.md)
 
 中文文档: [README.zh-CN.md](README.zh-CN.md)

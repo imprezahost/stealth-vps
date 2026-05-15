@@ -4,7 +4,7 @@ Automated tests for the roles and templates.
 
 ## Layout
 
-```
+```text
 tests/
 ├── molecule/
 │   └── default/        # Ansible Molecule scenario — converges site.yml

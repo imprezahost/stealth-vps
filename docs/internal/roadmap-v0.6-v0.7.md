@@ -73,7 +73,7 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
 3. **Bot setup via QR (chat-id auto-capture)**. The TUI prompts for the BotFather token + admin handle; bot auto-captures `chat_id` from the first `/start` rather than requiring the operator to paste it. The TUI also prints a QR for `t.me/BotFather` with 3-step inline instructions for users who haven't created a bot before.
 4. **DNS pre-flight**. When `domain` is set, the TUI does `dig +short` against it before calling `acme.sh` and loops "DNS not propagated yet, retrying…" up to 5 min, instead of letting LE fail and dumping an obscure error.
 5. **Health-check pós-deploy**. After `ansible-pull` returns, the script sleeps 10 s and runs a 6-8-line checklist: `x-ui` active? `hysteria-server` active? panel responds HTTPS? Reality port reachable from outside (egress curl)? cert expiry > 60 d? Prints a tabela with ✓/✗/⚠ per row so the operator knows immediately if it worked.
-6. **Human-friendly error messages**. `install.sh` wraps the Ansible / acme.sh / systemd errors most likely to bite and replaces the stack trace with: "✗ Reality couldn't reach dest www.microsoft.com:443. Common cause: VPS provider blocks outbound TCP from new instances. Quick fix: `STEALTH_REALITY_DEST=www.lovelive-anime.jp:443 install.sh`. Full log: /var/log/stealth-vps/install-*.log."
+6. **Human-friendly error messages**. `install.sh` wraps the Ansible / acme.sh / systemd errors most likely to bite and replaces the stack trace with: "✗ Reality couldn't reach dest `www.microsoft.com:443`. Common cause: VPS provider blocks outbound TCP from new instances. Quick fix: `STEALTH_REALITY_DEST=www.lovelive-anime.jp:443 install.sh`. Full log: `/var/log/stealth-vps/install-*.log`."
 7. **`s-vps update` antecipado**. The CLI lands in v0.7 in the roadmap, but `s-vps update` (single command: fetch latest tag, ansible-pull with the right `--tags`) ships in v0.6.0 as a `/usr/local/bin/s-vps` symlink to a minimal shell wrapper. Full Python CLI still v0.7.
 8. **Bot DM pós-install**. If the operator opted into the bot, the install script ends by sending the default-profile URI (with QR) + subscription URL + a `/diagnose` hint via DM. The operator can close their SSH session and never need to touch the terminal again — everything from then on is Telegram.
 
@@ -130,7 +130,7 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
    - Detecta `[ -t 0 ] && [ -t 1 ]`. Se ambos TTY → whiptail. Senão → env-var mode (path atual, intocado).
    - Sem `< /dev/tty` magic. Cloud-init / Terraform / Pulumi seguem env-var.
    - **Prompts (Caminho C)** — domain é **optional**, instalador deixa claro que o fast-path é "skip and stay on IP":
-     ```
+     ```text
      ┌─ stealth-vps installer ────────────────────────────────────┐
      │  Fast path: leave fields empty for IP-only deploy          │
      │  (you can be connected in 5 minutes — domain is optional). │
@@ -305,7 +305,7 @@ Full UX layer (Caminho C):
 
 ## Release sequencing
 
-```
+```text
 v0.5.9   sprints 16+17+18:
          - sprint 16: scripts/release.sh                       (✓ MR !17 merged 1f4762b)
          - sprint 17: roadmap doc                              (this file, branch up, MR pending)

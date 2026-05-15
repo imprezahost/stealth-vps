@@ -36,7 +36,7 @@ The first four catch ~90% of real-world breakage we've seen on production deploy
 
 ## Layout
 
-```
+```text
 tests/probe-resistance/
 ├── README.md                       # this file
 ├── scenarios/                      # numbered scenario docs (1 per file)

@@ -17,7 +17,7 @@ The Terraform examples already cover the IaC story. Pulumi's value is **the same
 
 ## Layout
 
-```
+```text
 pulumi/
 ├── README.md                            # this file
 ├── stealth-vps/

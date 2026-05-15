@@ -70,7 +70,7 @@ If the server still uses a self-signed cert (test setups), the URI carries `&ins
 
 When port hopping is enabled on the server, the URI looks like:
 
-```
+```text
 hysteria2://…@host:49440,20000-50000/?…
 ```
 

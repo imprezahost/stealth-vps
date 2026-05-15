@@ -6,7 +6,7 @@
 
 `stealth-vps` is structured as two cooperating Ansible roles plus a thin installer / cloud-init layer:
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                       Entry point (one of)                       │
 │   scripts/install.sh   cloud-init/stealth-vps.yaml   ansible-pull│

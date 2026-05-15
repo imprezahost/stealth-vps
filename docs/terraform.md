@@ -22,7 +22,7 @@ The Terraform path replaces the static cloud-init for users who:
 
 ## Architecture
 
-```
+```text
                  ┌──────────────────────┐
    Your HCL ───▶│  module.stealth_vps  │── output: cloud_init (string)
   (variables)   │   .stealth-vps       │

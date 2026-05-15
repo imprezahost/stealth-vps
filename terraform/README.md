@@ -34,7 +34,7 @@ The module has no provider dependencies of its own. It produces a string. You ta
 
 ## Layout
 
-```
+```text
 terraform/
 ├── README.md                            # this file
 ├── modules/

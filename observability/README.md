@@ -6,7 +6,7 @@ How to see what's actually happening on a stealth-vps host — CPU, memory, netw
 
 The `stealth-vps` role installs **`prometheus-node-exporter`** bound to `127.0.0.1:9100` by default. The exporter is left *not* exposed externally; pull metrics from a central Prometheus via SSH tunnel, or override `stealth_vps_observability_listen` if you want it open.
 
-```
+```text
 observability/
 ├── grafana/
 │   └── dashboards/      # JSON dashboards (planned — v0.3.0)

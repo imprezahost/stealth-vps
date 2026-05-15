@@ -46,7 +46,7 @@ Eighteenth tagged release. Bug-fix release driven by the v0.6.0 Tokyo-VPS smoke 
 
 End-to-end `ansible-pull -C main` against a VPS that originally shipped v0.5.1:
 
-```
+```text
 PLAY RECAP: ok=149 changed=5 unreachable=0 failed=0 skipped=75
 s-vps diagnose: all systems nominal (5/5 ✓)
 ```
