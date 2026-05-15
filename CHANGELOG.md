@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.6.0+)
-- Additional Pulumi examples (AWS / DigitalOcean / Vultr / Proxmox — same shape as the Hetzner one).
-- Python / Go ports of the Pulumi cloud-init builder (TypeScript is the canonical reference at v0.5.8).
-- Publish `@imprezahost/stealth-vps` to npm so Pulumi examples can `npm install` instead of vendoring via relative path.
+### Planned (v0.6.0 — Caminho C full UX)
+Single big release covering 11 sub-sprints. See [`docs/internal/roadmap-v0.6-v0.7.md`](docs/internal/roadmap-v0.6-v0.7.md) for the full plan.
+
+Headline UX changes (the "script does the dirty work" thesis):
+- Zero-domain default — install works without a domain; LE strictly opt-in.
+- Terminal QR code for the default Reality URI at end of install.
+- Bot Telegram with chat-id auto-capture on first `/start` (no manual chat-id paste).
+- DNS pre-flight loop before LE call.
+- Health-check post-deploy ✓/✗/⚠ table.
+- Human-friendly error messages wrapping Ansible / acme.sh stderr.
+- `s-vps` shell wrapper (update + diagnose) — full Python CLI lands in v0.7.
+- Bot DM post-install with the default URI + QR + sub URL.
+- `users.index.json` with double-write to the panel (the structural change that makes v0.7 headless mode a flag flip).
+- Caddy + static files for the subscription endpoint.
+
+### Planned (v0.7.0)
+- Headless mode: 3X-UI optional, Xray standalone, Hysteria2 per-user, full Python `s-vps` CLI, migration tool `s-vps migrate from-3xui`.
 
 ### Planned (v1.0)
 - JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
@@ -19,6 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitLab shell-executor runner fix (`apt-get: Permission denied`).
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
+- Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.5.9] - 2026-05-15
+
+Sixteenth tagged release. Pre-conditions for the v0.6.0 "full UX" sprint. **No user-facing behaviour change**; all three items are structural refactors / tooling.
+
+### Added
+- **`scripts/release.sh`** (sprint 16). One-shot version bumper across the 21 self-pinned files in the repo (`scripts/install.sh`, `cloud-init/stealth-vps.yaml`, `docs/terraform.md`, `terraform/README.md`, Terraform module's `variables.tf` + `README.md`, each of the 5 example dirs' `variables.tf` + `terraform.tfvars.example`, Pulumi tree). Leaves 4 manual files alone (`CHANGELOG`, `README`, `README.zh-CN`, `pulumi/README.md`) and prints per-file reminders with occurrence counts. `--dry-run` flag. SemVer regex validation matching the Terraform module + Pulumi builder. Detects GNU sed vs BSD sed for in-place editing (works on Linux + macOS). First used end-to-end on this release.
+- **`docs/internal/roadmap-v0.6-v0.7.md`** (sprint 17, 375 lines). Internal roadmap doc covering v0.5.9 → v0.6.0 → v0.7.0. Decision documented: **v0.6.0 ships Caminho C (full UX)** rather than the minimal-roadmap baseline. Eight UX layers added (zero-domain default, terminal QR, bot setup via QR, DNS pre-flight, health-check, human errors, `s-vps update`, bot DM post-install). Estimated +2 weeks on v0.6.0 vs the baseline; the trade-off is documented inline (full UX is what differentiates from the existing `bash <(curl ...)` installers). v0.6.0 split into 11 named sub-sprints (6.0.1 .. 6.0.11). Critical-files reference for the next contributor.
+
+### Changed
+- **`ansible/roles/stealth-vps/tasks/xray.yml`** refactored from 333 lines to a 38-line wrapper (sprint 18). The two halves are now:
+  - **`reality_state.yml`** (96 lines, panel-INDEPENDENT) — X25519 keypair + UUID + shortId + port generation, persisted to `/etc/stealth-vps/reality.state.yml`. The xray binary path still comes from the 3X-UI install via `{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }}` (v0.7 will parameterize this for the standalone-xray path).
+  - **`reality_push_3xui.yml`** (251 lines, panel-SPECIFIC) — `x-ui` active assertion, panel state load, login, list inbounds, create Reality inbound via REST API, post-deploy TLS smoke test, credentials file refresh. Skipped when `stealth_vps_panel_enabled = false` (v0.7+).
+  Zero behaviour change. Same tasks, same order, same idempotency markers, same tags. Pure structural refactor so v0.7 headless mode adds a third include (`reality_xray_standalone.yml`) without rewriting anything else.
+
+### Fixed
+- **Self-pinning bumped to v0.5.9** across all 21 self-pinned files via `scripts/release.sh` (first use of the new tool). Manual edits applied to `CHANGELOG.md`, `README.md` (banner + roadmap row), `README.zh-CN.md`, and `pulumi/README.md` ("Limitations at vX.Y" header).
 
 ## [0.5.8] - 2026-05-14
 

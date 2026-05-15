@@ -35,7 +35,7 @@ runcmd:
   - |
     ansible-pull \
       -U https://github.com/imprezahost/stealth-vps.git \
-      -C v0.5.8 \
+      -C v0.5.9 \
       -i 'localhost,' \
       -c local \
       -e "@/etc/stealth-vps/extra-vars.yml" \

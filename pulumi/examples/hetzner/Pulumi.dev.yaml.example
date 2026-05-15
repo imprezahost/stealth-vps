@@ -11,7 +11,7 @@ config:
   stealth-vps-hetzner:image: debian-12
   stealth-vps-hetzner:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
   stealth-vps-hetzner:sshPort: 22550
-  stealth-vps-hetzner:stealthVersion: v0.5.8
+  stealth-vps-hetzner:stealthVersion: v0.5.9
   # Optional LE — uncomment to enable:
   # stealth-vps-hetzner:domain: vpn.example.com
   # stealth-vps-hetzner:letsencryptEmail: ops@example.com

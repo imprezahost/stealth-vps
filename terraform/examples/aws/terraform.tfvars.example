@@ -35,7 +35,7 @@ root_volume_gb = 10
 ssh_port = 22550
 
 # Release pin
-stealth_version = "v0.5.8"
+stealth_version = "v0.5.9"
 
 # Optional: enable Let's Encrypt --------------------------------------------
 # Point a DNS A record at the public_ip output BEFORE running apply,
