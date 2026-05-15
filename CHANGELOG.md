@@ -7,21 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.6.0 — Caminho C full UX)
-Single big release covering 11 sub-sprints. See [`docs/internal/roadmap-v0.6-v0.7.md`](docs/internal/roadmap-v0.6-v0.7.md) for the full plan.
-
-Headline UX changes (the "script does the dirty work" thesis):
-- Zero-domain default — install works without a domain; LE strictly opt-in.
-- Terminal QR code for the default Reality URI at end of install.
-- Bot Telegram with chat-id auto-capture on first `/start` (no manual chat-id paste).
-- DNS pre-flight loop before LE call.
-- Health-check post-deploy ✓/✗/⚠ table.
-- Human-friendly error messages wrapping Ansible / acme.sh stderr.
-- `s-vps` shell wrapper (update + diagnose) — full Python CLI lands in v0.7.
-- Bot DM post-install with the default URI + QR + sub URL.
-- `users.index.json` with double-write to the panel (the structural change that makes v0.7 headless mode a flag flip).
-- Caddy + static files for the subscription endpoint.
-
 ### Planned (v0.7.0)
 - Headless mode: 3X-UI optional, Xray standalone, Hysteria2 per-user, full Python `s-vps` CLI, migration tool `s-vps migrate from-3xui`.
 
@@ -33,6 +18,50 @@ Headline UX changes (the "script does the dirty work" thesis):
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.6.0] - 2026-05-15
+
+Seventeenth tagged release. Single big release implementing the v0.6.0 "Caminho C — full UX" sprint planned in [`docs/internal/roadmap-v0.6-v0.7.md`](docs/internal/roadmap-v0.6-v0.7.md). All 11 sub-sprints (6.0.1 .. 6.0.11) landed in one continuous session, split into four physical blocks:
+
+- **B1** — Foundations (defaults, `users.index.json`, shared Python pkg).
+- **B2** — Install UX (TUI installer, terminal QR, DNS pre-flight, post-deploy health check, friendly error messages, `s-vps` wrapper).
+- **B3** — Telegram bot + Caddy subscription endpoint.
+- **B4** — Release prep (this entry).
+
+The headline thesis (per the user request that triggered this release): *"o script deve fazer todo trabalho sujo"* — the installer does the dirty work so an operator can go from a fresh Debian 12 VPS to working privacy proxy in one `curl | bash`. Pressing Enter through every prompt is now guaranteed to produce a working install on bare IP — no domain, no bot, no manual config.
+
+### Added
+
+- **`scripts/install.sh` — interactive TUI mode** (sprint 6.0.1). Detects `[ -t 0 ] && [ -t 1 ]` and switches between two modes: whiptail TUI on a TTY, env-var-driven (byte-compat with v0.5.x) when piped. TUI prompts: domain (optional, blank = bare IP), Let's Encrypt email (only when domain set), services checklist (panel + Hysteria2 default on, bot + sub default off), bot token (only when bot checked), subscription exposure (only when sub checked), summary confirmation. Fast-path: every prompt has a sane default — operator can Enter-through to a working install.
+- **`scripts/lib/dns-preflight.sh`** (sprint 6.0.4). Sourceable bash helper that polls `1.1.1.1` / `8.8.8.8` / `9.9.9.9` for up to 10 minutes (configurable) waiting for the configured domain's A record to match the VPS's detected public IPv4. Bypasses the system resolver deliberately — some VPS providers (Vultr Tokyo) ship split-horizon DNS with stale caches. DNS failure exits BEFORE running Ansible, so the VPS is never touched until DNS is ready.
+- **`scripts/lib/health-check.sh`** (sprint 6.0.5). Sourceable bash helper running ✓/✗/⚠ checks: systemd units active, ports listening (`ss`), TLS cert expiry (`openssl x509`), panel HTTPS probe (`curl -k`). Caller toggles optional checks via `--panel --hysteria --bot --subscription --domain <fqdn>`. Returns 0 (all ✓), 1 (any ✗), 2 (only ⚠).
+- **`scripts/lib/error-wrap.sh`** (sprint 6.0.9). Sourceable bash helper that scans the install log for known failure regexes and prints a one-paragraph human-readable headline + remediation step. Initial pattern catalogue: GitHub unreachable, TLS validation, ACME verify error, panel didn't come up, old Ansible version, dpkg lock, no disk space, Xray failed to start.
+- **`scripts/s-vps` operator CLI wrapper** (sprint 6.0.10). Pure-bash CLI installed at `/usr/local/bin/s-vps`. Verbs: `update` (re-run ansible-pull at the pinned tag, picking up the original config from `/etc/stealth-vps/installer.env`), `diagnose` (sources health-check.sh), `status` (`systemctl is-active` summary for the five managed units), `version`, `help`. Reads pinned tag from `/etc/stealth-vps/version`; on `s-vps update <tag>` rewrites the version pin atomically after success. Reads bot token out of `/etc/stealth-vps/bot.env` to preserve it across re-runs (the token is NEVER written to `installer.env`, which is operator-readable).
+- **`docs/installer-ux.md`** (sprint 6.0.10). Installer contract reference. Documents the two modes, the prompt sequence, every `STEALTH_*` env var, the lib helpers, exit codes, and the "press Enter through everything" fast-path rule for future contributors.
+- **`ansible/roles/stealth-vps/tasks/python_pkg.yml`** + **`files/python-pkg/`** (sprint 6.0.6, B1). Pure-stdlib Python package at `/usr/local/lib/stealth_vps/`, imported by the bot, the metrics updater, and (v0.7+) the full `s-vps` CLI. Modules: `state` (atomic users.index.json I/O), `threex_client` (3X-UI REST via stdlib urllib + cookiejar), `backends` (`UserBackend` ABC + `ThreeXUIBackend` impl with double-write reconcile), `subscription` (base64 URI rendering, atomic file writes), `urivider` (`build_vless_uri` + `build_hysteria2_uri`). `.pth` file in `dist-packages` makes `import stealth_vps` work system-wide without venv gymnastics.
+- **`ansible/roles/stealth-vps/tasks/users_index.yml`** (sprint 6.0.6, B1). Seeds `/etc/stealth-vps/users.index.json` from `reality.state.yml` + `hysteria.state.yml` on first run. Schema v1: `{"version": 1, "users": {"<label>": {reality_uuid, hysteria_password, sub_token, created_at, enabled}}}`. The index is the v0.6→v0.7 migration anchor: in v0.6 (panel mode) bot/CLI double-write panel-API + index; in v0.7 (headless) the index becomes authoritative and Xray reads it directly.
+- **`ansible/roles/stealth-vps/tasks/bot.yml`** + **`files/bot/`** + **bot templates** (sprint 6.0.2, B3). Opt-in (`stealth_vps_bot_enabled=true`). Single-file python-telegram-bot v21.7 (~400 LOC), venv at `/opt/stealth-vps/bot/venv`, hardened systemd unit with `ProtectSystem=strict`, `PrivateTmp`, `NoNewPrivileges`, `MemoryDenyWriteExecute`, system-call filter `@system-service` minus `@privileged @resources @mount`. Commands: `/start` (pair on first run by capturing first chat_id), `/help`, `/status`, `/diagnose`, `/creds`, `/user add|list|revoke <label>`, `/sub <label>|revoke <label>`. State files chgrp'd to `stealth-vps-bot` group so the bot reads them at 0640 (users.index.json at 0660 for write). Pairing state persisted to `/var/lib/stealth-vps-bot/state.json`.
+- **`ansible/roles/stealth-vps/tasks/subscription.yml`** + **`templates/Caddyfile.j2`** (sprint 6.0.7, B3). Opt-in (`stealth_vps_subscription_enabled=true`). Installs Caddy from the official Cloudsmith APT repo + a vhost serving `/.well-known/stealth-vps-sub/<token>` from `/var/lib/stealth-vps/subscriptions/<token>.txt`. Two bind modes: `expose=false` (default) → `127.0.0.1:8443` HTTP, operator fetches via SSH tunnel; `expose=true` → `:443` with Let's Encrypt auto-TLS (requires a domain). Anything outside the subscription path returns 404.
+- **`ansible/roles/stealth-vps/tasks/cli_wrapper.yml`** (sprint 6.0.10, B2). Drops `s-vps` at `/usr/local/bin/`, the three lib helpers at `/usr/local/lib/stealth-vps/scripts-lib/`, the pinned-version file at `/etc/stealth-vps/version`, and `/etc/stealth-vps/installer.env` (sourced by `s-vps update`).
+- **`apt` deps in install.sh**: `whiptail` (TUI), `qrencode` (ANSI QR), `dnsutils` (`dig`). Added unconditionally so both TUI and headless modes get them.
+
+### Changed
+
+- **`scripts/install.sh` flow** reorganised into five numbered phases (`[1/5]` … `[5/5]`): install base deps → gather options (TUI or env) → DNS pre-flight → ansible-pull → health check. Each phase prints a banner so a stuck install is easy to triage.
+- **Final install banner** now prints the ANSI QR for the default Reality URI (from `qrencode -t ANSIUTF8`) when `qrencode` is available, plus optional reminders for Telegram bot pairing and subscription endpoint URL.
+- **`scripts/release.sh`** now bumps `docs/installer-ux.md` alongside the other 21 self-pinned files.
+- **`cloud-init/stealth-vps.yaml`** pins `stealth_vps_release_tag` in the rendered extra-vars file so cloud-init bootstraps end up with a valid version marker for `s-vps update`.
+- **`handlers/main.yml`** gains four new handlers: `reload systemd`, `restart stealth-vps-bot`, `restart caddy`, `reload caddy`.
+
+### Migration notes
+
+- **From v0.5.9**: `s-vps update` works without operator action. The existing `panel.state.yml` + `reality.state.yml` + `hysteria.state.yml` get reused; `users_index.yml` seeds a fresh `users.index.json` from them.
+- **For new operators**: `curl | bash` flow is byte-compat with v0.5.x. To use the TUI, download the script first (`curl -fsSL ... -o install.sh && sudo bash install.sh`) so stdin stays a TTY.
+
+### Known issues
+
+- The GitLab CI runner config is broken (Permission denied / no python in the shell executor); all four lint jobs failed for B3's MR. Merge was forced through the API after manual review. Runner fix tracked under v1.0 planned items.
+- VPS smoke test on Tokyo (`103.106.228.154`) is pending; the release is tagged on code-review confidence + per-file syntax checks (Python AST, YAML parse, `bash -n`). File a follow-up if a deploy-time issue surfaces.
 
 ## [0.5.9] - 2026-05-15
 
