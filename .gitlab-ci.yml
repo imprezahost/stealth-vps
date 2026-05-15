@@ -11,6 +11,15 @@ stages:
   - mirror
   - report
 
+# All jobs run on the project-scoped runner registered at v0.6.0 (tokyo-test-th,
+# Docker executor). The default `tags:` applies to every job unless overridden.
+# Without this, jobs would be picked up by the instance-shared `whmcs-deploy`
+# runner whose shell executor lacks Python + apt perms — see the v0.6.0 release
+# notes' "Known issues" section.
+default:
+  tags:
+    - stealth-vps-ci
+
 # Skip the "empty" push-pipeline that fires when the GitHub reverse-mirror
 # workflow pushes a PR to ext/pr-<N> before opening the MR — the MR pipeline
 # (detached) is what we actually want to run.
