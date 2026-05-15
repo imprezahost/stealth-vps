@@ -60,7 +60,7 @@
   loop:
     - stealth_vps_bot.py
     - requirements.txt
-  notify: restart stealth-vps-bot
+  notify: Restart stealth-vps-bot
   tags: [bot]
 
 # --- python venv ---------------------------------------------------------
@@ -85,7 +85,7 @@
     state: present
   become: true
   become_user: stealth-vps-bot
-  notify: restart stealth-vps-bot
+  notify: Restart stealth-vps-bot
   tags: [bot]
 
 # --- State-file permissions ----------------------------------------------
@@ -96,14 +96,14 @@
 # because the bot writes to it on /user add. After atomic-rename writes
 # the file becomes bot:bot 0600, which the next Ansible run reverts.
 
-- name: chgrp users.index.json to bot group (writable)
+- name: Chgrp users.index.json to bot group (writable)
   ansible.builtin.file:
     path: "{{ stealth_vps_users_index_path }}"
     group: stealth-vps-bot
     mode: '0660'
   tags: [bot]
 
-- name: chgrp panel.state.yml to bot group (readable)
+- name: Chgrp panel.state.yml to bot group (readable)
   ansible.builtin.file:
     path: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
     group: stealth-vps-bot
@@ -111,7 +111,7 @@
   when: stealth_vps_panel_enabled | bool
   tags: [bot]
 
-- name: chgrp reality.state.yml to bot group (readable)
+- name: Chgrp reality.state.yml to bot group (readable)
   ansible.builtin.file:
     path: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
     group: stealth-vps-bot
@@ -119,7 +119,7 @@
   when: stealth_vps_reality_enabled | bool
   tags: [bot]
 
-- name: chgrp hysteria.state.yml to bot group (readable)
+- name: Chgrp hysteria.state.yml to bot group (readable)
   ansible.builtin.file:
     path: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
     group: stealth-vps-bot
@@ -127,7 +127,7 @@
   when: stealth_vps_hysteria_enabled | bool
   tags: [bot]
 
-- name: chgrp credentials.txt to bot group (readable for /creds DM)
+- name: Chgrp credentials.txt to bot group (readable for /creds DM)
   ansible.builtin.file:
     path: "{{ stealth_vps_credentials_file }}"
     group: stealth-vps-bot
@@ -172,7 +172,7 @@
     owner: root
     group: stealth-vps-bot
     mode: '0640'
-  notify: restart stealth-vps-bot
+  notify: Restart stealth-vps-bot
   tags: [bot]
 
 # --- systemd unit --------------------------------------------------------
@@ -185,8 +185,8 @@
     group: root
     mode: '0644'
   notify:
-    - reload systemd
-    - restart stealth-vps-bot
+    - Reload systemd
+    - Restart stealth-vps-bot
   tags: [bot]
 
 - name: Enable + start stealth-vps-bot.service
