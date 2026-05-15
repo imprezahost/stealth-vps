@@ -1,10 +1,10 @@
 # stealth-vps
 
-> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.6.1),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
+> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.6.2),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
 
 ---
 
-> **状态: v0.6.1(alpha)。** 当前版本继续包含 v0.5.x 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、Terraform/Pulumi IaC),并在 v0.6 中新增 **Caminho C 全 UX 安装体验**:交互式 whiptail 安装器(零域名默认路径)、Reality URI 终端 QR、LE 前 DNS 预检、部署后 ✓/✗/⚠ 健康检查、人性化错误提示、`s-vps` 运维 CLI(`update`/`diagnose`/`status`)、可选 Telegram 机器人(`/user` 用户管理 + `/sub` 订阅地址轮换)、可选 Caddy 订阅端点。`users.index.json` 现已成为运维者的可移植真相之源——这是让 v0.7 无面板模式仅需翻一个标志即可切换的结构性改动。v0.6.1 修复了 v0.6.0 在东京 VPS 烟雾测试中暴露的若干 bug。详见英文 [CHANGELOG.md](CHANGELOG.md)。
+> **状态: v0.6.2(alpha)。** 当前版本继续包含 v0.5.x 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、Terraform/Pulumi IaC),并在 v0.6 中新增 **Caminho C 全 UX 安装体验**:交互式 whiptail 安装器(零域名默认路径)、Reality URI 终端 QR、LE 前 DNS 预检、部署后 ✓/✗/⚠ 健康检查、人性化错误提示、`s-vps` 运维 CLI(`update`/`diagnose`/`status`)、可选 Telegram 机器人(`/user` 用户管理 + `/sub` 订阅地址轮换)、可选 Caddy 订阅端点。`users.index.json` 现已成为运维者的可移植真相之源——这是让 v0.7 无面板模式仅需翻一个标志即可切换的结构性改动。v0.6.2 修复了 v0.6.0 在东京 VPS 烟雾测试中暴露的若干 bug。详见英文 [CHANGELOG.md](CHANGELOG.md)。
 
 一个可复用的工具集,用于在受限网络环境中搭建注重隐私的 VPS。在 3X-UI 面板背后部署 VLESS-Reality + Hysteria2,带合理的安全加固、真正可用的 fail2ban 配置,以及内置的可观测性方案。
 
@@ -51,14 +51,14 @@
 适合一台刚开通、只想跑起来的 VPS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.1/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.2/scripts/install.sh | bash
 ```
 
-这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.6.1 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
+这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.6.2 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.1/scripts/install.sh \
-  | STEALTH_VERSION=v0.6.1 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.2/scripts/install.sh \
+  | STEALTH_VERSION=v0.6.2 bash
 ```
 
 ### 2. Ansible(推荐用于可重复部署)
@@ -81,9 +81,9 @@ Provider-agnostic —— 从类型化的 HCL 输入(SSH 公钥、域名、版本
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.1"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.2"
 
-  stealth_version = "v0.6.1"
+  stealth_version = "v0.6.2"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
