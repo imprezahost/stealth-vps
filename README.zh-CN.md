@@ -1,12 +1,10 @@
 # stealth-vps
 
-> ⚠️ **机器辅助翻译草稿(v0.4.3),等待母语者审校。**
-> 本文档由维护者从英文 [README.md](README.md) 翻译,在母语者完成审校并合并相应 PR 前,其内容仅供参考。如有任何措辞、术语或文化语境上的修正建议,欢迎在 GitHub 上提交 issue 或 PR。
-> 英文版仍是该项目的权威文档。
+> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.6.1),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
 
 ---
 
-> **状态: v0.5.1(alpha)。** 完整技术栈: VLESS-Reality + Hysteria2(支持端口跳跃),3X-UI 面板,Let's Encrypt 自动签发,SSH/UFW/fail2ban/unattended-upgrades 加固,通过 ipset 实现 Spamhaus DROP,内核调优。**amd64 + arm64** 双架构(Oracle Ampere、AWS Graviton、Hetzner CAX 实测可用)。可观测性: `:9100` 单端口暴露每协议 Prometheus 指标(单一抓取目标),开箱即用的 Grafana 仪表板,Prometheus 告警规则。客户端配置指南覆盖 Android、Windows、iOS、macOS。多平台 Molecule 测试场景(Debian 12 + Ubuntu 22.04 + 24.04)。GitHub 上的外部贡献者 PR 自动镜像到内部 GitLab CI,`stealth-vps/gitlab-ci` 状态回报到 PR commit。Provider-agnostic Terraform 模块 + Hetzner 完整示例。Probe-resistance 测试套件: **5 个场景中 4 个可运行**,场景 02 在 v0.5.1 实现了基于 stdlib `ssl.MemoryBIO` 的**真实字节级 JA3 + JA3S**。详见 [CHANGELOG.md](CHANGELOG.md)。
+> **状态: v0.6.1(alpha)。** 当前版本继续包含 v0.5.x 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、Terraform/Pulumi IaC),并在 v0.6 中新增 **Caminho C 全 UX 安装体验**:交互式 whiptail 安装器(零域名默认路径)、Reality URI 终端 QR、LE 前 DNS 预检、部署后 ✓/✗/⚠ 健康检查、人性化错误提示、`s-vps` 运维 CLI(`update`/`diagnose`/`status`)、可选 Telegram 机器人(`/user` 用户管理 + `/sub` 订阅地址轮换)、可选 Caddy 订阅端点。`users.index.json` 现已成为运维者的可移植真相之源——这是让 v0.7 无面板模式仅需翻一个标志即可切换的结构性改动。v0.6.1 修复了 v0.6.0 在东京 VPS 烟雾测试中暴露的若干 bug。详见英文 [CHANGELOG.md](CHANGELOG.md)。
 
 一个可复用的工具集,用于在受限网络环境中搭建注重隐私的 VPS。在 3X-UI 面板背后部署 VLESS-Reality + Hysteria2,带合理的安全加固、真正可用的 fail2ban 配置,以及内置的可观测性方案。
 

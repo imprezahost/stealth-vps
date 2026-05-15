@@ -1,0 +1,23 @@
+{
+  "_comment_purpose": "markdownlint-cli2 config for stealth-vps. We keep structural rules on (heading spacing, list spacing, code-fence languages, no-bare-urls) and disable the cosmetic ones that don't affect rendered output or that conflict with the project's prose style.",
+
+  "_comment_MD013": "line-length: disabled. Tables and prose in this project intentionally use long lines (one row = one line). Wrapping would hurt readability of the rendered output.",
+  "MD013": false,
+
+  "_comment_MD060": "table-column-style: disabled. Some tables use compact pipe spacing (no space-around-pipe) and others use loose; both render identically on GitLab + GitHub. The rule flags style inconsistency, but our tables are correct GFM tables.",
+  "MD060": false,
+
+  "_comment_MD024": "no-duplicate-heading: allow siblings (different parent sections). CHANGELOG entries repeat '### Added', '### Changed', '### Fixed' under each release header — that's the Keep-a-Changelog convention.",
+  "MD024": { "siblings_only": true },
+
+  "_comment_MD041": "first-line-heading: disabled. Some files (e.g. docs/internal/roadmap-v0.6-v0.7.md) intentionally start with a comment-style intro before the H1.",
+  "MD041": false,
+
+  "_comment_MD033": "no-inline-html: allow. We use <kbd>, <details>, <summary>, and a couple of <br /> for readability in tables.",
+  "MD033": false,
+
+  "_comment_MD036": "no-emphasis-as-heading: disabled. Some docs use **bold** lines for sub-sub-section emphasis where adding a fifth-level heading would be heavier than the content warrants.",
+  "MD036": false,
+
+  "_comment_kept": "Kept-on (gating): MD022 blanks-around-headings, MD031 blanks-around-fences, MD032 blanks-around-lists, MD040 fenced-code-language, MD034 no-bare-urls, MD029 ol-prefix. Those are structural and easy to fix when they fire."
+}
