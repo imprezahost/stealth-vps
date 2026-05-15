@@ -1,0 +1,96 @@
+---
+# Reality state generation — panel-INDEPENDENT.
+#
+# Generates the Reality crypto material (X25519 keypair, client UUID,
+# shortId, port) and persists to /etc/stealth-vps/reality.state.yml.
+# Idempotent: on subsequent runs we only load the existing state.
+#
+# This file does NOT touch the 3X-UI panel. It is the half of the old
+# `xray.yml` that survives the move to v0.7.0 headless mode unchanged —
+# the standalone-xray path will read the same `reality.state.yml`.
+#
+# The Reality state is created using the xray binary bundled inside
+# the 3X-UI panel (for now). In v0.7.0 headless mode, the path resolves
+# to `/usr/local/bin/xray` instead via a `stealth_vps_xray_bin` var.
+
+- name: Probe xray binary used for crypto generation
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }}"
+  register: stealth_vps_xray_bin_stat
+  tags: [xray, reality]
+
+- name: Assert xray binary present
+  ansible.builtin.assert:
+    that: stealth_vps_xray_bin_stat.stat.exists
+    fail_msg: >-
+      xray binary missing under {{ stealth_vps_panel_dir }}/bin/. In
+      panel mode this comes from the 3X-UI install — run `--tags panel`
+      first. In headless mode (v0.7+) the binary is installed
+      standalone by `reality_xray_standalone.yml`.
+  tags: [xray, reality]
+
+# --- Reality state (generate once, reuse forever) ------------------------
+
+- name: Probe existing reality state file
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+  register: stealth_vps_reality_state_stat
+  tags: [xray, reality]
+
+- name: Load existing reality state when present
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+    name: stealth_vps_reality_state
+  when: stealth_vps_reality_state_stat.stat.exists
+  tags: [xray, reality]
+
+- name: Generate Reality state (first run only)
+  when: not stealth_vps_reality_state_stat.stat.exists
+  tags: [xray, reality]
+  block:
+
+    - name: Generate X25519 keypair via bundled xray
+      ansible.builtin.command:
+        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }} x25519"
+      register: stealth_vps_x25519_raw
+      changed_when: false
+      no_log: true
+
+    - name: Generate client UUID via bundled xray
+      ansible.builtin.command:
+        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }} uuid"
+      register: stealth_vps_uuid_raw
+      changed_when: false
+
+    - name: Generate 8-char hex shortId
+      ansible.builtin.command:
+        cmd: openssl rand -hex 4
+      register: stealth_vps_shortid_raw
+      changed_when: false
+
+    - name: Compose new reality state
+      # Use a Jinja2 dict expression (rather than YAML mapping with
+      # `"{{ ... }}"` values) so the port stays an int. YAML mappings
+      # convert template outputs to strings, which then break the
+      # 3X-UI POST that expects port:int.
+      ansible.builtin.set_fact:
+        stealth_vps_reality_state: "{{ {
+          'port': (range(stealth_vps_reality_port_min, stealth_vps_reality_port_max + 1) | random),
+          'private_key': (stealth_vps_x25519_raw.stdout
+            | regex_search('PrivateKey:\\s+(\\S+)', '\\1') | first),
+          'public_key': (stealth_vps_x25519_raw.stdout
+            | regex_search('PublicKey\\):\\s+(\\S+)', '\\1') | first),
+          'client_uuid': (stealth_vps_uuid_raw.stdout | trim),
+          'client_email': stealth_vps_reality_default_client_email,
+          'short_id': (stealth_vps_shortid_raw.stdout | trim),
+        } }}"
+      no_log: true
+
+    - name: Persist reality state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_reality_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
