@@ -18,9 +18,11 @@
 
 - name: Sync Python package source files
   # `copy` with recursive directory source so adding a module later
-  # just needs a new file in files/python-pkg/.
+  # just needs a new file in files/stealth_vps/. The on-disk source
+  # name matches the import name (underscore, not hyphen) so pytest
+  # can pick it up directly via `pythonpath` without a symlink dance.
   ansible.builtin.copy:
-    src: python-pkg/
+    src: stealth_vps/
     dest: "{{ stealth_vps_python_pkg_dir }}/"
     owner: root
     group: root

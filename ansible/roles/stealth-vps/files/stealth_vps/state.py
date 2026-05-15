@@ -1,9 +1,11 @@
 """State file I/O — atomic, schema-aware reads + writes for
 /etc/stealth-vps/users.index.json (and related state files).
 
-Atomicity: every write goes to a sibling temp file, then `os.rename()`
-in place. POSIX guarantees the rename is atomic, so concurrent
-readers either see the old file or the new file, never a partial.
+Atomicity: every write goes to a sibling temp file, then `os.replace()`
+in place. POSIX `rename(2)` and Windows `MoveFileEx` with REPLACE_EXISTING
+are both atomic for in-same-directory moves; `os.replace` wraps the
+right syscall on each platform. Concurrent readers either see the old
+file or the new file, never a partial.
 """
 
 from __future__ import annotations
@@ -85,7 +87,7 @@ def save_users_index(data: dict[str, Any], path: str = USERS_INDEX_PATH) -> None
         tmp_path = f.name
     try:
         os.chmod(tmp_path, 0o600)
-        os.rename(tmp_path, path)
+        os.replace(tmp_path, path)
     except OSError:
         # Best-effort cleanup if the rename fails.
         try:

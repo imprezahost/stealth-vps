@@ -1,0 +1,22 @@
+# Project-level config for Python tooling. We don't publish anything to
+# PyPI — this file exists purely to point pytest at the shared package
+# that ships under the Ansible role's files/ dir.
+#
+# The package itself (stealth_vps) is pure-stdlib and gets copied onto
+# managed VPSes via tasks/python_pkg.yml. Tests run against the source
+# tree (no install step) so a fresh checkout + `pytest` Just Works.
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python-pkg"]
+# Make `import stealth_vps` resolve to ansible/roles/stealth-vps/files/stealth_vps/
+# directly, the same dir that python_pkg.yml ships to /usr/local/lib/.
+pythonpath = ["ansible/roles/stealth-vps/files"]
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+]
+filterwarnings = [
+  "error",
+  # python-telegram-bot lives in the bot venv, not in tests. Tests don't import it.
+]
