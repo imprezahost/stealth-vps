@@ -86,9 +86,9 @@ The module has no `required_providers`. Drop it into any Terraform config:
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.2"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.3"
 
-  stealth_version = "v0.6.2"
+  stealth_version = "v0.6.3"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   ssh_port        = 22550
   domain          = "vpn.example.com"
@@ -133,8 +133,8 @@ Full reference in [`terraform/modules/stealth-vps/README.md`](../terraform/modul
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source          = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.2"
-  stealth_version = "v0.6.2"
+  source          = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.3"
+  stealth_version = "v0.6.3"
   # ...
 }
 ```
@@ -156,7 +156,7 @@ The Terraform module doesn't have its own CI yet. `terraform fmt -check` + `terr
 
 ## Limitations
 
-- The example tree is **Hetzner + AWS + DigitalOcean + Vultr + Proxmox** as of v0.6.2. Pulumi reference lands next; the module itself works against any provider whose Terraform resource accepts a string user_data.
+- The example tree is **Hetzner + AWS + DigitalOcean + Vultr + Proxmox** as of v0.6.3. Pulumi reference lands next; the module itself works against any provider whose Terraform resource accepts a string user_data.
 - `extra_role_vars` is `map(any)` — no per-key validation. Override surface is wide; misnames are silently ignored by Ansible.
 - No support for *multi-server fleet* state in the example. The pattern (`for_each` over a regions map) works but is out of scope for the minimal example.
 - The `hcloud` provider version pin is `~> 1.49` (Q2/2026). Bump explicitly in the example's `versions.tf` if you want newer.
