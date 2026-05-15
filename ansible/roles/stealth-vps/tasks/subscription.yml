@@ -1,7 +1,131 @@
 ---
-# Placeholder — filled in v0.6.0 Block 3 (Caddy + subscription endpoint).
+# Install Caddy + the subscription-endpoint vhost.
+#
+# What Caddy serves:
+#   /<sub_path>/<token>  →  /var/lib/stealth-vps/subscriptions/<token>.txt
+#
+# Caddy is the right tool here despite the project's "minimal dependency"
+# rule because:
+#   - We need TLS termination at a real port (acme.sh only handles cert
+#     issuance, not serving files).
+#   - Range/HEAD/byte-cache for static files is "just works" with Caddy.
+#   - file_server returns 404 for unknown tokens automatically.
+#
+# Two bind modes (controlled by stealth_vps_subscription_expose):
+#   false → 127.0.0.1:8443 (loopback, operator fetches via SSH tunnel)
+#   true  → 0.0.0.0:443 with Let's Encrypt when domain is set, otherwise
+#           refuses to start (we won't expose a self-signed sub endpoint).
 
-- name: Subscription task stub (Block 3 not yet applied)
-  ansible.builtin.debug:
-    msg: "subscription.yml stub — v0.6.0 Block 3 fills this in."
-  when: false
+- name: Refuse to expose subscription without a domain
+  ansible.builtin.assert:
+    that:
+      - not (stealth_vps_subscription_expose | bool and not stealth_vps_domain)
+    fail_msg: >-
+      stealth_vps_subscription_expose=true requires stealth_vps_domain
+      to be set so Caddy can use a Let's Encrypt cert. Either set the
+      domain or flip expose=false (loopback-only bind).
+  tags: [subscription, caddy]
+
+# --- Install Caddy from the official APT repo ----------------------------
+
+- name: Install Caddy repo prerequisites
+  ansible.builtin.apt:
+    name:
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [subscription, caddy]
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: [subscription, caddy]
+
+- name: Trust the Cloudsmith Caddy signing key
+  # Caddy is published via Cloudsmith; the key + repo URL come straight
+  # from https://caddyserver.com/docs/install#debian-ubuntu-raspbian.
+  # Modern apt (Debian 12+) reads .asc armored keys when signed-by points
+  # at one — no need to gpg --dearmor.
+  ansible.builtin.get_url:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    dest: /etc/apt/keyrings/caddy-stable.asc
+    mode: '0644'
+    force: false
+  tags: [subscription, caddy]
+
+- name: Add Caddy APT repository
+  ansible.builtin.copy:
+    content: |
+      # Cloudsmith Caddy stable repo — managed by stealth-vps.
+      deb [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+      deb-src [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+    dest: /etc/apt/sources.list.d/caddy-stable.list
+    owner: root
+    group: root
+    mode: '0644'
+  register: stealth_vps_caddy_repo
+  tags: [subscription, caddy]
+
+- name: Refresh apt cache after adding Caddy repo
+  ansible.builtin.apt:
+    update_cache: true
+  when: stealth_vps_caddy_repo.changed
+  tags: [subscription, caddy]
+
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+  tags: [subscription, caddy]
+
+# --- Caddy config --------------------------------------------------------
+
+- name: Ensure subscriptions directory exists (also created by users_index.yml)
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps/subscriptions
+    state: directory
+    owner: root
+    # Group ownership stays whatever users_index.yml / bot.yml set —
+    # don't reset here. We use `state: directory` for idempotency only.
+  tags: [subscription, caddy]
+
+- name: Render /etc/caddy/Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: caddy
+    mode: '0640'
+    validate: 'caddy validate --config %s --adapter caddyfile'
+  notify: reload caddy
+  tags: [subscription, caddy]
+
+# --- UFW + firewall ------------------------------------------------------
+
+- name: Open Caddy's public port via UFW (when exposing)
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    comment: "stealth-vps subscription endpoint (Caddy)"
+  when: stealth_vps_subscription_expose | bool
+  failed_when: false   # tolerate UFW absent / not yet configured
+  tags: [subscription, caddy, ufw]
+
+# --- Service -------------------------------------------------------------
+
+- name: Enable + start Caddy
+  ansible.builtin.systemd:
+    name: caddy.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [subscription, caddy]

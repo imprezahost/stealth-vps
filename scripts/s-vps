@@ -131,7 +131,8 @@ s_cmd_update() {
   current=$(_s_load_pinned_version)
   if [[ -z "${target}" ]]; then
     target="${current}"
-    [[ "${target}" == "unknown" ]] && _s_die "no pinned version found; pass an explicit tag (e.g. s-vps update v0.6.0)."
+    [[ "${target}" == "unknown" || "${target}" == "local" ]] && \
+      _s_die "no pinned version found; pass an explicit tag (e.g. s-vps update v0.6.0)."
     echo "Re-deploying stealth-vps ${target}..."
   else
     echo "Updating stealth-vps from ${current} → ${target}..."
@@ -142,11 +143,32 @@ s_cmd_update() {
   mkdir -p "${log_dir}"
   local log="${log_dir}/update-$(date +%Y%m%d-%H%M%S).log"
 
+  # Reconstruct the original -e overrides. Non-secrets come from
+  # installer.env (already sourced by _s_load_installer_env). The bot
+  # token isn't in installer.env for security reasons — pull it out of
+  # the existing bot.env if the bot is enabled and the file is present.
+  local bot_token=""
+  if [[ "${STEALTH_BOT_ENABLED:-false}" == "true" ]] && [[ -r /etc/stealth-vps/bot.env ]]; then
+    bot_token=$(grep -E '^STEALTH_VPS_BOT_TOKEN=' /etc/stealth-vps/bot.env | cut -d= -f2-)
+  fi
+
+  local extra_vars=(
+    "stealth_vps_release_tag=${target}"
+    "stealth_vps_domain=${STEALTH_DOMAIN:-}"
+    "stealth_vps_panel_enabled=${STEALTH_PANEL_ENABLED:-true}"
+    "stealth_vps_hysteria_enabled=${STEALTH_HYSTERIA_ENABLED:-true}"
+    "stealth_vps_bot_enabled=${STEALTH_BOT_ENABLED:-false}"
+    "stealth_vps_bot_token=${bot_token}"
+    "stealth_vps_subscription_enabled=${STEALTH_SUBSCRIPTION_ENABLED:-false}"
+    "stealth_vps_subscription_expose=${STEALTH_SUBSCRIPTION_EXPOSE:-false}"
+  )
+
   if ansible-pull \
         -U "${repo}" \
         -C "${target}" \
         -i 'localhost,' \
         -c local \
+        -e "${extra_vars[*]}" \
         ansible/playbooks/site.yml \
         2>&1 | tee "${log}"; then
     echo "${target}" > "${S_VPS_VERSION_FILE}"
