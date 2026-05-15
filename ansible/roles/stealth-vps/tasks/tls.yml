@@ -58,10 +58,15 @@
       # would still be curl-to-sh semantically. ansible-lint's
       # command-instead-of-module is disabled per-task.
       ansible.builtin.shell: >-
+        set -o pipefail;
         curl -fsSL https://get.acme.sh
         | sh -s email={{ stealth_vps_tls_email | quote }}
       args:
+        # `creates:` makes the shell run only when acme.sh isn't there
+        # yet (idempotent re-runs) AND satisfies ansible-lint's
+        # no-changed-when by deriving changed_when from the file marker.
         creates: /root/.acme.sh/acme.sh
+        executable: /bin/bash
       when: not stealth_vps_acme_stat.stat.exists
 
     - name: Set Let's Encrypt as the default CA
@@ -148,7 +153,11 @@
     - name: Re-install cron if missing
       ansible.builtin.command:
         cmd: /root/.acme.sh/acme.sh --install-cronjob
+      # `when:` already guards against unnecessary runs (cron already
+      # registered → rc==0). Mirror that into changed_when so the report
+      # only flags "changed" when we actually re-install.
       when: stealth_vps_acme_cron.rc != 0
+      changed_when: stealth_vps_acme_cron.rc != 0
 
     - name: Show issued cert details
       ansible.builtin.command:

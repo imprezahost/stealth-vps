@@ -98,7 +98,10 @@
     state: directory
     owner: root
     # Group ownership stays whatever users_index.yml / bot.yml set —
-    # don't reset here. We use `state: directory` for idempotency only.
+    # we use `state: directory` for idempotency only. Explicit mode is
+    # required by ansible-lint's risky-file-permissions rule; this matches
+    # what users_index.yml / bot.yml set (bot.yml later flips to 2770).
+    mode: '0755'
   tags: [subscription, caddy]
 
 - name: Render /etc/caddy/Caddyfile

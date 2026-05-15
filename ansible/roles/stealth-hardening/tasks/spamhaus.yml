@@ -90,7 +90,11 @@
 - name: Bootstrap Spamhaus ipset (initial download + populate)
   ansible.builtin.command:
     cmd: /usr/local/sbin/stealth-vps-update-spamhaus.sh
+  # The `when:` already guards against unnecessary runs (probe failed →
+  # ipset isn't present yet); explicit `changed_when:` ties the report
+  # to the same condition so ansible-lint's no-changed-when is happy.
   when: stealth_hardening_spamhaus_ipset_probe.rc != 0
+  changed_when: stealth_hardening_spamhaus_ipset_probe.rc != 0
   tags: [spamhaus, hardening]
 
 - name: Enable the daily timer
@@ -132,7 +136,11 @@
 
 - name: Confirm ipset has entries
   ansible.builtin.shell:
-    cmd: "ipset list {{ stealth_hardening_spamhaus_ipset_name }} | grep -c '^[0-9]'"
+    # `set -o pipefail` so an empty ipset (grep -c → no matches → rc=1)
+    # propagates through the pipe instead of being masked by grep's exit
+    # status. Without pipefail the task always reports rc=0.
+    cmd: "set -o pipefail; ipset list {{ stealth_hardening_spamhaus_ipset_name }} | grep -c '^[0-9]'"
+    executable: /bin/bash
   register: stealth_hardening_spamhaus_count
   changed_when: false
   tags: [spamhaus, hardening]

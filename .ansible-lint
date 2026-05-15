@@ -8,6 +8,17 @@ exclude_paths:
   - .cache/
   - .ansible/
 
-# Default profile is "production" since 24.x — bump up gradually. For now
-# "basic" is enough; revisit when we add Molecule integration tests.
-profile: basic
+# Profile bumped to "safety" in the v0.6.1 cleanup sweep. The next
+# rung up, "production", flags every task that mutates state outside
+# a handler — including our daemon-reload / ufw-reload tasks that
+# intentionally run unconditionally to recover from drift. That's an
+# architectural opinion we don't share; skip_list disables `no-handler`
+# instead of redesigning the role around handlers.
+profile: safety
+skip_list:
+  # The role uses direct tasks (not handlers) for systemd daemon-reload
+  # + UFW reload because those are idempotent and the explicit ordering
+  # matters more than handler-batching efficiency. ansible-lint's
+  # production profile insists on handlers; we opt out per-task with
+  # an honest skip_list entry rather than restructuring the role.
+  - no-handler
