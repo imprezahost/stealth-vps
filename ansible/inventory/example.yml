@@ -38,7 +38,7 @@ all:
     # re-deploys this exact tag. install.sh sets this automatically;
     # direct ansible-playbook runs should set it themselves to match
     # whatever version this checkout corresponds to.
-    # stealth_vps_release_tag: v0.6.1
+    # stealth_vps_release_tag: v0.6.3
 
     # ---- v0.6.0+ Telegram bot (opt-in) ----
     # When enabled, installs python-telegram-bot under a hardened systemd

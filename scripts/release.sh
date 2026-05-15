@@ -115,6 +115,34 @@ MANUAL_FILES=(
   pulumi/README.md
 )
 
+# --- Partial-bump file allowlist -----------------------------------------
+#
+# Files where a blanket sed across the whole file would clobber historical
+# references (roadmap rows, "what shipped in v0.X.Y" prose) but where some
+# *specific* lines DO need to track the latest release — install URLs,
+# Terraform/Pulumi module refs, env-var examples. For these we apply sed
+# only on lines that match one of the PARTIAL_PATTERNS regexes.
+#
+# Symptom this avoids: "v0.6.2 ships, but the README install command on
+# the homepage still says v0.6.1". Happened in v0.6.2 → fixed in v0.6.3.
+
+PARTIAL_FILES=(
+  README.md
+  README.zh-CN.md
+)
+
+# sed address regexes — a line that matches ANY of these gets its
+# OLD_VERSION → NEW_VERSION token bumped. Roadmap rows like
+# `| v0.6.1 | ... | shipped 2026-05-15 |` don't match any pattern,
+# so they stay as historical fact.
+PARTIAL_PATTERNS=(
+  'raw\.githubusercontent\.com.*scripts/install\.sh'
+  '\?ref=v[0-9]'
+  'stealth_version[[:space:]]*='
+  '"v[0-9]+\.[0-9]+\.[0-9]+"'
+  'STEALTH_VERSION=v[0-9]'
+)
+
 # --- Sanity: all listed files exist --------------------------------------
 
 missing=()
@@ -171,6 +199,47 @@ done
 echo
 echo "Auto-bump summary: ${files_changed} file(s) changed, ${files_skipped} skipped, ${total_matches} occurrence(s)."
 
+# --- Partial bump (install URLs etc.) on README files -------------------
+
+echo
+echo "Selective bump on ${#PARTIAL_FILES[@]} README-style file(s)..."
+partial_changed=0
+partial_total=0
+for f in "${PARTIAL_FILES[@]}"; do
+  [[ -f "$f" ]] || { echo "  ${f}: missing, skipped"; continue; }
+  this_file_count=0
+  for p in "${PARTIAL_PATTERNS[@]}"; do
+    # Count matching lines that ALSO contain OLD_VERSION on that line.
+    hits=$(grep -E "${p}" "$f" 2>/dev/null | grep -cF "${OLD_VERSION}" 2>/dev/null || true)
+    if [[ "${hits}" -eq 0 ]]; then
+      continue
+    fi
+    if [[ ${DRY_RUN} -eq 0 ]]; then
+      # `\#regex#s|old|new|g` — `#` is the address-pattern delimiter
+      # (custom-delimiter form, since some PARTIAL_PATTERNS contain `/`
+      # like `scripts/install.sh`, which would terminate the default
+      # `/` address delimiter mid-pattern). Substitution still uses
+      # `|` since version strings contain `.` but not `|`.
+      "${SED_INPLACE[@]}" "\\#${p}#s|${OLD_VERSION}|${NEW_VERSION}|g" "$f"
+    fi
+    this_file_count=$((this_file_count + hits))
+  done
+  if [[ ${this_file_count} -gt 0 ]]; then
+    partial_changed=$((partial_changed + 1))
+    partial_total=$((partial_total + this_file_count))
+    if [[ ${DRY_RUN} -eq 1 ]]; then
+      printf '  %-58s  %d install/ref line(s)\n' "$f" "${this_file_count}"
+    else
+      printf '  %-58s  %d install/ref line(s) → bumped\n' "$f" "${this_file_count}"
+    fi
+  else
+    printf '  %-58s  (no install/ref lines to bump)\n' "$f"
+  fi
+done
+
+echo
+echo "Partial-bump summary: ${partial_changed} README(s) touched, ${partial_total} install/ref line(s)."
+
 # --- Manual-file reminder -----------------------------------------------
 
 echo
@@ -184,7 +253,10 @@ cat <<EOF
 Manual checklist for ${NEW_VERSION}:
   - CHANGELOG.md         add new "## [${NEW_VERSION#v}] - YYYY-MM-DD" section
   - README.md            bump "Status: ${OLD_VERSION}" banner + append roadmap row
-  - README.zh-CN.md      mirror README.md changes
+                         (install URLs + Terraform refs were already auto-bumped
+                         by the partial-bump pass above)
+  - README.zh-CN.md      mirror README.md banner / status text changes
+                         (install URLs already auto-bumped)
   - pulumi/README.md     review "Limitations at ${OLD_VERSION}" section header
                          (bump to ${NEW_VERSION} if limitations still apply,
                          remove or rename if resolved)

@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
 
+## [0.6.3] - 2026-05-15
+
+Twentieth tagged release. Fixes the v0.6.2 oversight where the README on the GitHub homepage still showed `v0.6.1` install URLs (and the v0.6.2 release-page README still said `v0.5.4` URLs even further back). Also drops two pieces of fictional content from `SECURITY.md` that were never wired up.
+
+### Added
+
+- **`scripts/release.sh` partial-bump pass**. New `PARTIAL_FILES` + `PARTIAL_PATTERNS` arrays — files where blanket `sed` would clobber historical refs (roadmap rows, "what shipped in v0.X.Y" prose) but specific lines DO need to track the latest tag. The pass uses sed's custom-delimiter address form (`\#regex#s|old|new|g`) so patterns with `/` (like `scripts/install.sh`) don't break the parse. Catches: install URLs on `raw.githubusercontent.com`, Terraform `?ref=` refs, `stealth_version = "v..."` literals, `STEALTH_VERSION=v...` env-var examples. Going forward `release.sh` auto-bumps these on every release — no more "v0.6.X ships but README still says v0.6.X-1".
+
+### Changed
+
+- **`SECURITY.md` contact channels**. The previous policy listed three contacts that never existed: `security@imprezahost.com` (no mailbox provisioned), a PGP key "to be published when v0.1.0 ships" (never published), and a separate `https://imprezahost.com/security` channel for infrastructure disclosure (never set up). Replaced with the three channels that actually reach the maintainers: `support@imprezahost.com`, `@imprezahost` on Telegram, and the support portal's security department. Out-of-scope bullet for "Impreza Host infrastructure itself" simplified — infra reports go through the same support channels and the team routes them internally.
+- **README install URLs and Terraform refs bumped to v0.6.3** in `README.md` and `README.zh-CN.md`. README's banner + roadmap row bumped manually as usual (those are part of the historical surface, intentionally not auto-bumped).
+
+### Removed
+
+- **GitHub repo recreated**. After the v0.6.2 `git filter-branch` rewrite of two old commit messages (sprint 16 `release.sh` + sprint 17 roadmap doc — both had `Co-Authored-By: Claude Opus 4.7 ...` trailers from earlier sessions), force-pushing main + tags to the existing GitHub mirror left the two old SHAs as dangling commits — still reachable by direct fetch, and still credited to the GitHub user `@claude` (id 81847, unrelated to Anthropic but matched by the trailer's name field) in the contributor sidebar. Solution: delete the GitHub repo via the UI's Danger Zone, recreate it via API (same URL, MIT license, topics, description, homepage), push the rewritten history from GitLab fresh. The 4 GitHub Releases (v0.5.9, v0.6.0, v0.6.1, v0.6.2) were re-created via the API with bodies pulled from the CHANGELOG. Contributors list now shows only `imprezabr`.
+
 ## [0.6.2] - 2026-05-15
 
 Nineteenth tagged release. Documentation + testing + CI consolidation. No runtime behaviour changes; the role itself is byte-equivalent to v0.6.1 plus three small Docker-container-aware guards (`ansible_facts.virtualization_type != 'docker'`) on tasks that previously failed when applied in a Molecule sandbox.
