@@ -53,14 +53,29 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
 
 ---
 
-## v0.6.0 — TUI install + Telegram bot + subscriptions (panel mode)
+## v0.6.0 — Full UX install + Telegram bot + subscriptions (panel mode)
+
+> **Scope decision 2026-05-15**: shipping **Caminho C (full UX)** rather than the minimal-roadmap baseline. The thesis is "the script does the dirty work so the user is connected in under 5 minutes without touching `nano`, `dig`, or `journalctl`." That decision adds 8 UX layers on top of the original scope. See the "UX layers" subsection below for what each one is and why.
 
 ### Scope (in)
+
+**Core (original roadmap)**:
 
 - `install.sh` interativo via whiptail (com fallback graceful para env-var quando piped).
 - Index de usuários `users.index.json` — escrito por toda task que cria/revoga cliente Reality.
 - Bot Telegram (`stealth-vps-bot.service`) com comandos: `/status`, `/diagnose`, `/creds`, `/user add|list|revoke`, `/sub|sub revoke`.
 - Endpoint de subscription via Caddy servindo `/var/lib/stealth-vps/subscriptions/*.txt`.
+
+**Full UX layers (Caminho C)**:
+
+1. **Zero-domain default**. `install.sh` doesn't require `domain`. Default = IP-only Reality + self-signed Hysteria2. The operator can be connected in 5 min without touching DNS. LE is strictly opt-in (only needed when they want a public subscription URL or a domain-validating client).
+2. **Terminal QR code** for the default Reality URI at the end of `install.sh`. `qrencode -t ANSIUTF8` prints into the terminal; operator scans with their phone camera or directly from Hiddify → profile imports, connects. Cuts first-connection time to <30 s.
+3. **Bot setup via QR (chat-id auto-capture)**. The TUI prompts for the BotFather token + admin handle; bot auto-captures `chat_id` from the first `/start` rather than requiring the operator to paste it. The TUI also prints a QR for `t.me/BotFather` with 3-step inline instructions for users who haven't created a bot before.
+4. **DNS pre-flight**. When `domain` is set, the TUI does `dig +short` against it before calling `acme.sh` and loops "DNS not propagated yet, retrying…" up to 5 min, instead of letting LE fail and dumping an obscure error.
+5. **Health-check pós-deploy**. After `ansible-pull` returns, the script sleeps 10 s and runs a 6-8-line checklist: `x-ui` active? `hysteria-server` active? panel responds HTTPS? Reality port reachable from outside (egress curl)? cert expiry > 60 d? Prints a tabela with ✓/✗/⚠ per row so the operator knows immediately if it worked.
+6. **Human-friendly error messages**. `install.sh` wraps the Ansible / acme.sh / systemd errors most likely to bite and replaces the stack trace with: "✗ Reality couldn't reach dest www.microsoft.com:443. Common cause: VPS provider blocks outbound TCP from new instances. Quick fix: `STEALTH_REALITY_DEST=www.lovelive-anime.jp:443 install.sh`. Full log: /var/log/stealth-vps/install-*.log."
+7. **`s-vps update` antecipado**. The CLI lands in v0.7 in the roadmap, but `s-vps update` (single command: fetch latest tag, ansible-pull with the right `--tags`) ships in v0.6.0 as a `/usr/local/bin/s-vps` symlink to a minimal shell wrapper. Full Python CLI still v0.7.
+8. **Bot DM pós-install**. If the operator opted into the bot, the install script ends by sending the default-profile URI (with QR) + subscription URL + a `/diagnose` hint via DM. The operator can close their SSH session and never need to touch the terminal again — everything from then on is Telegram.
 
 ### Scope (out)
 
@@ -68,6 +83,7 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
 - Hysteria2 per-user (v0.7.0 — 3X-UI v2.9.4 não gerencia Hysteria2; em v0.6.0 todos os clientes Hysteria2 compartilham a mesma senha, documentado nas release notes).
 - Comandos do bot com janela temporal (`/user list --since X`). Bot expõe só "totais correntes" para não criar dívida que v0.7.0 não consegue pagar sem persistência adicional.
 - Web wizard. Decisão firme: conflita com pitch "auditable / IaC-native".
+- Full Python `s-vps` CLI (just `update` and `diagnose` ship as shell wrappers in v0.6.0; verb expansion is v0.7.0).
 
 ### Implementation steps (ordem importa)
 
@@ -110,15 +126,39 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
    - Opt-in para exposição pública (`stealth_vps_subscription_expose=true`): UFW abre 443/TCP, vhost reescreve para `0.0.0.0:443`. Caminho `/.well-known/stealth-vps-sub/<token>` (menos pingável).
    - 404 idêntico para path desconhecido e token inválido.
 
-5. **`install.sh` interativo**:
+5. **`install.sh` interativo** (Caminho C: full UX):
    - Detecta `[ -t 0 ] && [ -t 1 ]`. Se ambos TTY → whiptail. Senão → env-var mode (path atual, intocado).
    - Sem `< /dev/tty` magic. Cloud-init / Terraform / Pulumi seguem env-var.
-   - Prompts (ordem): domain → LE email (só se domain setado) → SSH port → Reality dest → habilitar bot? (token + admin chat IDs).
+   - **Prompts (Caminho C)** — domain é **optional**, instalador deixa claro que o fast-path é "skip and stay on IP":
+     ```
+     ┌─ stealth-vps installer ────────────────────────────────────┐
+     │  Fast path: leave fields empty for IP-only deploy          │
+     │  (you can be connected in 5 minutes — domain is optional). │
+     └────────────────────────────────────────────────────────────┘
+     [1/5] Domain (optional, leave empty for IP-only): _
+     [2/5] LE email (only if domain set): _
+     [3/5] SSH port [22550]: _
+     [4/5] Reality dest [www.microsoft.com:443]: _
+     [5/5] Enable Telegram bot? (Y/n): _
+       └─ if yes: paste BotFather token: _
+       └─ admin Telegram handle (we'll capture chat_id on /start): _
+     ```
+   - **DNS pre-flight** (Caminho C item #4) when domain is set: loops `dig +short` against the domain vs the VPS IP up to 5 min with progress dots before calling `acme.sh`. Aborts with a human message if it times out.
+   - **Health check post-deploy** (item #5): after `ansible-pull` returns, sleeps 10 s and runs a checklist (services active? panel HTTPS reachable? Reality port reachable from outside via curl to ifconfig.me? cert expiry > 60 d?). Prints a ✓/✗/⚠ table — operator sees deploy status without parsing logs.
+   - **Error wrapping** (item #6): around the `ansible-pull` call + `acme.sh` invocations, intercept known failure patterns (regex on stderr/journal) and replace the stack trace with a one-paragraph "what failed + likely cause + quick fix" message. Full Ansible log stays at `/var/log/stealth-vps/install-<timestamp>.log` for advanced cases.
+   - **QR code at the end** (item #2): if `qrencode` is installed (added to apt-get deps in `install.sh` itself), print `qrencode -t ANSIUTF8 -o - "<vless URI>"` directly into the terminal. If `qrencode` install fails, fall back to printing the URI and a `qrencode -t ANSIUTF8 -r /root/stealth-vps-credentials.txt` instruction.
+   - **Bot DM at the end** (item #8): if bot is enabled AND chat_id was captured (operator clicked /start), the script sends the default profile URI + sub URL + a `/diagnose` hint via Telegram before exiting. From that point the operator's phone is the control surface.
+   - **`s-vps update` wrapper** (item #7): script drops `/usr/local/bin/s-vps` as a thin shell wrapper exposing `update` (fetch latest tag + ansible-pull) and `diagnose` (the same checklist as the health-check). Both call existing role logic; full Python CLI lands in v0.7.0.
    - Escreve respostas em `/root/stealth-vps-install-vars.yml` chmod 0600; passa para `ansible-pull -e @<file>`.
    - Header comment documenta o contrato env-var como estável pra cloud-init.
 
+6. **Bot chat_id auto-capture** (item #3): when the bot starts for the first time without a chat_id in `bot.env`, it enters a "pairing mode" — polling for `/start` messages from anyone, accepting the first one as the admin, writing the chat_id to `bot.env`, and dropping into normal mode. Pairing mode has a 30-min timeout (bot exits and falls back to env-var configuration if no `/start` arrives) so a forgotten-pair bot doesn't sit open indefinitely. Documented in `docs/telegram-bot.md`.
+
+7. **QR code library** (item #2): add `qrencode` to the role's package list (`stealth-vps/tasks/main.yml` or similar). Also installed by `install.sh` directly before the QR-print step (in case the operator runs `install.sh` before `apt-get` finishes setting up the role's deps).
+
 ### Files (new)
 
+Core (original roadmap):
 - `ansible/roles/stealth-vps/tasks/users_index.yml`
 - `ansible/roles/stealth-vps/tasks/bot.yml`
 - `ansible/roles/stealth-vps/tasks/subscription.yml`
@@ -136,21 +176,34 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
 - `docs/subscription-endpoint.md`
 - `tests/molecule/default/verify-bot.yml`
 
+Full UX layer (Caminho C):
+- `scripts/lib/health-check.sh` — the post-deploy ✓/✗/⚠ checklist, sourced by `install.sh` and reused by `s-vps diagnose`. Pure bash so it works on minimal VPSes before the Python venv is set up.
+- `scripts/lib/dns-preflight.sh` — the `dig`-loop waiting for DNS to propagate to the VPS IP. Sourced by `install.sh`.
+- `scripts/lib/error-wrap.sh` — known-failure-pattern catalogue (associative array of `pattern → "what failed + likely cause + quick fix"`); piped through `ansible-pull` + `acme.sh` stderr.
+- `scripts/s-vps` — thin shell wrapper exposing `update` (fetch latest tag + ansible-pull with smart `--tags`) and `diagnose` (calls `scripts/lib/health-check.sh`). Installed at `/usr/local/bin/s-vps` by the role's `main.yml`.
+- `ansible/roles/stealth-vps/tasks/cli_wrapper.yml` — drops `/usr/local/bin/s-vps` + makes it executable.
+- `docs/installer-ux.md` — documents the install.sh contract: prompts, env-var fallbacks, the 8 UX layers, what each error message means.
+
 ### Files (changed)
 
-- `scripts/install.sh` — TUI + env-var contract documentado.
-- `ansible/roles/stealth-vps/tasks/main.yml` — inclui `users_index.yml`, `bot.yml`, `subscription.yml` (com `when:` no opt-in).
-- `ansible/roles/stealth-vps/defaults/main.yml` — `stealth_vps_bot_enabled`, `stealth_vps_bot_token`, `stealth_vps_bot_admin_chat_ids`, `stealth_vps_subscription_enabled`, `stealth_vps_subscription_expose`, `stealth_vps_subscription_path`.
+- `scripts/install.sh` — TUI + env-var contract documentado + sourcing the three `scripts/lib/*.sh` helpers + the 8 UX-layer integrations (DNS pre-flight, error wrap, health check, QR print, bot DM, s-vps drop, zero-domain branch). Header comment expanded to enumerate every env-var the contract supports.
+- `ansible/roles/stealth-vps/tasks/main.yml` — inclui `users_index.yml`, `bot.yml`, `subscription.yml`, `cli_wrapper.yml` (com `when:` no opt-in onde apropriado).
+- `ansible/roles/stealth-vps/defaults/main.yml` — `stealth_vps_bot_enabled`, `stealth_vps_bot_token`, `stealth_vps_bot_admin_chat_ids` (now optional; bot pairs via /start if empty), `stealth_vps_subscription_enabled`, `stealth_vps_subscription_expose`, `stealth_vps_subscription_path`, `stealth_vps_cli_install` (default true).
 - `ansible/roles/stealth-vps/templates/stealth-vps-metrics-update.py.j2` — importa de `threex_client.py`.
-- `ansible/roles/stealth-vps/templates/stealth-vps-credentials.txt.j2` — adiciona seção "Telegram bot" + "Subscription URL" quando habilitados.
+- `ansible/roles/stealth-vps/templates/stealth-vps-credentials.txt.j2` — adiciona seção "Telegram bot" + "Subscription URL" quando habilitados + ANSI QR (literal bytes) for the default URI so `cat /root/stealth-vps-credentials.txt` from a fresh SSH session shows the QR too.
 - `ansible/roles/stealth-hardening/tasks/ufw.yml` — abre 443/TCP só quando `stealth_vps_subscription_expose=true`.
 - `tests/molecule/default/converge.yml` / `verify.yml`.
 - `CHANGELOG.md`, `README.md`, `README.zh-CN.md`, `docs/operations.md`.
 
 ### Tests
 
-- **Molecule**: novo `verify-bot.yml` afirma (a) `stealth-vps-bot.service` ativo, (b) `/etc/stealth-vps/bot.env` chmod 0600, (c) `/opt/stealth-vps/venv/bin/python` existe, (d) `caddy` serving 127.0.0.1:8443 retorna 404 para path inválido e 200 para token pre-seeded.
-- **Real-VPS**: deploy completo em Hetzner CAX11 via TUI `install.sh`. BotFather token real, criar 2 usuários, baixar subs em v2rayNG + sing-box, confirmar conexão Reality + Hysteria2, `/metrics` mostrando per-client counters.
+- **Molecule** (panel mode):
+  - novo `verify-bot.yml` afirma (a) `stealth-vps-bot.service` ativo, (b) `/etc/stealth-vps/bot.env` chmod 0600, (c) `/opt/stealth-vps/venv/bin/python` existe, (d) `caddy` serving 127.0.0.1:8443 retorna 404 para path inválido e 200 para token pre-seeded.
+  - `verify-installer-ux.yml` (Caminho C): asserts `qrencode` installed, `/usr/local/bin/s-vps` exists + executable, `scripts/lib/health-check.sh` returns 0 on a converged host, `dns-preflight.sh` returns 2 (inconclusive) on an unset domain — fast unit-style checks.
+- **Real-VPS** validation matrix (Caminho C):
+  - **Fast-path**: deploy via TUI on a fresh Hetzner CAX11, leave domain empty, scan the printed QR in Hiddify, connect. Target time-to-connect: under 5 min from `curl install.sh | bash` to traffic flowing.
+  - **Full-path**: same VPS, with domain + LE + bot. Verify DNS pre-flight waits + retries, bot pairs via /start, install ends with a Telegram DM containing the QR + sub URL.
+  - **Failure path**: simulate dest unreachable (point `STEALTH_REALITY_DEST` at `127.0.0.1:1`); verify the error-wrap intercepts and shows the human message instead of the stack trace.
 
 ---
 
@@ -253,17 +306,38 @@ Comportamento idêntico ao atual. Molecule deve passar sem mudança. Pré-condi�
 ## Release sequencing
 
 ```
-v0.5.9   sprints 16+17:
-         - sprint 16: scripts/release.sh                       (✓ branch pushed)
-         - sprint 17: refactor xray.yml                        (todo)
-v0.6.0   TUI installer + bot Telegram + sub endpoint
-v0.6.1   Polish: i18n EN+zh-CN nos strings do bot, /diagnose enriquecido
-v0.7.0   Headless mode + s-vps CLI + migração
+v0.5.9   sprints 16+17+18:
+         - sprint 16: scripts/release.sh                       (✓ MR !17 merged 1f4762b)
+         - sprint 17: roadmap doc                              (this file, branch up, MR pending)
+         - sprint 18: refactor xray.yml                        (todo, prereq for v0.6)
+v0.6.0   Caminho C full-UX install + bot + sub. Split into 11 sub-sprints (6.0.1 .. 6.0.11):
+         - 6.0.1  zero-domain default + DNS pre-flight
+         - 6.0.2  users.index.json schema + seed task
+         - 6.0.3  Python pkg extract (threex_client, state, backends, subscription, urivider)
+         - 6.0.4  TUI install.sh (whiptail + env-var fallback)
+         - 6.0.5  qrencode + terminal QR
+         - 6.0.6  bot service skeleton + chat_id auto-capture pairing mode
+         - 6.0.7  Caddy + subscription endpoint
+         - 6.0.8  bot DM pós-install + sub URL print
+         - 6.0.9  health-check post-deploy lib + integration
+         - 6.0.10 error-wrap lib + integration
+         - 6.0.11 s-vps shell wrapper (update + diagnose)
+v0.6.1   Polish: i18n EN+zh-CN nos strings do bot, /diagnose enriquecido com mais signal
+v0.7.0   Headless mode + full Python s-vps CLI + 3X-UI migração
 v0.7.1   Métricas headless via Xray gRPC stats (se não couber em v0.7.0)
 v1.0.0   Probe-resistance CI full + JA4 + signed releases
 ```
 
-Estimativa: v0.5.9 ~2 dias, v0.6.0 ~1-2 semanas, v0.6.1 ~3 dias, v0.7.0 ~2-3 semanas, v0.7.1 ~3 dias. Cumulativo ~5-6 semanas full-time.
+Estimativas revisadas (Caminho C):
+- **v0.5.9** ~2 dias (sprint 18 é o único item de código real; 16+17 já estão prontos).
+- **v0.6.0** ~3-4 semanas full-time (era 1-2 semanas no escopo mínimo; 8 UX layers + 11 sub-sprints adicionam ~2 semanas).
+- **v0.6.1** ~3 dias.
+- **v0.7.0** ~2-3 semanas.
+- **v0.7.1** ~3 dias.
+
+Cumulativo ~7-8 semanas full-time.
+
+A linha gorda é v0.6.0. O ponto-de-corte deliberado: a aposta é que aumentar v0.6.0 em ~2 semanas pra entregar full UX vale mais do que cortar v0.6.0 cedo e empurrar UX pra v0.6.1, v0.6.2, etc. — porque a UX é o que diferencia stealth-vps dos `bash <(curl ...)` scripts existentes; entregar metade não move a agulha.
 
 ---
 
