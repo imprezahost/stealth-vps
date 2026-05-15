@@ -112,7 +112,11 @@
         stealth_vps_hysteria_obfs_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
       no_log: true
 
-    - name: Compose new hysteria state (Jinja dict so port stays int)
+    - name: Compose new hysteria state (Jinja dict so port stays int)  # noqa: jinja[spacing]
+      # Multi-line Jinja dict literal is intentional: YAML mapping form would
+      # coerce port to a string and break Hysteria2's unmarshal. The dict
+      # literal preserves the int type. ansible-lint's jinja[spacing] rule
+      # flags the multi-line form; disabled per-task.
       ansible.builtin.set_fact:
         stealth_vps_hysteria_state: "{{ {
           'port': (range(stealth_vps_hysteria_port_min, stealth_vps_hysteria_port_max + 1) | random),
@@ -241,7 +245,7 @@
         state: stopped
       failed_when: false
 
-    - name: Download hysteria binary ({{ stealth_vps_hysteria_version }}, {{ stealth_vps_arch }})
+    - name: Download hysteria binary {{ stealth_vps_hysteria_version ~ ' (' ~ stealth_vps_arch ~ ')' }}
       ansible.builtin.get_url:
         url: >-
           https://github.com/apernet/hysteria/releases/download/{{ stealth_vps_hysteria_version

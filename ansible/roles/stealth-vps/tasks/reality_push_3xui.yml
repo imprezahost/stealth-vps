@@ -136,7 +136,12 @@
          | list | length > 0 }}
   tags: [xray, reality]
 
-- name: Create Reality inbound via 3X-UI API
+- name: Create Reality inbound via 3X-UI API  # noqa: jinja[spacing]
+  # _payload below is a multi-line Jinja dict literal. Same reason as
+  # reality_state.yml: YAML mapping form coerces port to string, but the
+  # 3X-UI Go handler rejects port:str with a json unmarshal error. The
+  # dict literal preserves int. ansible-lint flags jinja[spacing] on the
+  # multi-line form; disabled per-task.
   ansible.builtin.uri:
     url: >-
       {{ stealth_vps_panel_scheme }}://127.0.0.1:{{ stealth_vps_panel_state.port

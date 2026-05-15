@@ -69,15 +69,13 @@ ansible-lint:
   script:
     - pip install "ansible-core>=2.14,<2.18" ansible-lint
     - ansible-galaxy collection install -r ansible/requirements.yml
+    # ANSIBLE_CONFIG forces ansible-lint's internal syntax-check call to
+    # honour the repo's ansible.cfg (roles_path = ansible/roles). Without
+    # it the syntax-check sub-step searches relative to the playbook's
+    # directory and reports `stealth-hardening` as missing.
+    - export ANSIBLE_CONFIG=$CI_PROJECT_DIR/ansible.cfg
+    - export ANSIBLE_ROLES_PATH=$CI_PROJECT_DIR/ansible/roles
     - ansible-lint
-  # allow_failure until the pre-existing 9 issues are cleaned up: 6×
-  # name[casing] in stealth-hardening + role tasks (lowercase first words
-  # like "systemd daemon-reload..."), 3× jinja[spacing] in multi-line dict
-  # `set_fact` blocks (hysteria.yml:117, reality_push_3xui.yml:125, etc.).
-  # These predate v0.6.0; they only started failing when the new runner
-  # actually ran the lint (the previous runner had no Python). Each is a
-  # mechanical fix but spans several files — separate cleanup MR.
-  allow_failure: true
 
 markdown-lint:
   <<: *lint-base

@@ -56,7 +56,7 @@
   register: stealth_vps_node_exporter_override
   tags: [observability]
 
-- name: systemd daemon-reload after node-exporter override change
+- name: Systemd daemon-reload after node-exporter override change
   ansible.builtin.systemd:
     daemon_reload: true
   when: stealth_vps_node_exporter_override.changed
@@ -111,7 +111,7 @@
   register: stealth_vps_metrics_timer
   tags: [observability]
 
-- name: systemd daemon-reload after metrics unit/timer change
+- name: Systemd daemon-reload after metrics unit/timer change
   ansible.builtin.systemd:
     daemon_reload: true
   when: >-
