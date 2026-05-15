@@ -58,3 +58,32 @@
   ansible.builtin.include_tasks: observability.yml
   when: stealth_vps_observability_enabled | bool
   tags: [observability]
+
+# --- v0.6.0: users index + Python pkg + bot + sub + CLI ----------------
+# Ordering: users_index needs reality.state.yml + hysteria.state.yml on
+# disk (created by xray.yml + hysteria.yml above). Python pkg seeds the
+# bot and the metrics updater, so it goes before bot.yml. Subscription
+# and bot are opt-in via defaults; CLI is on by default.
+
+- name: Install shared Python package (used by metrics updater + bot + CLI)
+  ansible.builtin.include_tasks: python_pkg.yml
+  tags: [python_pkg, bot, cli]
+
+- name: Seed users.index.json from the existing state files
+  ansible.builtin.include_tasks: users_index.yml
+  tags: [users, index]
+
+- name: Install Telegram bot (opt-in)
+  ansible.builtin.include_tasks: bot.yml
+  when: stealth_vps_bot_enabled | bool
+  tags: [bot]
+
+- name: Install Caddy + subscription endpoint (opt-in)
+  ansible.builtin.include_tasks: subscription.yml
+  when: stealth_vps_subscription_enabled | bool
+  tags: [subscription, caddy]
+
+- name: Install /usr/local/bin/s-vps operator CLI wrapper
+  ansible.builtin.include_tasks: cli_wrapper.yml
+  when: stealth_vps_cli_install | bool
+  tags: [cli, s-vps]

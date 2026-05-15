@@ -1,0 +1,8 @@
+---
+# Placeholder — filled in v0.6.0 Block 3 (Telegram bot).
+# Kept here so `include_tasks` resolves even when bot is opt-in disabled.
+
+- name: Bot task stub (Block 3 not yet applied)
+  ansible.builtin.debug:
+    msg: "bot.yml stub — v0.6.0 Block 3 fills this in."
+  when: false

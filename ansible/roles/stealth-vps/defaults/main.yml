@@ -155,3 +155,58 @@ stealth_vps_metrics_refresh_interval_sec: 30
 # either keep listen on 127.0.0.1 + tunnel, or open via
 # stealth_hardening_ufw_extra_ports yourself.
 stealth_vps_observability_allow_from: []
+
+# ---- v0.6.0: Users index + operator tooling ----
+# users.index.json is the operator's source-of-truth for "who is
+# authorised to connect": one record per Reality client with their
+# UUID, Hysteria2 password, subscription token, and metadata. The
+# index is populated in panel mode by the bot/CLI doing a double-
+# write (panel API + this file); in v0.7.0 headless mode the index
+# becomes authoritative and the panel disappears. Either way the
+# operator surface (bot commands, sub URLs) stays identical, which
+# is what makes the migration from panel to headless a flag flip.
+stealth_vps_users_index_path: /etc/stealth-vps/users.index.json
+
+# (stealth_vps_panel_enabled already declared above in the panel section.
+# v0.7.0 will let operators set it to false to run standalone Xray;
+# v0.5.9's xray.yml split into reality_state.yml + reality_push_3xui.yml
+# makes that flag flip a 1-line change in xray.yml.)
+
+# ---- v0.6.0: Telegram bot (opt-in) ----
+# When enabled the role installs `stealth-vps-bot.service` running
+# the Python bot under /opt/stealth-vps/venv. The bot answers
+# operator commands (`/status`, `/diagnose`, `/creds`, `/user add|list|revoke`,
+# `/sub`, `/sub revoke`) and DMs the operator after first install
+# with the default URI + QR + sub URL.
+#
+# To get a BotFather token: open https://t.me/BotFather → /newbot.
+# To capture the admin chat_id automatically: leave admin_chat_ids
+# empty; the bot enters pairing mode on first boot and accepts the
+# first /start it receives as the admin.
+stealth_vps_bot_enabled: false
+stealth_vps_bot_token: ""
+stealth_vps_bot_admin_chat_ids: []
+
+# ---- v0.6.0: Subscription endpoint (opt-in) ----
+# When enabled the role installs Caddy + a vhost that serves
+# /var/lib/stealth-vps/subscriptions/<token>.txt at
+# /.well-known/stealth-vps-sub/<token>. Default bind is 127.0.0.1:8443
+# (operator accesses via SSH tunnel). Set _expose=true to bind 0.0.0.0:443
+# + open UFW — needed only when users will fetch their sub from outside
+# your network.
+stealth_vps_subscription_enabled: false
+stealth_vps_subscription_expose: false
+stealth_vps_subscription_path: /.well-known/stealth-vps-sub
+
+# ---- v0.6.0: Operator CLI ----
+# Drops a shell wrapper at /usr/local/bin/s-vps exposing `update`
+# (fetch latest tag + ansible-pull with smart --tags) and `diagnose`
+# (the health-check checklist). Full Python CLI with verb expansion
+# lands in v0.7.0.
+stealth_vps_cli_install: true
+
+# ---- v0.6.0: Python package for bot/CLI/metrics ----
+# Shared modules live under /usr/local/lib/stealth-vps/ — threex_client,
+# state, backends, subscription, urivider. metrics-update.py and the
+# bot both import from this path. v0.7.0 adds backends_headless.py.
+stealth_vps_python_pkg_dir: /usr/local/lib/stealth_vps
