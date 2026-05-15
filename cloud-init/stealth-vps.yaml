@@ -29,6 +29,9 @@ write_files:
       stealth_vps_reality_dest: "www.microsoft.com:443"
       stealth_vps_reality_servernames:
         - www.microsoft.com
+      # Pin the on-disk version marker so `s-vps update` knows which tag
+      # to re-deploy. release.sh keeps this in sync with the -C flag below.
+      stealth_vps_release_tag: "v0.5.9"
 
 runcmd:
   - mkdir -p /var/log/stealth-vps

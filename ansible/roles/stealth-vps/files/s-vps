@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# s-vps — operator CLI wrapper for stealth-vps.
+#
+# Installed at /usr/local/bin/s-vps by tasks/cli_wrapper.yml. Pure-bash so it
+# works even when the Python pkg is broken (e.g. during a partial update).
+#
+# Subcommands:
+#   s-vps update           Re-run ansible-pull at the pinned release tag.
+#   s-vps diagnose         Run the post-deploy health check.
+#   s-vps status           Quick `systemctl is-active` summary.
+#   s-vps version          Print the installed stealth-vps version.
+#   s-vps help             Show this help.
+#
+# Configuration:
+#   /etc/stealth-vps/version           Pinned release tag (e.g. v0.6.0).
+#   /etc/stealth-vps/installer.env     Optional shell-fragment of overrides
+#                                      (STEALTH_REPO, STEALTH_LOG_DIR, etc.).
+
+set -euo pipefail
+
+S_VPS_VERSION_FILE="/etc/stealth-vps/version"
+S_VPS_INSTALLER_ENV="/etc/stealth-vps/installer.env"
+S_VPS_LIB_DIR="/usr/local/lib/stealth-vps/scripts-lib"
+S_VPS_LOG_DIR="/var/log/stealth-vps"
+S_VPS_REPO_DEFAULT="https://github.com/imprezahost/stealth-vps.git"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+_s_die() { echo "s-vps: $*" >&2; exit 1; }
+
+_s_require_root() {
+  [[ $EUID -eq 0 ]] || _s_die "this subcommand must run as root."
+}
+
+_s_load_pinned_version() {
+  if [[ -r "${S_VPS_VERSION_FILE}" ]]; then
+    cat "${S_VPS_VERSION_FILE}"
+  else
+    echo "unknown"
+  fi
+}
+
+_s_load_installer_env() {
+  # shellcheck disable=SC1090
+  [[ -r "${S_VPS_INSTALLER_ENV}" ]] && source "${S_VPS_INSTALLER_ENV}"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+s_cmd_help() {
+  cat <<'EOF'
+s-vps — stealth-vps operator CLI
+
+Usage:
+  s-vps update           Re-run ansible-pull at the pinned release tag.
+                         To switch versions: s-vps update <tag>  (e.g. v0.7.0).
+  s-vps diagnose         Run the post-deploy health check.
+  s-vps status           Quick service-status summary.
+  s-vps version          Print installed stealth-vps version + tooling.
+  s-vps help             Show this help.
+
+Files:
+  /etc/stealth-vps/version          pinned release tag
+  /etc/stealth-vps/installer.env    optional env overrides (sourced)
+  /var/log/stealth-vps/             ansible-pull / install logs
+
+Documentation: https://github.com/imprezahost/stealth-vps
+EOF
+}
+
+s_cmd_version() {
+  local pinned
+  pinned=$(_s_load_pinned_version)
+  printf "stealth-vps:      %s\n" "${pinned}"
+  printf "ansible-core:     %s\n" "$(ansible --version 2>/dev/null | head -n1 | awk '{print $NF}' | tr -d '[]')"
+  printf "python3:          %s\n" "$(python3 --version 2>/dev/null | awk '{print $2}')"
+  if [[ -d /usr/local/lib/stealth_vps ]]; then
+    printf "stealth_vps pkg:  installed at /usr/local/lib/stealth_vps\n"
+  else
+    printf "stealth_vps pkg:  NOT installed\n"
+  fi
+}
+
+s_cmd_status() {
+  local units=(xray.service x-ui.service hysteria-server.service stealth-vps-bot.service caddy.service)
+  local u state
+  printf "%-32s %s\n" "UNIT" "STATE"
+  printf -- "-----------------------------------------\n"
+  for u in "${units[@]}"; do
+    if systemctl list-unit-files "${u}" >/dev/null 2>&1; then
+      state=$(systemctl is-active "${u}" 2>/dev/null || true)
+      printf "%-32s %s\n" "${u}" "${state}"
+    fi
+  done
+}
+
+s_cmd_diagnose() {
+  _s_require_root
+  if [[ ! -r "${S_VPS_LIB_DIR}/health-check.sh" ]]; then
+    _s_die "health-check helper not found at ${S_VPS_LIB_DIR}/health-check.sh"
+  fi
+  # shellcheck disable=SC1091
+  source "${S_VPS_LIB_DIR}/health-check.sh"
+
+  # Heuristic: enable optional checks when the corresponding unit exists.
+  local args=()
+  systemctl list-unit-files x-ui.service                >/dev/null 2>&1 && args+=(--panel)
+  systemctl list-unit-files hysteria-server.service     >/dev/null 2>&1 && args+=(--hysteria)
+  systemctl list-unit-files stealth-vps-bot.service     >/dev/null 2>&1 && args+=(--bot)
+  systemctl list-unit-files caddy.service               >/dev/null 2>&1 && args+=(--subscription)
+
+  # Pull the domain out of the stealth-vps config if it exists.
+  if [[ -r /etc/stealth-vps/installer.env ]]; then
+    # shellcheck disable=SC1091
+    source /etc/stealth-vps/installer.env || true
+    [[ -n "${STEALTH_DOMAIN:-}" ]] && args+=(--domain "${STEALTH_DOMAIN}")
+  fi
+
+  health_check_run "${args[@]}"
+}
+
+s_cmd_update() {
+  _s_require_root
+  _s_load_installer_env
+
+  local target="${1:-}"
+  local current
+  current=$(_s_load_pinned_version)
+  if [[ -z "${target}" ]]; then
+    target="${current}"
+    [[ "${target}" == "unknown" ]] && _s_die "no pinned version found; pass an explicit tag (e.g. s-vps update v0.6.0)."
+    echo "Re-deploying stealth-vps ${target}..."
+  else
+    echo "Updating stealth-vps from ${current} → ${target}..."
+  fi
+
+  local repo="${STEALTH_REPO:-${S_VPS_REPO_DEFAULT}}"
+  local log_dir="${STEALTH_LOG_DIR:-${S_VPS_LOG_DIR}}"
+  mkdir -p "${log_dir}"
+  local log="${log_dir}/update-$(date +%Y%m%d-%H%M%S).log"
+
+  if ansible-pull \
+        -U "${repo}" \
+        -C "${target}" \
+        -i 'localhost,' \
+        -c local \
+        ansible/playbooks/site.yml \
+        2>&1 | tee "${log}"; then
+    echo "${target}" > "${S_VPS_VERSION_FILE}"
+    echo
+    echo "✓ stealth-vps is now at ${target}"
+    echo "  log: ${log}"
+  else
+    local rc="${PIPESTATUS[0]}"
+    echo
+    echo "✗ update failed (exit ${rc})"
+    if [[ -r "${S_VPS_LIB_DIR}/error-wrap.sh" ]]; then
+      # shellcheck disable=SC1091
+      source "${S_VPS_LIB_DIR}/error-wrap.sh"
+      error_wrap_explain "${log}"
+    fi
+    return "${rc}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Dispatcher
+# ---------------------------------------------------------------------------
+main() {
+  local cmd="${1:-help}"
+  shift || true
+  case "${cmd}" in
+    update)            s_cmd_update "$@" ;;
+    diagnose|doctor)   s_cmd_diagnose "$@" ;;
+    status)            s_cmd_status "$@" ;;
+    version|--version) s_cmd_version "$@" ;;
+    help|--help|-h)    s_cmd_help "$@" ;;
+    *)
+      echo "s-vps: unknown subcommand '${cmd}'" >&2
+      echo "Try: s-vps help" >&2
+      exit 64
+      ;;
+  esac
+}
+
+main "$@"

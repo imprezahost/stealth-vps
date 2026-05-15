@@ -87,6 +87,7 @@ AUTO_FILES=(
   scripts/install.sh
   cloud-init/stealth-vps.yaml
   docs/terraform.md
+  docs/installer-ux.md
   terraform/README.md
   terraform/modules/stealth-vps/variables.tf
   terraform/modules/stealth-vps/README.md
