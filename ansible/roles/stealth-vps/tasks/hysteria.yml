@@ -172,9 +172,12 @@
       - "{{ stealth_vps_hysteria_config_dir }}/cert.key"
       - -out
       - "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
-  when:
-    - not stealth_vps_domain
-    - not stealth_vps_hysteria_cert_stat.stat.exists
+    # `creates:` tells Ansible the task is idempotent — once cert.crt
+    # exists, the command is a no-op. Lets us drop the explicit
+    # `cert_stat.stat.exists` check AND satisfies ansible-lint's
+    # no-changed-when (the module derives changed_when from creates).
+    creates: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
+  when: not stealth_vps_domain
   tags: [hysteria, hysteria2]
 
 - name: Set self-signed cert ownership + permissions
@@ -298,7 +301,12 @@
 
 - name: Wait for hysteria UDP port to be listening
   ansible.builtin.shell:
-    cmd: "ss -lunH | awk '{print $5}' | grep -E ':{{ stealth_vps_hysteria_state.port }}$' | head -1"
+    # `set -o pipefail` so a failure anywhere in the pipe propagates to
+    # the outer command's rc — without it, `grep -E ...` failing returns
+    # 0 because `head -1` succeeded on empty input, and the `until:`
+    # loop never retries.
+    cmd: "set -o pipefail; ss -lunH | awk '{print $5}' | grep -E ':{{ stealth_vps_hysteria_state.port }}$' | head -1"
+    executable: /bin/bash
   register: stealth_vps_hysteria_udp_check
   until: stealth_vps_hysteria_udp_check.rc == 0
   retries: 15
