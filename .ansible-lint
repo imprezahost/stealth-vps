@@ -8,6 +8,10 @@ exclude_paths:
   - .cache/
   - .ansible/
 
-# Default profile is "production" since 24.x — bump up gradually. For now
-# "basic" is enough; revisit when we add Molecule integration tests.
-profile: basic
+# Profile bumped to "production" in v0.6.1 cleanup — we cleared every
+# basic-profile failure (see CHANGELOG) and the next lint run reported
+# "Passed: 0 failure(s), 0 warning(s) ... 'production' profile passed",
+# so we just lift the floor to match what the code already satisfies.
+# Production adds rules for: name[missing], yaml[trailing-spaces],
+# yaml[indentation], yaml[hyphens], yaml[empty-lines], schema[meta], etc.
+profile: production
