@@ -232,12 +232,13 @@
     timeout: 30
   tags: [panel, 3xui]
 
-- name: Smoke-test panel endpoint (HTTPS preferred, HTTP fallback)
+- name: Detect panel scheme (HTTPS preferred, HTTP fallback) — sets stealth_vps_panel_scheme
   # We don't infer the scheme from `stealth_vps_domain` anymore — a panel
   # that was previously configured for HTTPS (3X-UI does this automatically
   # in some upgrade paths) keeps serving TLS even when no domain is set.
   # Try HTTPS first with cert verification disabled (loopback can never
-  # match the SAN), fall back to HTTP if HTTPS isn't bound at all.
+  # match the SAN), fall back to HTTP if HTTPS isn't bound at all. The
+  # resulting fact is reused by reality_push_3xui.yml + credentials.txt.j2.
   block:
     - name: Probe panel via HTTPS
       ansible.builtin.uri:
@@ -250,16 +251,40 @@
       register: stealth_vps_panel_https_probe
       failed_when: false
 
-    - name: Fall back to HTTP if HTTPS didn't return a 2xx/3xx
+    - name: Record HTTPS as the panel scheme
+      ansible.builtin.set_fact:
+        stealth_vps_panel_scheme: https
+      when: >-
+        stealth_vps_panel_https_probe.status is defined
+        and stealth_vps_panel_https_probe.status in [200, 301, 302, 307]
+
+    - name: Probe panel via HTTP (only if HTTPS didn't return 2xx/3xx)
       ansible.builtin.uri:
         url: >-
           {{ 'http://127.0.0.1:' + (stealth_vps_panel_state.port | string)
              + '/' + stealth_vps_panel_state.web_base_path + '/' }}
         status_code: [200, 301, 302, 307]
         return_content: false
-      when: >-
-        stealth_vps_panel_https_probe.status is not defined
-        or stealth_vps_panel_https_probe.status not in [200, 301, 302, 307]
+      register: stealth_vps_panel_http_probe
+      failed_when: false
+      when: stealth_vps_panel_scheme is not defined
+
+    - name: Record HTTP as the panel scheme
+      ansible.builtin.set_fact:
+        stealth_vps_panel_scheme: http
+      when:
+        - stealth_vps_panel_scheme is not defined
+        - stealth_vps_panel_http_probe.status is defined
+        - stealth_vps_panel_http_probe.status in [200, 301, 302, 307]
+
+    - name: Assert one of the two schemes worked
+      ansible.builtin.assert:
+        that: stealth_vps_panel_scheme is defined
+        fail_msg: >-
+          Panel didn't respond on http:// or https://127.0.0.1:{{
+          stealth_vps_panel_state.port }}/{{ stealth_vps_panel_state.web_base_path }}/
+          — check `journalctl -u x-ui -n 100` and `ss -tnlp | grep {{
+          stealth_vps_panel_state.port }}`.
   tags: [panel, 3xui]
 
 # --- Credentials file ----------------------------------------------------
