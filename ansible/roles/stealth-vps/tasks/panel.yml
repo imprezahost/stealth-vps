@@ -98,7 +98,7 @@
   tags: [panel, 3xui]
   block:
 
-    - name: Download 3X-UI tarball ({{ stealth_vps_panel_version }}, {{ stealth_vps_arch }})
+    - name: Download 3X-UI tarball {{ stealth_vps_panel_version ~ ' (' ~ stealth_vps_arch ~ ')' }}
       ansible.builtin.get_url:
         url: >-
           https://github.com/MHSanaei/3x-ui/releases/download/{{ stealth_vps_panel_version
@@ -239,6 +239,7 @@
   # Try HTTPS first with cert verification disabled (loopback can never
   # match the SAN), fall back to HTTP if HTTPS isn't bound at all. The
   # resulting fact is reused by reality_push_3xui.yml + credentials.txt.j2.
+  tags: [panel, 3xui]
   block:
     - name: Probe panel via HTTPS
       ansible.builtin.uri:
@@ -285,7 +286,6 @@
           stealth_vps_panel_state.port }}/{{ stealth_vps_panel_state.web_base_path }}/
           — check `journalctl -u x-ui -n 100` and `ss -tnlp | grep {{
           stealth_vps_panel_state.port }}`.
-  tags: [panel, 3xui]
 
 # --- Credentials file ----------------------------------------------------
 

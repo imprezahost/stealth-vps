@@ -41,8 +41,15 @@
       failed_when: false
 
     - name: Assert sysctl file contents match the template
-      ansible.builtin.shell:
-        cmd: "grep -E '^{{ item }}' /etc/sysctl.d/99-stealth.conf"
+      # `grep -E` doesn't need shell features — use `command` (argv form
+      # so spaces / `=` in the pattern stay inside the regex arg) instead
+      # of `shell:`. Makes ansible-lint's command-instead-of-shell happy.
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -E
+          - "^{{ item }}"
+          - /etc/sysctl.d/99-stealth.conf
       changed_when: false
       loop:
         - "net.core.default_qdisc = fq"
@@ -79,7 +86,7 @@
         cmd: sshd -t
       changed_when: false
 
-    - name: sshd -T reports the hardened port
+    - name: Confirm sshd -T reports the hardened port
       ansible.builtin.command:
         cmd: "bash -c 'sshd -T | grep ^port'"
       register: stealth_vps_sshd_port

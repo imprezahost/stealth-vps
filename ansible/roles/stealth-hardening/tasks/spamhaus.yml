@@ -69,7 +69,7 @@
   register: stealth_hardening_spamhaus_timer
   tags: [spamhaus, hardening]
 
-- name: systemd daemon-reload after unit/timer install
+- name: Systemd daemon-reload after unit/timer install
   ansible.builtin.systemd:
     daemon_reload: true
   when: stealth_hardening_spamhaus_service.changed or stealth_hardening_spamhaus_timer.changed

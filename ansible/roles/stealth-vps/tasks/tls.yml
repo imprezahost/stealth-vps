@@ -51,10 +51,12 @@
         path: /root/.acme.sh/acme.sh
       register: stealth_vps_acme_stat
 
-    - name: Install acme.sh (one-shot)
+    - name: Install acme.sh (one-shot)  # noqa: command-instead-of-module
       # The upstream installer drops itself in /root/.acme.sh/ and
       # registers a daily cron. Curl-to-shell is the canonical entry
-      # point; pin to a tag if you need reproducibility.
+      # point published by acme.sh — splitting into get_url + shell
+      # would still be curl-to-sh semantically. ansible-lint's
+      # command-instead-of-module is disabled per-task.
       ansible.builtin.shell: >-
         curl -fsSL https://get.acme.sh
         | sh -s email={{ stealth_vps_tls_email | quote }}

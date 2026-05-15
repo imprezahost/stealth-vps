@@ -56,7 +56,10 @@
           {{ lookup('password', '/dev/null length=43 chars=ascii_letters,digits') }}
       no_log: true
 
-    - name: Compose initial users.index.json content
+    - name: Compose initial users.index.json content  # noqa: jinja[spacing]
+      # Multi-line Jinja dict literal so the YAML mapping form doesn't
+      # coerce `'version': 1` to the string '1'. ansible-lint flags
+      # jinja[spacing] on the multi-line form; disabled per-task.
       ansible.builtin.set_fact:
         stealth_vps_users_index: "{{ {
           'version': 1,

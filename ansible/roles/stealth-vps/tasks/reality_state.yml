@@ -68,11 +68,12 @@
       register: stealth_vps_shortid_raw
       changed_when: false
 
-    - name: Compose new reality state
+    - name: Compose new reality state  # noqa: jinja[spacing]
       # Use a Jinja2 dict expression (rather than YAML mapping with
       # `"{{ ... }}"` values) so the port stays an int. YAML mappings
       # convert template outputs to strings, which then break the
-      # 3X-UI POST that expects port:int.
+      # 3X-UI POST that expects port:int. ansible-lint's jinja[spacing]
+      # rule flags the multi-line form; disabled per-task.
       ansible.builtin.set_fact:
         stealth_vps_reality_state: "{{ {
           'port': (range(stealth_vps_reality_port_min, stealth_vps_reality_port_max + 1) | random),
