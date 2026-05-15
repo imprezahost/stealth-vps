@@ -370,3 +370,41 @@ cat <<EOF
 ╚══════════════════════════════════════════════════════════════╝
 
 EOF
+
+# Bot pairing reminder — only when the bot was enabled.
+if [[ "${STEALTH_BOT_ENABLED}" == "true" ]] && [[ -n "${STEALTH_BOT_TOKEN}" ]]; then
+  cat <<'EOF'
+┌─ Telegram bot is in pairing mode ──────────────────────────┐
+│                                                            │
+│  Open Telegram, find your bot, and send /start.            │
+│  The first chat to message it becomes the admin.           │
+│                                                            │
+│  Then try:                                                 │
+│    /help        list commands                              │
+│    /creds       DM the credentials file                    │
+│    /user list   show enabled users                         │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+EOF
+fi
+
+# Subscription endpoint reminder — only when the sub endpoint was enabled.
+if [[ "${STEALTH_SUBSCRIPTION_ENABLED}" == "true" ]]; then
+  if [[ "${STEALTH_SUBSCRIPTION_EXPOSE}" == "true" ]] && [[ -n "${STEALTH_DOMAIN}" ]]; then
+    sub_url="https://${STEALTH_DOMAIN}/.well-known/stealth-vps-sub/<token>"
+  else
+    sub_url="http://127.0.0.1:8443/.well-known/stealth-vps-sub/<token>  (via SSH tunnel)"
+  fi
+  cat <<EOF
+┌─ Subscription endpoint ────────────────────────────────────┐
+│                                                            │
+│  Caddy serves per-user sub files at:                       │
+│    ${sub_url}
+│                                                            │
+│  Get a token with the bot: /sub <label>                    │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+EOF
+fi

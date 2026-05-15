@@ -1,8 +1,198 @@
 ---
-# Placeholder — filled in v0.6.0 Block 3 (Telegram bot).
-# Kept here so `include_tasks` resolves even when bot is opt-in disabled.
+# Install the stealth-vps Telegram bot.
+#
+# Layout on disk:
+#   /opt/stealth-vps/bot/                         (owned by bot user)
+#       venv/                                     python-telegram-bot pip install
+#       stealth_vps_bot.py                        entry point (copied from files/bot/)
+#       requirements.txt                          version pins
+#   /etc/stealth-vps/bot.env                      systemd EnvironmentFile (0640, root:bot)
+#   /var/lib/stealth-vps-bot/                     StateDirectory (chat-id pairing state)
+#   /etc/systemd/system/stealth-vps-bot.service   systemd unit
+#
+# The bot runs as the `stealth-vps-bot` system user. State files the bot
+# needs to read (users.index.json, panel/reality/hysteria.state.yml,
+# credentials.txt) get chgrp'd to that user with mode 0640 so the bot can
+# read them; users.index.json is 0660 so the bot can rewrite it after
+# `/user add`. Subscriptions dir is 2770 + setgid for inherited group.
 
-- name: Bot task stub (Block 3 not yet applied)
-  ansible.builtin.debug:
-    msg: "bot.yml stub — v0.6.0 Block 3 fills this in."
-  when: false
+# --- System user ---------------------------------------------------------
+
+- name: Ensure stealth-vps-bot system user exists
+  ansible.builtin.user:
+    name: stealth-vps-bot
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/stealth-vps-bot
+    create_home: false
+    comment: "stealth-vps Telegram bot"
+  tags: [bot]
+
+# --- Filesystem layout ---------------------------------------------------
+
+- name: Ensure bot install directory exists
+  ansible.builtin.file:
+    path: /opt/stealth-vps/bot
+    state: directory
+    owner: stealth-vps-bot
+    group: stealth-vps-bot
+    mode: '0755'
+  tags: [bot]
+
+- name: Ensure bot state directory exists
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps-bot
+    state: directory
+    owner: stealth-vps-bot
+    group: stealth-vps-bot
+    mode: '0750'
+  tags: [bot]
+
+# --- Sync source files ---------------------------------------------------
+
+- name: Sync bot source files
+  ansible.builtin.copy:
+    src: "bot/{{ item }}"
+    dest: "/opt/stealth-vps/bot/{{ item }}"
+    owner: stealth-vps-bot
+    group: stealth-vps-bot
+    mode: '0644'
+  loop:
+    - stealth_vps_bot.py
+    - requirements.txt
+  notify: restart stealth-vps-bot
+  tags: [bot]
+
+# --- python venv ---------------------------------------------------------
+
+- name: Install python3-venv (Debian splits it out of python3)
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [bot]
+
+- name: Create bot virtualenv + install python-telegram-bot
+  # Using ansible.builtin.pip with virtualenv= creates the venv on first
+  # call and reuses it on subsequent runs. become_user ensures the venv
+  # is bot-owned (root-created venvs cause `pip install` failures on
+  # subsequent runs when packages need to write into site-packages).
+  ansible.builtin.pip:
+    requirements: /opt/stealth-vps/bot/requirements.txt
+    virtualenv: /opt/stealth-vps/bot/venv
+    virtualenv_command: /usr/bin/python3 -m venv
+    state: present
+  become: true
+  become_user: stealth-vps-bot
+  notify: restart stealth-vps-bot
+  tags: [bot]
+
+# --- State-file permissions ----------------------------------------------
+
+# The bot reads users.index.json + panel/reality/hysteria.state.yml +
+# credentials.txt. Each is normally root:root 0600. We chgrp them to the
+# bot group with mode 0640 (read) — except users.index.json which is 0660
+# because the bot writes to it on /user add. After atomic-rename writes
+# the file becomes bot:bot 0600, which the next Ansible run reverts.
+
+- name: chgrp users.index.json to bot group (writable)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_users_index_path }}"
+    group: stealth-vps-bot
+    mode: '0660'
+  tags: [bot]
+
+- name: chgrp panel.state.yml to bot group (readable)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    group: stealth-vps-bot
+    mode: '0640'
+  when: stealth_vps_panel_enabled | bool
+  tags: [bot]
+
+- name: chgrp reality.state.yml to bot group (readable)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+    group: stealth-vps-bot
+    mode: '0640'
+  when: stealth_vps_reality_enabled | bool
+  tags: [bot]
+
+- name: chgrp hysteria.state.yml to bot group (readable)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+    group: stealth-vps-bot
+    mode: '0640'
+  when: stealth_vps_hysteria_enabled | bool
+  tags: [bot]
+
+- name: chgrp credentials.txt to bot group (readable for /creds DM)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_credentials_file }}"
+    group: stealth-vps-bot
+    mode: '0640'
+  tags: [bot]
+
+- name: Ensure subscriptions directory is bot-writable (setgid)
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps/subscriptions
+    state: directory
+    owner: root
+    group: stealth-vps-bot
+    mode: '2770'
+  tags: [bot]
+
+# --- bot.env (config + secrets) ------------------------------------------
+
+- name: Load panel state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/panel.state.yml"
+    name: stealth_vps_panel_state
+  when: stealth_vps_panel_enabled | bool
+  tags: [bot]
+
+- name: Load reality state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+    name: stealth_vps_reality_state
+  tags: [bot]
+
+- name: Load hysteria state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+    name: stealth_vps_hysteria_state
+  when: stealth_vps_hysteria_enabled | bool
+  tags: [bot]
+
+- name: Render bot.env
+  ansible.builtin.template:
+    src: stealth-vps-bot.env.j2
+    dest: /etc/stealth-vps/bot.env
+    owner: root
+    group: stealth-vps-bot
+    mode: '0640'
+  notify: restart stealth-vps-bot
+  tags: [bot]
+
+# --- systemd unit --------------------------------------------------------
+
+- name: Install stealth-vps-bot.service
+  ansible.builtin.template:
+    src: stealth-vps-bot.service.j2
+    dest: /etc/systemd/system/stealth-vps-bot.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart stealth-vps-bot
+  tags: [bot]
+
+- name: Enable + start stealth-vps-bot.service
+  ansible.builtin.systemd:
+    name: stealth-vps-bot.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [bot]

@@ -1,0 +1,16 @@
+# stealth-vps Telegram bot — Python dependencies.
+#
+# Single direct dep: python-telegram-bot v21.x. The v21 line is the
+# current LTS as of Q2/2026 (last release v21.7); the v22 line moved to
+# httpx 0.27 + still-shifting async-context APIs, so we stay on 21 until
+# the dust settles.
+#
+# Transitive deps come from python-telegram-bot's own pyproject.toml:
+#   httpx, anyio, certifi, h2, httpcore, hyperframe, idna, sniffio.
+# pip resolves them at install time. We don't hash-pin because the
+# wheels-list rotates with every python-telegram-bot patch; if you need
+# reproducible-build guarantees, generate a hash-pinned requirements
+# with `pip-compile --generate-hashes` against a Debian 12 venv and
+# replace this file.
+
+python-telegram-bot==21.7

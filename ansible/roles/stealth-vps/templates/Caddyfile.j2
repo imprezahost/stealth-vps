@@ -1,0 +1,67 @@
+# /etc/caddy/Caddyfile — stealth-vps subscription endpoint.
+#
+# Rendered by tasks/subscription.yml. Two modes:
+#
+#   expose=false (default)  →  loopback on 127.0.0.1:8443 with the
+#                              packaged self-signed Caddy cert. Operator
+#                              fetches via SSH tunnel.
+#
+#   expose=true             →  bind :443, Let's Encrypt + the configured
+#                              domain. Requires stealth_vps_domain.
+#
+# In both modes Caddy only serves the subscription path
+# (`/.well-known/stealth-vps-sub/`); every other URL gets a 404 so the
+# host doesn't accidentally become a generic web server.
+
+{
+    # Disable the admin API endpoint — we don't need it and it widens
+    # the attack surface unnecessarily.
+    admin off
+    # Auto-HTTPS on uses ACME; off forces HTTP-only or manual TLS.
+    # Decided per-site below; the global default doesn't matter.
+}
+
+{% if stealth_vps_subscription_expose %}
+# --- Public, TLS-terminated subscription endpoint ----------------------
+# `{$STEALTH_VPS_BOT_PUBLIC_HOST}` would also work, but we render the
+# concrete domain into the file so `caddy validate` can resolve it.
+{{ stealth_vps_domain }} {
+    # ACME auto-issuance via Let's Encrypt. acme.sh's certs are not
+    # reused — Caddy maintains its own.
+    tls {{ stealth_vps_tls_email | default("admin@" + stealth_vps_domain, true) }}
+
+    # Subscription files only — everything else is 404.
+    handle_path {{ stealth_vps_subscription_path }}/* {
+        root * /var/lib/stealth-vps/subscriptions
+        # Map /<token> to <token>.txt so URLs stay clean.
+        rewrite * {path}.txt
+        file_server {
+            hide .* *.tmp
+        }
+    }
+
+    # Fall-through: anything else gets a 404, no directory listing.
+    respond 404
+}
+
+{% else %}
+# --- Loopback-only subscription endpoint -------------------------------
+# 127.0.0.1:8443 — operator fetches via SSH tunnel:
+#   ssh -L 8443:127.0.0.1:8443 root@vps
+#   curl http://127.0.0.1:8443{{ stealth_vps_subscription_path }}/<token>
+:8443 {
+    # Bind to loopback only — Caddy resolves `:8443` to 0.0.0.0 by
+    # default, so we use `bind` to constrain it.
+    bind 127.0.0.1
+
+    handle_path {{ stealth_vps_subscription_path }}/* {
+        root * /var/lib/stealth-vps/subscriptions
+        rewrite * {path}.txt
+        file_server {
+            hide .* *.tmp
+        }
+    }
+
+    respond 404
+}
+{% endif %}

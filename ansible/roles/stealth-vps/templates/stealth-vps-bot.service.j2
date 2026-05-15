@@ -1,0 +1,66 @@
+[Unit]
+# stealth-vps Telegram bot — operator interface for /user CRUD + /sub + /status.
+# Rendered from templates/stealth-vps-bot.service.j2 by tasks/bot.yml.
+Description=stealth-vps Telegram bot
+After=network-online.target x-ui.service hysteria-server.service xray.service
+Wants=network-online.target
+# Don't fail the unit if x-ui isn't installed (panel-mode opt-out future).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=stealth-vps-bot
+Group=stealth-vps-bot
+WorkingDirectory=/opt/stealth-vps/bot
+EnvironmentFile=/etc/stealth-vps/bot.env
+
+# Run under the venv'd python — picks up python-telegram-bot.
+ExecStart=/opt/stealth-vps/bot/venv/bin/python /opt/stealth-vps/bot/stealth_vps_bot.py
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+# --- Hardening -----------------------------------------------------------
+# These flags shrink the bot's blast radius if Python or python-telegram-bot
+# is ever exploited. The bot still needs to write to /etc/stealth-vps/
+# (users.index.json) and /var/lib/stealth-vps/subscriptions/; ReadWritePaths
+# punches a hole in ProtectSystem=strict for those.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+
+# Paths the bot must be able to write to.
+ReadWritePaths=/etc/stealth-vps /var/lib/stealth-vps-bot /var/lib/stealth-vps/subscriptions
+
+# StateDirectory= asks systemd to (re-)create /var/lib/stealth-vps-bot
+# with mode 0750 owned by the unit's User=/Group=. Idempotent across runs.
+StateDirectory=stealth-vps-bot
+StateDirectoryMode=0750
+
+# Logging — bot uses python `logging` which writes to stderr; systemd
+# captures stderr and routes it to journald.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stealth-vps-bot
+
+[Install]
+WantedBy=multi-user.target
