@@ -55,12 +55,40 @@
     name: stealth_vps_panel_state
   tags: [xray, reality]
 
+# --- Detect panel scheme (fallback when panel.yml didn't run this play) ---
+# panel.yml sets `stealth_vps_panel_scheme` after its post-install probe.
+# When `--tags xray` is invoked without `--tags panel`, that fact won't
+# exist — detect it here on the same loopback URL so the API calls below
+# pick the right scheme regardless of how the operator pinned tags.
+
+- name: Detect panel scheme (only when panel.yml didn't run)
+  when: stealth_vps_panel_scheme is not defined
+  block:
+    - name: Probe panel via HTTPS for scheme detection
+      ansible.builtin.uri:
+        url: >-
+          {{ 'https://127.0.0.1:' + (stealth_vps_panel_state.port | string)
+             + '/' + stealth_vps_panel_state.web_base_path + '/' }}
+        status_code: [200, 301, 302, 307]
+        return_content: false
+        validate_certs: false
+      register: stealth_vps_xray_panel_https_probe
+      failed_when: false
+
+    - name: Set panel scheme based on probe result
+      ansible.builtin.set_fact:
+        stealth_vps_panel_scheme: >-
+          {{ 'https'
+             if (stealth_vps_xray_panel_https_probe.status | default(0)) in [200, 301, 302, 307]
+             else 'http' }}
+  tags: [xray, reality]
+
 # --- Authenticate to panel API ------------------------------------------
 
 - name: Login to 3X-UI panel
   ansible.builtin.uri:
     url: >-
-      {{ 'https' if stealth_vps_domain else 'http' }}://127.0.0.1:{{ stealth_vps_panel_state.port
+      {{ stealth_vps_panel_scheme }}://127.0.0.1:{{ stealth_vps_panel_state.port
       }}/{{ stealth_vps_panel_state.web_base_path }}/login
     method: POST
     body:
@@ -89,7 +117,7 @@
 - name: List existing inbounds
   ansible.builtin.uri:
     url: >-
-      {{ 'https' if stealth_vps_domain else 'http' }}://127.0.0.1:{{ stealth_vps_panel_state.port
+      {{ stealth_vps_panel_scheme }}://127.0.0.1:{{ stealth_vps_panel_state.port
       }}/{{ stealth_vps_panel_state.web_base_path }}/panel/api/inbounds/list
     method: GET
     headers:
@@ -111,7 +139,7 @@
 - name: Create Reality inbound via 3X-UI API
   ansible.builtin.uri:
     url: >-
-      {{ 'https' if stealth_vps_domain else 'http' }}://127.0.0.1:{{ stealth_vps_panel_state.port
+      {{ stealth_vps_panel_scheme }}://127.0.0.1:{{ stealth_vps_panel_state.port
       }}/{{ stealth_vps_panel_state.web_base_path }}/panel/api/inbounds/add
     method: POST
     headers:
