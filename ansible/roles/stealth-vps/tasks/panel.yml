@@ -232,18 +232,34 @@
     timeout: 30
   tags: [panel, 3xui]
 
-- name: Smoke-test panel endpoint (HTTPS when domain set, HTTP otherwise)
-  ansible.builtin.uri:
-    url: >-
-      {{ ('https://' if stealth_vps_domain else 'http://')
-         + '127.0.0.1:' + (stealth_vps_panel_state.port | string)
-         + '/' + stealth_vps_panel_state.web_base_path + '/' }}
-    status_code: [200, 301, 302, 307]
-    return_content: false
-    # Loopback hits the cert as 127.0.0.1, which won't match the SAN
-    # for the public domain — disable cert verification on the local
-    # probe only. External clients still verify against the real CA.
-    validate_certs: false
+- name: Smoke-test panel endpoint (HTTPS preferred, HTTP fallback)
+  # We don't infer the scheme from `stealth_vps_domain` anymore — a panel
+  # that was previously configured for HTTPS (3X-UI does this automatically
+  # in some upgrade paths) keeps serving TLS even when no domain is set.
+  # Try HTTPS first with cert verification disabled (loopback can never
+  # match the SAN), fall back to HTTP if HTTPS isn't bound at all.
+  block:
+    - name: Probe panel via HTTPS
+      ansible.builtin.uri:
+        url: >-
+          {{ 'https://127.0.0.1:' + (stealth_vps_panel_state.port | string)
+             + '/' + stealth_vps_panel_state.web_base_path + '/' }}
+        status_code: [200, 301, 302, 307]
+        return_content: false
+        validate_certs: false
+      register: stealth_vps_panel_https_probe
+      failed_when: false
+
+    - name: Fall back to HTTP if HTTPS didn't return a 2xx/3xx
+      ansible.builtin.uri:
+        url: >-
+          {{ 'http://127.0.0.1:' + (stealth_vps_panel_state.port | string)
+             + '/' + stealth_vps_panel_state.web_base_path + '/' }}
+        status_code: [200, 301, 302, 307]
+        return_content: false
+      when: >-
+        stealth_vps_panel_https_probe.status is not defined
+        or stealth_vps_panel_https_probe.status not in [200, 301, 302, 307]
   tags: [panel, 3xui]
 
 # --- Credentials file ----------------------------------------------------
