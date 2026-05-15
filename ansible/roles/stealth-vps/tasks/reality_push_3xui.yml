@@ -63,6 +63,7 @@
 
 - name: Detect panel scheme (only when panel.yml didn't run)
   when: stealth_vps_panel_scheme is not defined
+  tags: [xray, reality]
   block:
     - name: Probe panel via HTTPS for scheme detection
       ansible.builtin.uri:
@@ -81,7 +82,6 @@
           {{ 'https'
              if (stealth_vps_xray_panel_https_probe.status | default(0)) in [200, 301, 302, 307]
              else 'http' }}
-  tags: [xray, reality]
 
 # --- Authenticate to panel API ------------------------------------------
 
