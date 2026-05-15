@@ -119,6 +119,17 @@ s_cmd_diagnose() {
     [[ -n "${STEALTH_DOMAIN:-}" ]] && args+=(--domain "${STEALTH_DOMAIN}")
   fi
 
+  # Pull the panel base_path from panel.state.yml so the HTTPS probe lands
+  # on the real URL instead of bare /. Run as root so 0600 state files
+  # are readable; non-root callers (e.g. via bot) won't have the path and
+  # health-check falls back to bare /.
+  if [[ -r /etc/stealth-vps/panel.state.yml ]]; then
+    local base_path
+    base_path=$(awk -F: '/^web_base_path:/ { gsub(/[[:space:]'"'"'"]/, "", $2); print $2; exit }' \
+                  /etc/stealth-vps/panel.state.yml)
+    [[ -n "${base_path}" ]] && args+=(--panel-base-path "${base_path}")
+  fi
+
   health_check_run "${args[@]}"
 }
 
