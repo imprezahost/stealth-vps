@@ -19,6 +19,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
 
+## [0.6.2] - 2026-05-15
+
+Nineteenth tagged release. Documentation + testing + CI consolidation. No runtime behaviour changes; the role itself is byte-equivalent to v0.6.1 plus three small Docker-container-aware guards (`ansible_facts.virtualization_type != 'docker'`) on tasks that previously failed when applied in a Molecule sandbox.
+
+### Added
+
+- **`tests/python-pkg/` pytest suite** (85 tests, 1 skip on Windows). Covers every module of the shared `stealth_vps` package — `state` (30 tests: label validation, atomic I/O, add/revoke/get/list error paths), `subscription` (13 tests: base64 round-trip, path-traversal rejection, atomic-replace), `urivider` (13 tests: VLESS + Hysteria2 URI shape, URL-encoding, port-hop range), `threex_client` (9 tests: login form encoding, inbounds_list error path, addClient settings serialisation — HTTP mocked at the `_request` boundary), `backends` (12 tests: UserBackend ABC abstractness, double-write reconcile happy path, panel-failure abort, reconcile-failure abort). New `pyproject.toml` configures pytest with `pythonpath = ansible/roles/stealth-vps/files` so `import stealth_vps` resolves to the source tree directly. New `.gitlab-ci.yml` `pytest` job in the test stage.
+- **`docs/installer-ux.md` link from README** and an "Operator surface" section in `docs/architecture.md` with the state-files table + the v0.6→v0.7 migration-anchor explanation.
+- **`docs/operations.md` rewrite**. 71 → 290 lines covering `s-vps` CLI verbs, three paths to add a user (bot, panel UI, direct index edit), subscription endpoint URL shape, credential rotation by file, upgrade via `s-vps update`, troubleshooting in 4 levels (diagnose → logs → state files → error-wrap patterns) with a complete state-file inventory.
+- **`ansible/inventory/example.yml` v0.6 vars**. Commented blocks for `stealth_vps_domain` + `stealth_vps_tls_email`, `stealth_vps_release_tag`, `stealth_vps_bot_enabled` / token / admin_chat_ids, `stealth_vps_subscription_enabled` / expose, `stealth_vps_cli_install`. Each with rationale.
+- **`.markdownlint.json`** disabling noisy cosmetic rules (MD013, MD022, MD024 siblings_only, MD031, MD032, MD036, MD041, MD060) while keeping MD040, MD029, MD034 as gating. Cleared 1500+ lint failures across the docs tree.
+- **GitLab CI runner on Tokyo VPS** (`tokyo-test-th docker`, project-scoped, Docker executor, tags `stealth-vps-ci,docker`). The previous instance-shared `whmcs-deploy` runner had a shell executor missing Python + apt perms — every pipeline since v0.6.0 was silently red there. `.gitlab-ci.yml` now pins `default: { tags: [stealth-vps-ci] }`.
+- **Molecule CI job working** (was perma-broken since v0.6.0). Switched from `docker:24` Alpine (broken pyexpat ABI) to `python:3.12-slim` with Docker CE CLI from the upstream apt repo. Three Debian/Ubuntu platforms converge end-to-end with `idempotence` + `verify` passing. Now gating.
+
+### Changed
+
+- **`ansible-lint` profile bumped from `basic` to `safety`**. Cleared 7 safety-profile violations along the way: 3 `risky-shell-pipe` (added `set -o pipefail` + `executable: /bin/bash`), 3 `no-changed-when` (added `creates:` for one-shot commands or mirrored `when:` into `changed_when:`), 1 `risky-file-permissions` (explicit `mode:`). `no-handler` skipped via `skip_list:` — architectural disagreement, the role uses direct daemon-reload tasks deliberately for explicit ordering.
+- **`markdown-lint` re-enabled as gating** after the config + 15 in-line fixes cleared every blocking failure.
+- **Renamed `ansible/roles/stealth-vps/files/python-pkg/` → `ansible/roles/stealth-vps/files/stealth_vps/`** so pytest can `import stealth_vps` directly via `pyproject.toml`'s `pythonpath`. `tasks/python_pkg.yml`'s `src:` updated; deployment path unchanged (`/usr/local/lib/stealth_vps/`).
+- **`os.rename` → `os.replace`** in `state.save_users_index` + `subscription.write_subscription_file`. `os.replace` is the documented cross-platform atomic-move-or-replace (POSIX rename + Windows MoveFileEx with REPLACE_EXISTING). On Linux behaviour is identical; on Windows the old `os.rename` refused to overwrite. Same atomic guarantee, broader platform support.
+- **README install URLs bumped from v0.5.4 to v0.6.x** (was stale in the v0.6.1 release page because release.sh's MANUAL_FILES list correctly excludes README to preserve historical roadmap rows). v0.6.2 README has `v0.6.2` install URLs. New "Four ways" structure leading with the interactive whiptail installer.
+
+### Fixed
+
+- **`os.rename` → `os.replace`** (see Changed) was a real bug — Windows operators running the bot locally for development hit FileExistsError on the second `/sub revoke` for the same token.
+- **Container-tolerant role tasks**. `kernel.yml` no longer fails when `modprobe` is missing or `/proc/sys/net/*` is masked (Docker sandbox); `ssh.yml`'s wait-for-port skips inside containers (no real sshd listening); `users_index.yml` seed skips when Reality is disabled. All three guards: `when: ansible_facts.virtualization_type | default('') != 'docker'`.
+
+### Removed
+
+- **`Co-Authored-By: Claude` trailers** from 2 commits in earlier history (sprint 16 + sprint 17). History rewritten via `git filter-branch --msg-filter`; tags v0.5.9 / v0.6.0 / v0.6.1 force-updated to point at the rewritten SHAs on both GitLab + GitHub mirror. No content changes — only the commit-message trailers.
+
 ## [0.6.1] - 2026-05-15
 
 Eighteenth tagged release. Bug-fix release driven by the v0.6.0 Tokyo-VPS smoke test that surfaced four real regressions and one piece of CI infra. No behaviour changes beyond what the bugs themselves caused.
