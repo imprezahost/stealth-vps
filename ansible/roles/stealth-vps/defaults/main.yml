@@ -204,6 +204,12 @@ stealth_vps_subscription_path: /.well-known/stealth-vps-sub
 # (the health-check checklist). Full Python CLI with verb expansion
 # lands in v0.7.0.
 stealth_vps_cli_install: true
+# Release tag recorded into /etc/stealth-vps/version (so `s-vps update`
+# without arguments re-deploys the same tag). install.sh passes the
+# tag it checked out via `-e stealth_vps_release_tag=...`. When the
+# playbook runs directly (no install.sh), this stays "local" which is
+# the signal `s-vps update` needs to refuse with "pass an explicit tag".
+stealth_vps_release_tag: "local"
 
 # ---- v0.6.0: Python package for bot/CLI/metrics ----
 # Shared modules live under /usr/local/lib/stealth-vps/ — threex_client,
