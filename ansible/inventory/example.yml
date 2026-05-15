@@ -25,6 +25,46 @@ all:
     stealth_vps_hysteria_bandwidth_up: "200 mbps"
     stealth_vps_hysteria_bandwidth_down: "1 gbps"
 
+    # ---- TLS / Let's Encrypt (optional) ----
+    # When set, the role issues a Let's Encrypt cert for this domain via
+    # acme.sh (HTTP-01 standalone). Hysteria2 + 3X-UI panel both use the
+    # real cert; falls back to self-signed if unset. Leave blank for the
+    # zero-domain "stay on bare IP" path (default since v0.6.0).
+    # stealth_vps_domain: vpn.example.com
+    # stealth_vps_tls_email: ops@example.com
+
+    # ---- v0.6.0+ release tag pin ----
+    # Recorded into /etc/stealth-vps/version so `s-vps update` (no args)
+    # re-deploys this exact tag. install.sh sets this automatically;
+    # direct ansible-playbook runs should set it themselves to match
+    # whatever version this checkout corresponds to.
+    # stealth_vps_release_tag: v0.6.1
+
+    # ---- v0.6.0+ Telegram bot (opt-in) ----
+    # When enabled, installs python-telegram-bot under a hardened systemd
+    # unit. Commands: /user add|list|revoke, /sub <label>|revoke, /status,
+    # /diagnose, /creds, /help. First chat to send /start becomes admin
+    # (pairing); persists chat_id to /var/lib/stealth-vps-bot/state.json.
+    # Get a token from https://t.me/BotFather → /newbot.
+    # stealth_vps_bot_enabled: true
+    # stealth_vps_bot_token: "123456:ABCdefGHIjklMNOpqrSTUvwxYZ_0123456789"
+    # stealth_vps_bot_admin_chat_ids: []   # leave empty for first-/start pairing
+
+    # ---- v0.6.0+ Caddy subscription endpoint (opt-in) ----
+    # Serves /.well-known/stealth-vps-sub/<token> from
+    # /var/lib/stealth-vps/subscriptions/<token>.txt. Two bind modes:
+    #   expose=false (default) → 127.0.0.1:8443, fetch via SSH tunnel
+    #   expose=true → :443 + Let's Encrypt auto-TLS (requires stealth_vps_domain)
+    # stealth_vps_subscription_enabled: true
+    # stealth_vps_subscription_expose: false
+
+    # ---- v0.6.0+ Operator CLI (defaults to on) ----
+    # Drops /usr/local/bin/s-vps (update/diagnose/status/version verbs),
+    # /usr/local/lib/stealth-vps/scripts-lib/ (dns-preflight, health-check,
+    # error-wrap helpers), and /etc/stealth-vps/installer.env (non-secret
+    # operator choices, sourced by `s-vps update`).
+    # stealth_vps_cli_install: true   # default true, set false to skip
+
     # ---- stealth-hardening role ----
     stealth_hardening_ssh_port: 22550
     stealth_hardening_fail2ban_bantime: 86400      # 24h
@@ -32,3 +72,4 @@ all:
     stealth_hardening_ufw_allow_ports:
       - "{{ stealth_hardening_ssh_port }}"
       # Reality + Hysteria2 ports are added automatically by the stealth-vps role
+      # Caddy subscription (when subscription_expose=true) opens :443 itself.
