@@ -94,7 +94,7 @@ In v0.6 the bot and CLI do a **double-write**: every `/user add` calls the 3X-UI
 
 In v0.7 the bot and CLI will use a different `UserBackend` implementation — `HeadlessBackend` — that renders Xray's `config.json` directly from the index. The bot and CLI code paths are unchanged; only the backend swap moves. Same `UserBackend.add()` / `.list()` / `.revoke()` interface, different I/O strategy underneath.
 
-That's the whole point of the ABC in [`files/python-pkg/backends.py`](../ansible/roles/stealth-vps/files/python-pkg/backends.py): operator surface (bot commands, sub URLs, `s-vps user add`) stays byte-identical across the panel→headless transition.
+That's the whole point of the ABC in [`files/stealth_vps/backends.py`](../ansible/roles/stealth-vps/files/stealth_vps/backends.py): operator surface (bot commands, sub URLs, `s-vps user add`) stays byte-identical across the panel→headless transition.
 
 ## Component choices
 

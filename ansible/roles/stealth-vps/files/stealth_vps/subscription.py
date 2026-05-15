@@ -66,7 +66,10 @@ def write_subscription_file(
         f.write(body)
         tmp_path = f.name
     os.chmod(tmp_path, 0o644)
-    os.rename(tmp_path, target)
+    # os.replace, not rename — cross-platform atomic move-or-replace.
+    # Operator re-issuing a sub for the same token (e.g. after rotation)
+    # must overwrite the existing file, which Windows' rename refuses.
+    os.replace(tmp_path, target)
     return target
 
 

@@ -165,11 +165,11 @@ Core (original roadmap):
 - `ansible/roles/stealth-vps/templates/stealth-vps-bot.service.j2`
 - `ansible/roles/stealth-vps/templates/stealth-vps-bot.env.j2`
 - `ansible/roles/stealth-vps/templates/Caddyfile.j2`
-- `ansible/roles/stealth-vps/files/python-pkg/threex_client.py`
-- `ansible/roles/stealth-vps/files/python-pkg/state.py`
-- `ansible/roles/stealth-vps/files/python-pkg/backends.py`
-- `ansible/roles/stealth-vps/files/python-pkg/subscription.py`
-- `ansible/roles/stealth-vps/files/python-pkg/urivider.py`
+- `ansible/roles/stealth-vps/files/stealth_vps/threex_client.py`
+- `ansible/roles/stealth-vps/files/stealth_vps/state.py`
+- `ansible/roles/stealth-vps/files/stealth_vps/backends.py`
+- `ansible/roles/stealth-vps/files/stealth_vps/subscription.py`
+- `ansible/roles/stealth-vps/files/stealth_vps/urivider.py`
 - `ansible/roles/stealth-vps/files/bot/stealth_vps_bot.py`
 - `ansible/roles/stealth-vps/files/bot/requirements.txt` (hash-pinado)
 - `docs/telegram-bot.md`
@@ -261,7 +261,7 @@ Full UX layer (Caminho C):
 - `ansible/roles/stealth-vps/tasks/hysteria_migrate_state.yml`
 - `ansible/roles/stealth-vps/templates/xray-standalone.service.j2`
 - `ansible/roles/stealth-vps/templates/xray-config.json.j2`
-- `ansible/roles/stealth-vps/files/python-pkg/backends_headless.py`
+- `ansible/roles/stealth-vps/files/stealth_vps/backends_headless.py`
 - `ansible/roles/stealth-vps/files/cli/s-vps.py`
 - `docs/headless-mode.md`
 - `docs/migration-3xui-to-headless.md`

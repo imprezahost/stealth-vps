@@ -91,8 +91,23 @@ markdown-lint:
   # as real-readability checks.
 
 # ---------------------------------------------------------------------------
-# TEST — Molecule converge + verify in a Debian 12 + systemd container
+# TEST — pytest for the stealth_vps Python pkg + Molecule on Debian + systemd
 # ---------------------------------------------------------------------------
+
+pytest:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - apt-get update -qq && apt-get install -yqq --no-install-recommends git
+    - python -m pip install --upgrade pip pytest
+  script:
+    # pyproject.toml's pythonpath points at ansible/roles/stealth-vps/files/
+    # so `import stealth_vps` resolves to the source tree directly — no
+    # install step needed. The pkg is pure stdlib.
+    - pytest tests/python-pkg/ -v
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 molecule:
   stage: test
