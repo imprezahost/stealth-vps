@@ -80,11 +80,11 @@
       # install choices. Edit cautiously; values are passed verbatim to
       # ansible-pull via `-e`.
       STEALTH_DOMAIN={{ stealth_vps_domain | default('') | quote }}
-      STEALTH_PANEL_ENABLED={{ stealth_vps_panel_enabled | ternary('true', 'false') }}
-      STEALTH_HYSTERIA_ENABLED={{ stealth_vps_hysteria_enabled | ternary('true', 'false') }}
-      STEALTH_BOT_ENABLED={{ stealth_vps_bot_enabled | ternary('true', 'false') }}
-      STEALTH_SUBSCRIPTION_ENABLED={{ stealth_vps_subscription_enabled | ternary('true', 'false') }}
-      STEALTH_SUBSCRIPTION_EXPOSE={{ stealth_vps_subscription_expose | ternary('true', 'false') }}
+      STEALTH_PANEL_ENABLED={{ stealth_vps_panel_enabled | bool | ternary('true', 'false') }}
+      STEALTH_HYSTERIA_ENABLED={{ stealth_vps_hysteria_enabled | bool | ternary('true', 'false') }}
+      STEALTH_BOT_ENABLED={{ stealth_vps_bot_enabled | bool | ternary('true', 'false') }}
+      STEALTH_SUBSCRIPTION_ENABLED={{ stealth_vps_subscription_enabled | bool | ternary('true', 'false') }}
+      STEALTH_SUBSCRIPTION_EXPOSE={{ stealth_vps_subscription_expose | bool | ternary('true', 'false') }}
     dest: /etc/stealth-vps/installer.env
     owner: root
     group: root

@@ -100,45 +100,80 @@ _hc_check_https() {
   fi
 }
 
+# Best-effort port detection from state files. Returns empty on miss.
+# Each state file is a flat YAML map: `port: 12345` (no nesting). We
+# pull the value with a single awk pass so the helper has zero
+# dependencies beyond what Debian 12 ships.
+_hc_read_port() {
+  local state_file="$1"
+  [[ -r "${state_file}" ]] || { echo ""; return; }
+  awk -F: '/^port:/ { gsub(/[[:space:]'"'"'"]/, "", $2); print $2; exit }' "${state_file}"
+}
+
 # Run all checks. Caller may pass flags to skip optional components.
 # Usage:
 #   health_check_run \
 #       [--panel] [--hysteria] [--bot] [--subscription] \
-#       [--domain <fqdn>] [--reality-port <n>] [--panel-port <n>]
+#       [--domain <fqdn>] [--reality-port <n>] [--panel-port <n>] \
+#       [--panel-scheme http|https] [--panel-base-path <name>]
+#
+# Ports default to whatever's in /etc/stealth-vps/{reality,hysteria,panel}.state.yml
+# so the caller usually doesn't need to pass them. Explicit flags override.
 health_check_run() {
   _HC_SAW_FAIL=0
   _HC_SAW_WARN=0
 
   local check_panel=0 check_hysteria=0 check_bot=0 check_sub=0
-  local domain="" reality_port="443" panel_port="8443"
+  local domain="" reality_port="" hysteria_port="" panel_port=""
+  local panel_scheme="" panel_base_path=""
   while (( $# > 0 )); do
     case "$1" in
-      --panel)         check_panel=1 ;;
-      --hysteria)      check_hysteria=1 ;;
-      --bot)           check_bot=1 ;;
-      --subscription)  check_sub=1 ;;
-      --domain)        domain="$2"; shift ;;
-      --reality-port)  reality_port="$2"; shift ;;
-      --panel-port)    panel_port="$2"; shift ;;
+      --panel)            check_panel=1 ;;
+      --hysteria)         check_hysteria=1 ;;
+      --bot)              check_bot=1 ;;
+      --subscription)     check_sub=1 ;;
+      --domain)           domain="$2"; shift ;;
+      --reality-port)     reality_port="$2"; shift ;;
+      --hysteria-port)    hysteria_port="$2"; shift ;;
+      --panel-port)       panel_port="$2"; shift ;;
+      --panel-scheme)     panel_scheme="$2"; shift ;;
+      --panel-base-path)  panel_base_path="$2"; shift ;;
       *) echo "health_check_run: unknown arg '$1'" >&2; return 64 ;;
     esac
     shift
   done
 
+  # Fill in any unspecified port from the state files. State files are
+  # root-only 0600 — when invoked as non-root (e.g. the bot user calling
+  # `s-vps diagnose`), the reads silently fail and we fall back to the
+  # well-known defaults that match defaults/main.yml.
+  [[ -z "${reality_port}" ]]  && reality_port=$(_hc_read_port /etc/stealth-vps/reality.state.yml)
+  [[ -z "${hysteria_port}" ]] && hysteria_port=$(_hc_read_port /etc/stealth-vps/hysteria.state.yml)
+  [[ -z "${panel_port}" ]]    && panel_port=$(_hc_read_port /etc/stealth-vps/panel.state.yml)
+  [[ -z "${reality_port}" ]]  && reality_port="443"
+  [[ -z "${hysteria_port}" ]] && hysteria_port="${reality_port}"
+  [[ -z "${panel_port}" ]]    && panel_port="8443"
+  [[ -z "${panel_scheme}" ]]  && panel_scheme="https"
+
   echo "Running post-deploy health check..."
 
-  # Always-on checks.
-  _hc_check_unit xray.service "Xray (Reality)"
+  # Always-on checks. Xray-service-as-such isn't on the system in v0.6
+  # panel-mode (Reality lives inside the x-ui binary); skip cleanly.
+  if systemctl list-unit-files xray.service >/dev/null 2>&1; then
+    _hc_check_unit xray.service "Xray (Reality)"
+  fi
   _hc_check_port "${reality_port}" "Reality"
 
   (( check_hysteria )) && {
     _hc_check_unit hysteria-server.service "Hysteria2"
-    _hc_check_port "${reality_port}" "Hysteria2 (UDP)"  # shares 443 by default
+    _hc_check_port "${hysteria_port}" "Hysteria2 (UDP)"
   }
 
   (( check_panel )) && {
     _hc_check_unit x-ui.service "3X-UI panel"
-    _hc_check_https "https://127.0.0.1:${panel_port}/" "3X-UI panel (loopback)"
+    local panel_url="${panel_scheme}://127.0.0.1:${panel_port}/"
+    [[ -n "${panel_base_path}" ]] && panel_url="${panel_url}${panel_base_path}/"
+    _hc_check_https "${panel_url}" "3X-UI panel (loopback)"
   }
 
   (( check_bot )) && _hc_check_unit stealth-vps-bot.service "Telegram bot"

@@ -341,6 +341,13 @@ hc_args=()
 [[ "${STEALTH_BOT_ENABLED}" == "true" ]]          && hc_args+=(--bot)
 [[ "${STEALTH_SUBSCRIPTION_ENABLED}" == "true" ]] && hc_args+=(--subscription)
 [[ -n "${STEALTH_DOMAIN}" ]]                       && hc_args+=(--domain "${STEALTH_DOMAIN}")
+# Panel base_path is randomised per install; pull it out of the state file
+# so the HTTPS probe lands on the real URL, not bare /.
+if [[ -r /etc/stealth-vps/panel.state.yml ]]; then
+  panel_base_path=$(awk -F: '/^web_base_path:/ { gsub(/[[:space:]'"'"'"]/, "", $2); print $2; exit }' \
+                      /etc/stealth-vps/panel.state.yml)
+  [[ -n "${panel_base_path}" ]] && hc_args+=(--panel-base-path "${panel_base_path}")
+fi
 health_check_run "${hc_args[@]}" || true   # don't fail the install on a warn
 
 # ===========================================================================
