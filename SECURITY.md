@@ -6,8 +6,11 @@ If you believe you have found a security vulnerability in `stealth-vps`, please 
 
 ### Contact
 
-- **Email**: `security@imprezahost.com`
-- **PGP key**: published at `https://imprezahost.com/.well-known/security.txt` (fingerprint will be added when the v0.1.0 release ships)
+Pick whichever channel suits you — all three reach the maintainers directly:
+
+- **Email**: [support@imprezahost.com](mailto:support@imprezahost.com)
+- **Telegram**: [@imprezahost](https://t.me/imprezahost)
+- **Support portal**: [open a ticket in the security department](https://portal.imprezahost.com/submitticket.php?step=2&deptid=7)
 
 Please include:
 
@@ -32,7 +35,7 @@ Please include:
 ## Out of scope
 
 - Vulnerabilities in upstream dependencies (`Xray-core`, `Hysteria2`, `3X-UI`, etc.) — please report those to their respective projects. We will of course update affected dependencies once disclosed.
-- The Impreza Host infrastructure itself (separate disclosure channel; see `https://imprezahost.com/security`).
+- Issues affecting the Impreza Host infrastructure itself (the VPSes, the support portal, the website). Those go through the same channels as customer support — email / Telegram / ticket — and the team will route them internally.
 - Social-engineering, DoS, or rate-limit issues against `imprezahost.com` or its subdomains.
 - "Best practice" suggestions without a demonstrable security impact (those are welcome as regular issues).
 
