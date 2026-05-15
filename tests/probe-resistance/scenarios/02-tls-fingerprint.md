@@ -14,10 +14,10 @@ The TLS handshake response shape from our VPS — when responding to a probe tha
 6. Peer cert issuer CN
 7. Peer cert signature + public-key algorithms
 
-**Byte-level fingerprints (2, since v0.5.1):**
+**Byte-level fingerprints (2, since v0.5.1) — items 8-9 of the comparison set:**
 
-8. **JA3** — Salesforce 2017 spec. md5 of `version,ciphers,extensions,curves,formats` from ClientHello bytes captured via `ssl.MemoryBIO`. GREASE values (RFC 8701) excluded.
-9. **JA3S** — md5 of `version,cipher,extensions` from ServerHello bytes. Same byte-level capture path.
+1. **JA3** — Salesforce 2017 spec. md5 of `version,ciphers,extensions,curves,formats` from ClientHello bytes captured via `ssl.MemoryBIO`. GREASE values (RFC 8701) excluded.
+2. **JA3S** — md5 of `version,cipher,extensions` from ServerHello bytes. Same byte-level capture path.
 
 If Reality's reverse-proxy fallback is working, every one of these collides with the real dest, because Reality is literally returning the dest's TLS response. Divergence pinpoints which layer leaks — most commonly a cert-mismatch (we presented our own cert instead of mirroring dest's).
 

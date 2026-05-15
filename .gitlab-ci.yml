@@ -85,7 +85,10 @@ markdown-lint:
     - npm install -g markdownlint-cli2
   script:
     - markdownlint-cli2 "**/*.md" "#node_modules"
-  allow_failure: true
+  # Re-enabled as gating after the cleanup MR. Config in
+  # .markdownlint.json disables the noisy cosmetic rules
+  # (MD013/MD022/MD024/MD031/MD032/MD060) but keeps MD040/MD029/MD034
+  # as real-readability checks.
 
 # ---------------------------------------------------------------------------
 # TEST — Molecule converge + verify in a Debian 12 + systemd container

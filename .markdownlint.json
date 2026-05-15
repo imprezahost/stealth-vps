@@ -19,5 +19,10 @@
   "_comment_MD036": "no-emphasis-as-heading: disabled. Some docs use **bold** lines for sub-sub-section emphasis where adding a fifth-level heading would be heavier than the content warrants.",
   "MD036": false,
 
-  "_comment_kept": "Kept-on (gating): MD022 blanks-around-headings, MD031 blanks-around-fences, MD032 blanks-around-lists, MD040 fenced-code-language, MD034 no-bare-urls, MD029 ol-prefix. Those are structural and easy to fix when they fire."
+  "_comment_MD022_MD031_MD032": "blanks-around-headings/fences/lists: disabled. These flag missing blank lines before/after structural elements — cosmetic author-side style, no impact on rendered output. Legacy docs in this repo (especially the machine-generated ones) violate these constantly; fixing each by hand is a poor return.",
+  "MD022": false,
+  "MD031": false,
+  "MD032": false,
+
+  "_comment_kept": "Kept-on (gating): MD040 fenced-code-language (catches ``` blocks without a language hint — affects syntax highlighting in rendered output), MD034 no-bare-urls (real readability issue), MD029 ol-prefix (numbered-list correctness)."
 }
