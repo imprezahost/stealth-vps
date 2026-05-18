@@ -162,7 +162,12 @@ molecule:
     # not into the scenario dir itself. Older molecule (v6) accepted
     # being run from inside a scenario; v24+ removed that.
     - cd tests
+    # Run both scenarios — default (panel mode) and headless (v0.7
+    # panel_enabled=false). `molecule test` per scenario cleans up
+    # after itself; running them sequentially in one job keeps total
+    # DinD overhead low.
     - molecule test --scenario-name default
+    - molecule test --scenario-name headless
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

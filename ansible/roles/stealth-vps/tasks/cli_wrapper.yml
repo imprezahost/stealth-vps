@@ -52,7 +52,13 @@
     state: directory
     owner: root
     group: root
-    mode: '0755'
+    # 0711 (not 0755) — matches panel.yml + reality_state.yml. The dir
+    # holds panel/reality/hysteria.state.yml + tls/* which carry secrets;
+    # 0755 here was a v0.6 oversight that fought panel.yml's 0711 on
+    # every re-run. Files inside (e.g. /etc/stealth-vps/version) are
+    # mode 0644 so non-root readers that know the exact path can still
+    # `cat` them — the traverse bit (x for others) on 0711 covers that.
+    mode: '0711'
   tags: [cli, s-vps]
 
 - name: Record installed stealth-vps version (for `s-vps update`)

@@ -1,0 +1,110 @@
+---
+# Install the standalone Xray-core binary at /usr/local/bin/xray.
+#
+# Runs ONLY in headless mode (panel_enabled=false). In panel mode the
+# xray binary lives at {{ panel_dir }}/bin/xray-linux-{{ arch }} (bundled
+# with 3X-UI's release tarball) and we don't need a second copy.
+#
+# Ordered FIRST in xray.yml's headless branch so reality_state.yml's
+# `xray x25519` + `xray uuid` calls can find the binary at the path
+# resolved by `stealth_vps_xray_keygen_bin` (= /usr/local/bin/xray in
+# headless mode).
+#
+# Xray-core's GitHub release names are slightly off from our usual
+# `amd64`/`arm64` convention:
+#   stealth_vps_arch=amd64 → Xray-linux-64.zip
+#   stealth_vps_arch=arm64 → Xray-linux-arm64-v8a.zip
+# Map computed inline so adding new arches only touches one place.
+
+- name: Map stealth_vps_arch to Xray-core's release-archive name
+  ansible.builtin.set_fact:
+    stealth_vps_xray_archive_arch: >-
+      {{
+        {'amd64': '64', 'arm64': 'arm64-v8a'}[stealth_vps_arch]
+      }}
+  tags: [xray, reality]
+
+- name: Probe installed standalone xray version
+  # `xray version` prints "Xray <ver>" on the first line. We strip the
+  # prefix to compare against the pinned tag. failed_when:false because
+  # a missing binary is the normal first-run case (we install below).
+  ansible.builtin.command:
+    cmd: "{{ stealth_vps_xray_bin }} version"
+  register: stealth_vps_xray_installed_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [xray, reality]
+
+- name: Download + install standalone xray binary {{ stealth_vps_xray_version ~ ' (' ~ stealth_vps_arch ~ ')' }}
+  when: >-
+    stealth_vps_xray_installed_version.rc != 0
+    or stealth_vps_xray_version | regex_replace('^v', '')
+       not in (stealth_vps_xray_installed_version.stdout | default(''))
+  tags: [xray, reality]
+  block:
+
+    - name: Download Xray-core release archive
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/XTLS/Xray-core/releases/download/{{
+          stealth_vps_xray_version }}/Xray-linux-{{
+          stealth_vps_xray_archive_arch }}.zip
+        dest: "/tmp/Xray-linux-{{ stealth_vps_xray_archive_arch }}-{{ stealth_vps_xray_version }}.zip"
+        mode: '0644'
+        force: false
+
+    - name: Ensure unzip is installed (xray release ships as a zip archive)
+      ansible.builtin.apt:
+        name: unzip
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Stop xray.service before binary swap (safe on first run when unit doesn't exist)
+      ansible.builtin.systemd:
+        name: xray.service
+        state: stopped
+      failed_when: false
+
+    - name: Ensure /usr/local/share/xray exists (geo data dir, matches upstream installer)
+      ansible.builtin.file:
+        path: /usr/local/share/xray
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Unpack xray binary to /usr/local/bin/
+      # Archive contents: xray, geosite.dat, geoip.dat, README.md, LICENSE.
+      # We split the unpack into two tasks so binary lives in /usr/local/bin
+      # (matches the rest of stealth-vps's /usr/local/bin layout) and the
+      # geo data lives in /usr/local/share/xray/ (matches upstream's
+      # install-release.sh + Xray-core's default asset search path).
+      # The systemd unit sets XRAY_LOCATION_ASSET to the latter so the
+      # routing rule `geoip:private` resolves cleanly.
+      ansible.builtin.unarchive:
+        src: "/tmp/Xray-linux-{{ stealth_vps_xray_archive_arch }}-{{ stealth_vps_xray_version }}.zip"
+        dest: /usr/local/bin/
+        include: [xray]
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Unpack xray geo data (geoip.dat + geosite.dat) to /usr/local/share/xray/
+      ansible.builtin.unarchive:
+        src: "/tmp/Xray-linux-{{ stealth_vps_xray_archive_arch }}-{{ stealth_vps_xray_version }}.zip"
+        dest: /usr/local/share/xray/
+        include:
+          - geoip.dat
+          - geosite.dat
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Drop the release archive (saves ~30 MB)
+      ansible.builtin.file:
+        path: "/tmp/Xray-linux-{{ stealth_vps_xray_archive_arch }}-{{ stealth_vps_xray_version }}.zip"
+        state: absent

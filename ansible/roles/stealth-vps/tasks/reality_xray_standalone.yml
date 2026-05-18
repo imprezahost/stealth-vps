@@ -1,0 +1,110 @@
+---
+# Configure the standalone Xray-core systemd service.
+#
+# Runs in headless mode (panel_enabled=false), AFTER:
+#   1. reality_xray_binary.yml has installed /usr/local/bin/xray
+#   2. reality_state.yml has persisted /etc/stealth-vps/reality.state.yml
+#   3. users_index.yml has seeded /etc/stealth-vps/users.index.json
+#
+# Renders /etc/xray/config.json from the index + reality state, drops a
+# hardened systemd unit at /etc/systemd/system/xray.service, then waits
+# for the Reality port to be listening.
+#
+# In v0.6 panel mode this whole file is skipped — Reality lives inside
+# the x-ui binary instead. Mutex is enforced naturally by the xray.yml
+# wrapper's `when: not panel_enabled | bool` gate, not by an explicit
+# assert.
+
+# --- System user ---------------------------------------------------------
+
+- name: Ensure xray system user exists
+  ansible.builtin.user:
+    name: "{{ stealth_vps_xray_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ stealth_vps_xray_state_dir }}"
+    create_home: false
+    comment: "stealth-vps standalone Xray-core"
+  tags: [xray, reality]
+
+# --- Filesystem layout ---------------------------------------------------
+
+- name: Ensure /etc/xray exists (config dir, root-owned, group-readable by xray)
+  ansible.builtin.file:
+    path: "{{ stealth_vps_xray_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ stealth_vps_xray_user }}"
+    mode: '0750'
+  tags: [xray, reality]
+
+- name: Ensure /var/lib/xray state directory exists
+  ansible.builtin.file:
+    path: "{{ stealth_vps_xray_state_dir }}"
+    state: directory
+    owner: "{{ stealth_vps_xray_user }}"
+    group: "{{ stealth_vps_xray_user }}"
+    mode: '0750'
+  tags: [xray, reality]
+
+# --- Config render -------------------------------------------------------
+# B2 ship: render config.json with just the default client (from
+# reality.state.yml). Multi-client comes in B3 via HeadlessBackend's
+# reloader, which re-renders this file from users.index.json + SIGHUPs
+# xray when the bot/CLI adds or revokes a user. Keeping the Ansible
+# template single-client side-steps the main.yml ordering issue
+# (users_index.yml runs AFTER xray.yml, so the index doesn't exist
+# yet at template-render time on a fresh install).
+
+- name: Render /etc/xray/config.json
+  ansible.builtin.template:
+    src: xray-config.json.j2
+    dest: "{{ stealth_vps_xray_config_dir }}/config.json"
+    owner: root
+    group: "{{ stealth_vps_xray_user }}"
+    mode: '0640'
+    validate: "{{ stealth_vps_xray_bin }} -test -config %s"
+  notify: Restart xray
+  tags: [xray, reality]
+
+# --- systemd unit --------------------------------------------------------
+
+- name: Install xray.service unit
+  ansible.builtin.template:
+    src: xray-standalone.service.j2
+    dest: /etc/systemd/system/xray.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart xray
+  tags: [xray, reality]
+
+- name: Enable + start xray.service
+  ansible.builtin.systemd:
+    name: xray.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [xray, reality]
+
+# --- Smoke test ----------------------------------------------------------
+
+- name: Wait for Reality TCP port to be listening
+  ansible.builtin.shell:
+    # Same idiom as Hysteria2's port-wait (fixed in v0.6.4): kernel-side
+    # filter, no column-position dependency.
+    cmd: "set -o pipefail; ss -ltnH 'sport = :{{ stealth_vps_reality_state.port }}' | grep -q ."
+    executable: /bin/bash
+  register: stealth_vps_reality_tcp_check
+  until: stealth_vps_reality_tcp_check.rc == 0
+  retries: 15
+  delay: 1
+  changed_when: false
+  # Skip inside containers: molecule doesn't run the actual TCP listener
+  # the same way (xray.service may be inactive when systemd-in-docker
+  # quirks bite), and the test value comes from the converge tasks
+  # rendering the right files, not from a live socket.
+  when: ansible_facts.virtualization_type | default('') != 'docker'
+  tags: [xray, reality]

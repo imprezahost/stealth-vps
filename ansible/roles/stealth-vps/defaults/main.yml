@@ -235,6 +235,18 @@ stealth_vps_xray_user: xray
 stealth_vps_xray_config_dir: /etc/xray
 stealth_vps_xray_state_dir: /var/lib/xray
 
+# Which xray binary `reality_state.yml` uses to mint the X25519 keypair +
+# the default client's UUID on first run. In panel mode the binary lives
+# at `{{ panel_dir }}/bin/xray-linux-{{ arch }}` (bundled with 3X-UI);
+# in headless mode `reality_xray_binary.yml` installs it at
+# `{{ stealth_vps_xray_bin }}` BEFORE `reality_state.yml` runs.
+# Computed so the same `reality_state.yml` works in both modes without
+# branching.
+stealth_vps_xray_keygen_bin: >-
+  {{ stealth_vps_xray_bin
+     if not (stealth_vps_panel_enabled | bool)
+     else (stealth_vps_panel_dir + '/bin/xray-linux-' + stealth_vps_arch) }}
+
 # ---- v0.7.0: Hysteria2 per-user authentication ----
 # v0.6 mode: 3X-UI limitation forces a single shared Hysteria2 password
 # for every Reality client. v0.7 mode: each entry in users.index.json
