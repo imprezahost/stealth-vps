@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.6.4 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel, Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04). External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + a TypeScript Pulumi reference. Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. **v0.6 ships Caminho C "full UX"**: interactive whiptail installer with sane defaults (press-Enter-to-install on bare IP), terminal QR for the default Reality URI, DNS pre-flight before LE, post-deploy ✓/✗/⚠ health check, human-friendly error wrapping, `s-vps` operator CLI (`update`/`diagnose`/`status`), opt-in Telegram bot for `/user` CRUD + `/sub` rotation, and an opt-in Caddy subscription endpoint. `users.index.json` is the operator's portable source-of-truth — the structural change that turns v0.7 headless mode into a flag flip. v0.6.1 cleared the bugs that v0.6.0's first Tokyo smoke-test surfaced (panel-scheme auto-detection, `\| bool \| ternary` on env-var flags, real-port detection in the health check). See [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.7.0 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel **OR headless mode** (v0.7+), Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04), both default + headless scenarios green. External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + a TypeScript Pulumi reference. Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. **v0.7 ships headless mode**: 3X-UI optional via `panel_enabled=false`, standalone Xray-core systemd unit, Hysteria2 per-user `auth.userpass` so revoking one user doesn't break the others, `stealth_vps.reloader` Python module re-renders configs from `users.index.json` and SIGHUPs the services on every mutation, new `s-vps user add/revoke/list/show`, `s-vps reload`, `s-vps migrate from-3xui` CLI verbs. Telegram bot's HeadlessBackend wiring lands in v0.7.1; the CLI is the v0.7.0 path. See [CHANGELOG.md](CHANGELOG.md) + [docs/headless-mode.md](docs/headless-mode.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability. Comes with an interactive installer that you can press Enter through and an operator CLI (`s-vps`) for everything afterwards.
 
@@ -61,7 +61,7 @@ Pick the one that matches your workflow. All four apply the same configuration.
 Download then run with a TTY — you get a whiptail prompt sequence (domain optional, services checklist, bot token if you want it, summary confirm). Pressing Enter through every prompt produces a working install on the VPS's public IP.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.4/scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.0/scripts/install.sh -o install.sh
 sudo bash install.sh
 ```
 
@@ -72,7 +72,7 @@ After it finishes you get an ANSI QR code for the default Reality URI, a post-de
 For cloud-init / Terraform user-data / scripted deploys that don't have a TTY. Byte-compatible with v0.5.x — same `STEALTH_*` env vars.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.4/scripts/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.0/scripts/install.sh | sudo bash
 ```
 
 Override defaults with env vars before the pipe:
@@ -82,7 +82,7 @@ STEALTH_DOMAIN=vpn.example.com \
 STEALTH_TLS_EMAIL=ops@example.com \
 STEALTH_BOT_ENABLED=true \
 STEALTH_BOT_TOKEN=12345:abc... \
-  curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.4/scripts/install.sh | sudo bash
+  curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.0/scripts/install.sh | sudo bash
 ```
 
 Full env-var list in [`docs/installer-ux.md`](docs/installer-ux.md). Re-run any time with `s-vps update` — your original choices stay pinned to `/etc/stealth-vps/installer.env`.
@@ -105,9 +105,9 @@ For provider-agnostic Terraform, [`terraform/modules/stealth-vps/`](terraform/mo
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.6.4"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.7.0"
 
-  stealth_version   = "v0.6.4"
+  stealth_version   = "v0.7.0"
   ssh_public_key    = file("~/.ssh/id_ed25519.pub")
   domain            = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
@@ -169,8 +169,8 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 | v0.6.1 | **Bug-fix release** driven by the Tokyo VPS smoke test of v0.6.0: panel-scheme auto-detection (`https` first, `http` fallback) via a shared `stealth_vps_panel_scheme` fact; `installer.env` + `bot.env` now `\| bool \| ternary` so `-e key=false` actually persists as `false`; health-check reads ports from state files instead of hardcoding 443/8443; shellcheck / yamllint regressions cleared. CI back online via a new project-scoped Docker runner on the Tokyo VPS. | shipped 2026-05-15 |
 | v0.6.2 | **Docs + tests + CI consolidation**. 85-test pytest suite for the `stealth_vps` Python pkg; `docs/operations.md` rewritten 71→290 lines; `docs/architecture.md` + `ansible/inventory/example.yml` documented for v0.6; ansible-lint bumped `basic → safety` (7 fixes); markdown-lint config + 15 fixes (every gating lint green); Molecule CI green for the first time since v0.6.0 (was Alpine pyexpat-broken). `os.rename → os.replace` for Windows cross-platform `/sub revoke`. Container-tolerant guards on kernel modprobe / SSH wait / users_index seed so Molecule converges in Docker sandboxes. Two old `Co-Authored-By: Claude` trailers stripped from history. | shipped 2026-05-15 |
 | v0.6.3 | **README install-URL bump fix** that v0.6.2 forgot: `release.sh` now has a partial-bump pass that auto-rewrites install URLs + Terraform `?ref=` lines + `stealth_version` var in `README.md` / `README.zh-CN.md` on each release. Roadmap-row historical text stays untouched (lines that don't match the partial-bump regexes). Real contact channels in `SECURITY.md` (the previous `security@imprezahost.com` + PGP placeholder + separate-infra-channel were fictional). GitHub repo deleted + recreated to drop dangling commits referencing `@claude` after a `git filter-branch` rewrite. | shipped 2026-05-15 |
-| **v0.6.4** | **Hysteria port-wait bug fix**, surfaced by the Tokyo VPS smoke test of v0.6.3. The "Wait for hysteria UDP port to be listening" task piped `ss -lunH \| awk '{print $5}' \| grep ':PORT$'` — but `$5` is the *peer* address column on listening UDP sockets (always `*:*`), not the local address. The grep never matched, but for years `head -1` swallowed the empty input and returned rc=0, masking the bug. v0.6.2's safety-profile lint sweep added `set -o pipefail` to the task, which correctly propagated the real grep failure and turned the latent bug into a hard install fail. Fix: use `ss -lunH 'sport = :PORT' \| grep -q .` — kernel-side filter, no column-position dependency. Plus zh-CN README cleanup of two junk lines left by the broken-sed-delimiter bug in v0.6.3's `release.sh` partial-bump pass. | **shipped 2026-05-18** |
-| v0.7.0 | Headless mode — 3X-UI optional, Xray standalone, Hysteria2 per-user, full Python `s-vps` CLI, `migrate from-3xui` | planned |
+| v0.6.4 | **Hysteria port-wait bug fix**, surfaced by the Tokyo VPS smoke test of v0.6.3. The "Wait for hysteria UDP port to be listening" task piped `ss -lunH \| awk '{print $5}' \| grep ':PORT$'` — but `$5` is the *peer* address column on listening UDP sockets (always `*:*`), not the local address. The grep never matched, but for years `head -1` swallowed the empty input and returned rc=0, masking the bug. v0.6.2's safety-profile lint sweep added `set -o pipefail` to the task, which correctly propagated the real grep failure and turned the latent bug into a hard install fail. Fix: use `ss -lunH 'sport = :PORT' \| grep -q .` — kernel-side filter, no column-position dependency. Plus zh-CN README cleanup of two junk lines left by the broken-sed-delimiter bug in v0.6.3's `release.sh` partial-bump pass. | shipped 2026-05-18 |
+| **v0.7.0** | **Headless mode** — 3X-UI optional via `panel_enabled=false`. Standalone Xray-core (`/usr/local/bin/xray`, hardened systemd unit). Hysteria2 per-user `auth.userpass` map so revoking one user doesn't break the others. `stealth_vps.reloader` Python module renders `/etc/xray/config.json` + `/etc/hysteria/config.yaml` from `users.index.json` and SIGHUPs the services on every mutation. New `s-vps user add/revoke/list/show`, `s-vps reload`, `s-vps migrate from-3xui` CLI verbs. 67 new pytest cases over four MRs (`!41`/`!42`/`!43`/`!44`); 169 total. Per-user mode defaults to `not panel_enabled` so existing panel installs upgrade with shared-password semantics intact. Operator-facing docs: [docs/headless-mode.md](docs/headless-mode.md) + [docs/migration-3xui-to-headless.md](docs/migration-3xui-to-headless.md). | **shipped 2026-05-18** |
 | v1.0.0 | Probe-resistance CI suite (full, with JA4 + JA4S + golden snapshots), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.

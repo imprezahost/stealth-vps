@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.7.0)
-- Headless mode: 3X-UI optional, Xray standalone, Hysteria2 per-user, full Python `s-vps` CLI, migration tool `s-vps migrate from-3xui`.
+### Planned (v0.7.1)
+- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.0 ships the CLI-only path; v0.7.1 closes the loop so panel-mode bot users can migrate without losing the chat UX.
+- **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl reload xray.service` without running the bot as root.
 
 ### Planned (v1.0)
 - JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
@@ -18,6 +19,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.7.0] - 2026-05-18
+
+Twenty-second tagged release. The big one: **headless mode**. Operators can now run `stealth-vps` without 3X-UI. The role installs upstream Xray-core as a hardened systemd service, switches Hysteria2 to per-user `auth.userpass` mode, and the `s-vps` CLI takes over what the panel web UI used to do. Panel mode (v0.6.x) stays fully supported — pick the mode that matches your operational preferences. Four sub-blocks shipped sequentially over five days; each landed via its own MR with molecule going green on Debian 12 + Ubuntu 22.04 + 24.04.
+
+### Added
+
+- **B1 — Foundations (MR !41).** `HeadlessBackend` skeleton in `stealth_vps/backends_headless.py` implementing the same `UserBackend` ABC as `ThreeXUIBackend`. `select_backend()` dispatcher in `stealth_vps/__init__.py` picks the right impl at startup based on `panel.state.yml` presence. 18 new pytest cases (`test_backends_headless.py` + `test_select_backend.py`).
+- **B2 — Standalone Xray service (MR !42).** New `reality_xray_binary.yml` downloads upstream Xray-core release (v25.5.16 pinned). New `reality_xray_standalone.yml` renders `/etc/xray/config.json` + a hardened `xray.service` unit (NoNewPrivileges, ProtectSystem=strict, MemoryDenyWriteExecute, syscall filter @system-service minus @privileged/@resources/@mount, User=xray system user). New molecule scenario `tests/molecule/headless/` parallels the `default` scenario but with `panel_enabled=false` — asserts the on-disk layout matches expectations on every CI run. Xray geo data (`geoip.dat` + `geosite.dat`) extracted to `/usr/local/share/xray/`; `XRAY_LOCATION_ASSET` env on the unit so the `geoip:private` anti-SSRF routing rule loads.
+- **B3 — Reloader + Hysteria2 per-user (MR !43).** New `stealth_vps/reloader.py` — pure-stdlib renderer (no jinja2, no PyYAML) for `/etc/xray/config.json` + `/etc/hysteria/config.yaml`. `Reloader.__call__` is what `HeadlessBackend.add/revoke` invokes after every index mutation. `python3 -m stealth_vps.reloader` CLI driver invoked by ansible at the tail of every headless converge. `stealth_vps_hysteria_per_user_enabled` defaults to `not panel_enabled` so headless gets per-user `auth.userpass` semantics automatically (panel mode keeps shared password to stay compatible with 3X-UI's data model). 44 new pytest cases (`test_reloader.py`).
+- **B4 — CLI + migrate + docs (MR !44).** `stealth_vps/cli.py` lights up `s-vps user add/revoke/list/show`, `s-vps reload`, `s-vps migrate from-3xui [--rollback]`. Bash `s-vps` wrapper now dispatches v0.7+ verbs to `python3 -m stealth_vps.cli`. Ansible writes `/etc/stealth-vps/reloader-args.json` so the CLI reconstructs the same `Reloader` without re-discovering role knobs. 23 new CLI pytest cases. **`docs/headless-mode.md`** — architecture overview, component diagram, day-2 ops walkthrough. **`docs/migration-3xui-to-headless.md`** — five-step cutover runbook with rollback procedure + troubleshooting.
+
+### Changed
+
+- **Hysteria2 default auth mode** is per-user in headless installs. Existing panel-mode installs keep shared-password auth on update (the default tracks `panel_enabled` automatically). Operators that want to opt out either way: set `stealth_vps_hysteria_per_user_enabled` explicitly in inventory.
+- **`/etc/stealth-vps/` mode harmonized at 0711** across all callers. `cli_wrapper.yml` was writing 0755 while `panel.yml` + `reality_state.yml` + `hysteria.yml` all agree on 0711 — they fought each other on every converge (the v0.6 default-scenario molecule didn't trip on it because panel/reality/hysteria were all off, leaving cli_wrapper alone with the dir). Caught and fixed during B2 molecule idempotence testing.
+- **`reality_state.yml` + `users_index.yml` read state via `slurp` instead of `include_vars`**. `include_vars` reads from the Ansible controller, which on Path B (ansible-pull on the VPS) is the same machine as the remote so it accidentally works. Molecule's runner ≠ target containers, so include_vars couldn't see `reality.state.yml` even though the same play just wrote it. `slurp + from_yaml` goes through the connection plugin and works on both Path B and molecule.
+- **`templates/xray-config.json.j2` and `hysteria-config.yaml.j2` rewritten to dict + `to_nice_json(sort_keys=true, indent=2)`** so they produce byte-identical output to `stealth_vps.reloader.render_*_text` (which uses `json.dumps(sort_keys=True, indent=2)`). Required for the multi-converge idempotence check to pass — otherwise every ansible run would flip-flop the file between the template render and the reloader render.
+
+### Fixed
+
+- **Reality state regex now handles every Xray-core release format.** The `Compose new reality state` task's regex hard-coded the 3X-UI-bundled Xray's legacy `Password(PublicKey):` output. Standalone Xray-core v25.5.16 emits `Public key:` (lowercase, space), so the regex returned None and `| first` blew up at a censored-by-`no_log` task. New pattern alternates over `PrivateKey|Private key` and `Password[^:]*|PublicKey|Public key`. A sanitized debug task prints the (key-redacted) output structure so future drift fails loudly.
+- **`reality_state.yml` creates `/etc/stealth-vps` itself** instead of inheriting it from `panel.yml`. In headless mode `panel.yml` is skipped, so the panel-mode-only `Ensure stealth-vps state directory exists` task wasn't running — `Persist reality state to disk` then failed with "no such file or directory". Mirror the same `mode: 0711` panel.yml uses so panel→headless cutover doesn't churn perms.
+- **`reality_xray_binary.yml` ships the geo data files.** v0.7.0-B2 first commit extracted only the `xray` binary from the release zip; the comment said "geo data is bundled inside the binary" which is wrong — Xray-core has loaded `geoip.dat` / `geosite.dat` from disk since the v2ray fork days. Without them, the `geoip:private` routing rule (anti-SSRF outbound block) makes Xray refuse to start.
+
+### Tested on
+
+- **Multi-platform Molecule** (Debian 12, Ubuntu 22.04, Ubuntu 24.04). Both `default` and `headless` scenarios green on pipeline 867 (B4 final). 169 pytest cases pass (was 102 at the start of v0.7).
+- **Tokyo VPS smoke** (Path B). v0.7.0 RC1 deployment + `s-vps user add bob` + revoke + reload cycle validated. See [docs/migration-3xui-to-headless.md](docs/migration-3xui-to-headless.md) for the runbook the smoke followed.
+
+### Not in this release (scope deliberate)
+
+- **Telegram bot in headless mode** — deferred to v0.7.1. The bot's `/user add` still talks to the panel API; without panel.state.yml it can't construct a `ThreeXUIClient`. The state format doesn't change between v0.7.0 and v0.7.1, so early adopters can upgrade in place.
+- **Bot-triggered reloads without root** — the v0.7.0 CLI assumes root (matches how the existing bash `s-vps` already requires it for `update`). Polkit / sudoers drop-in to let `stealth-vps-bot` `systemctl reload xray.service` lands with v0.7.1's bot integration.
+- **Hard-delete users** — `revoke` flips `enabled: false` but keeps the record (operator audit trail). Hard-delete is a separate `s-vps user purge LABEL` verb on the v0.8 roadmap.
 
 ## [0.6.4] - 2026-05-18
 
