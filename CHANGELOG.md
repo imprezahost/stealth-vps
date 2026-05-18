@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
 
+## [0.6.4] - 2026-05-18
+
+Twenty-first tagged release. Hotfix for the Hysteria2 port-wait task that turned into a hard install failure once v0.6.2's safety-profile lint sweep added `set -o pipefail`. Caught by the Tokyo VPS smoke test of v0.6.3 (`s-vps update v0.6.3`).
+
+### Fixed
+
+- **`tasks/hysteria.yml:302` — "Wait for hysteria UDP port to be listening" was always broken.** The task piped `ss -lunH | awk '{print $5}' | grep ':PORT$' | head -1`. Column `$5` of `ss -lunH` is the *peer* address (always `*:*` for listening sockets), not the local address. The grep never matched; `head -1` swallowed the empty input and reported rc=0 — making the `until: rc == 0` loop succeed without ever verifying that anything was listening. v0.6.2's `set -o pipefail` correctly propagated the latent grep failure, turning the silent bug into "fatal after 15 retries". Replaced the whole awk/grep/head pipeline with `ss -lunH 'sport = :PORT' | grep -q .` — the kernel filters server-side by listening port, the result is empty (rc=1) or one+ line (rc=0), no column-position dependency. `set -o pipefail` kept to satisfy ansible-lint's `risky-shell-pipe`.
+- **`README.zh-CN.md` cleanup.** v0.6.3's `release.sh` partial-bump pass was first committed with a buggy `sed "/regex/s|old|new|g"` form whose `/` delimiter clashed with `/` inside the partial-bump patterns (e.g. `scripts/install.sh`). On the zh-CN README, this inserted literal `nstall.sh/s|v0.6.2|v0.6.3|g` strings into two install code blocks. The bug was fixed in `release.sh` mid-v0.6.3 work (switched to `\#regex#` delimiter) but the damage to zh-CN had already been committed. v0.6.4 strips the junk and re-bumps the orphaned `v0.6.2` URLs to `v0.6.4`.
+
+### Verified on the Tokyo test VPS
+
+End-to-end `s-vps update v0.6.3` reproduced the bug (PLAY RECAP: `ok=120 changed=1 failed=1` at the Hysteria port-wait task). After the fix lands and `s-vps update v0.6.4` re-runs, the task succeeds — port matches the `ss sport = :PORT` filter on a working Hysteria2 server (Tokyo's UDP port 49440 was already bound throughout, the bug was purely in the check, not in Hysteria2 itself).
+
 ## [0.6.3] - 2026-05-15
 
 Twentieth tagged release. Fixes the v0.6.2 oversight where the README on the GitHub homepage still showed `v0.6.1` install URLs (and the v0.6.2 release-page README still said `v0.5.4` URLs even further back). Also drops two pieces of fictional content from `SECURITY.md` that were never wired up.
