@@ -63,7 +63,16 @@
     owner: root
     group: "{{ stealth_vps_xray_user }}"
     mode: '0640'
-    validate: "{{ stealth_vps_xray_bin }} -test -config %s"
+    # `-format=json` is REQUIRED. Xray-core normally infers the config
+    # format from the file extension, but the `validate` step runs
+    # against ansible's temp file (e.g. `/root/.ansible/tmp/.../source`),
+    # which has no extension on ansible-core ≥2.16. Without the explicit
+    # format, Xray emits `Failed to get format of <tmp>` and the
+    # template task fails. v0.7.0 shipped without this flag — the
+    # molecule headless scenario happened to use an ansible-core whose
+    # temp file did keep `.json`, so it passed CI but failed on Tokyo's
+    # Debian 12.9 + ansible-core 2.19.
+    validate: "{{ stealth_vps_xray_bin }} -test -format=json -config %s"
   notify: Restart xray
   tags: [xray, reality]
 
