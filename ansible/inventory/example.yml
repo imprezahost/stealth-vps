@@ -65,6 +65,27 @@ all:
     # operator choices, sourced by `s-vps update`).
     # stealth_vps_cli_install: true   # default true, set false to skip
 
+    # ---- v0.7.0+ Headless mode (Xray standalone, panel optional) ----
+    # When stealth_vps_panel_enabled=false, the role swaps the embedded-
+    # in-x-ui Reality inbound for a standalone Xray-core systemd service.
+    # Same Reality protocol on the wire — operators / clients can't tell
+    # the difference. The bot + CLI auto-detect which backend mode is
+    # active via the presence of /etc/stealth-vps/panel.state.yml.
+    #
+    # To migrate from a v0.6 panel install to v0.7 headless:
+    #   1. Run `s-vps migrate from-3xui` to copy panel clients into
+    #      users.index.json (one-shot, idempotent).
+    #   2. Flip the flag: stealth_vps_panel_enabled: false
+    #   3. Re-run `s-vps update v0.7.X` — the role installs xray.service,
+    #      renders /etc/xray/config.json from users.index.json, and
+    #      leaves the 3X-UI panel installed but stopped (rollback path).
+    #
+    # Until you're ready, the v0.6 panel-mode default stays. The new vars
+    # below only take effect when panel_enabled=false.
+    # stealth_vps_panel_enabled: false
+    # stealth_vps_xray_version: "v25.5.16"   # standalone Xray-core release
+    # stealth_vps_xray_user: xray            # system user for the daemon
+
     # ---- stealth-hardening role ----
     stealth_hardening_ssh_port: 22550
     stealth_hardening_fail2ban_bantime: 86400      # 24h

@@ -216,3 +216,35 @@ stealth_vps_release_tag: "local"
 # state, backends, subscription, urivider. metrics-update.py and the
 # bot both import from this path. v0.7.0 adds backends_headless.py.
 stealth_vps_python_pkg_dir: /usr/local/lib/stealth_vps
+
+# ---- v0.7.0: Standalone Xray (when stealth_vps_panel_enabled=false) ----
+# In v0.7 headless mode the Reality inbound runs as its own Xray-core
+# systemd service instead of being embedded in the 3X-UI binary. The
+# task `reality_xray_standalone.yml` (lands in v0.7 Block 2) downloads
+# the upstream binary, drops a hardened systemd unit, and renders
+# /etc/xray/config.json from users.index.json + reality.state.yml.
+#
+# Mutually exclusive with stealth_vps_panel_enabled — main.yml asserts
+# never-both (see v0.7 Block 2). Operators flip from panel to headless
+# by setting stealth_vps_panel_enabled=false and re-running the role;
+# the panel.state.yml on disk stays as a rollback path until the
+# operator explicitly removes the panel.
+stealth_vps_xray_version: "v25.5.16"
+stealth_vps_xray_bin: /usr/local/bin/xray
+stealth_vps_xray_user: xray
+stealth_vps_xray_config_dir: /etc/xray
+stealth_vps_xray_state_dir: /var/lib/xray
+
+# ---- v0.7.0: Hysteria2 per-user authentication ----
+# v0.6 mode: 3X-UI limitation forces a single shared Hysteria2 password
+# for every Reality client. v0.7 mode: each entry in users.index.json
+# carries its own hysteria_password, and hysteria-config.yaml.j2 renders
+# the `auth.type: userpass` block from the index. Enabled automatically
+# when the index has >1 user OR when the panel is disabled.
+#
+# Operators with a v0.6 install upgrading to v0.7 hit
+# tasks/hysteria_migrate_state.yml (v0.7 Block 2), which converts the
+# old single-password hysteria.state.yml to the per-user dict shape
+# preserving the existing password as the default client's value.
+stealth_vps_hysteria_per_user_enabled: false  # auto-flipped by role
+                                              # when panel_enabled=false
