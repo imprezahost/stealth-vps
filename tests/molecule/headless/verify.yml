@@ -145,3 +145,62 @@
         fail_msg: "users.index.json missing or empty after a successful converge."
       vars:
         idx: "{{ headless_users_index_raw.content | b64decode | from_json }}"
+
+    # --- reloader smoke ------------------------------------------------
+    # B3: tasks/headless_reload.yml runs `python3 -m stealth_vps.reloader`
+    # at the tail of every converge. We don't directly assert it ran
+    # (changed_when:false in the task hides that signal), but we DO
+    # confirm the CLI is importable + invocable + idempotent on this
+    # host. If the reloader regressed, the assertions below catch it
+    # before a real `s-vps user add` blows up at runtime.
+
+    - name: Smoke-test the reloader CLI to a sibling path
+      # Re-render to /tmp/xray-config-roundtrip.json with --dry-run so
+      # `systemctl reload` is skipped (the molecule container doesn't
+      # actually run xray.service). The rendered file's bytes must
+      # match what's on disk at /etc/xray/config.json — if they drift,
+      # every converge will flip-flop the real file between the
+      # ansible-template render and the reloader render.
+      #
+      # IMPORTANT: pass the SAME --reality-dest / --reality-servernames
+      # / --reality-flow that the converge-time invocation used, or
+      # the argparse defaults built into reloader.py (cloudflare) will
+      # win and the JSON output won't match the role's choice (which
+      # defaults to microsoft.com via defaults/main.yml).
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -m
+          - stealth_vps.reloader
+          - --reality-enabled
+          - "true"
+          - --reality-dest
+          - "{{ stealth_vps_reality_dest | default('www.microsoft.com:443') }}"
+          - --reality-servernames
+          - "{{ (stealth_vps_reality_servernames | default(['www.microsoft.com'])) | join(',') }}"
+          - --reality-flow
+          - "{{ stealth_vps_reality_flow | default('xtls-rprx-vision') }}"
+          - --hysteria-enabled
+          - "false"
+          - --xray-config-path
+          - /tmp/xray-config-roundtrip.json
+          - --xray-group
+          - ""
+          - --dry-run
+      changed_when: false
+
+    - name: Read the round-trip xray config
+      ansible.builtin.slurp:
+        src: /tmp/xray-config-roundtrip.json
+      register: headless_xray_roundtrip
+
+    - name: Assert reloader's xray render matches the on-disk config
+      ansible.builtin.assert:
+        that:
+          - (headless_xray_roundtrip.content | b64decode)
+            == (headless_xray_config_raw.content | b64decode)
+        fail_msg: >-
+          The reloader's render_xray_config doesn't match what's on disk
+          at /etc/xray/config.json after the converge. Every subsequent
+          converge would flip-flop the file between the ansible-template
+          render and the reloader render. Diff the two and reconcile.

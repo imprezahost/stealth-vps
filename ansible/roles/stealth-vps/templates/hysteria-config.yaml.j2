@@ -1,46 +1,63 @@
-# {{ ansible_managed }}
-# Edit ansible/roles/stealth-vps/templates/hysteria-config.yaml.j2 — local
-# edits are overwritten on the next playbook run.
-#
-# apernet/hysteria server config. Stealth-tuned per docs/internal/expansion-plan.md §2.4.
+{#- apernet/hysteria server config. Stealth-tuned per
+   docs/internal/expansion-plan.md §2.4.
 
-listen: ":{{ stealth_vps_hysteria_state.port }}"
+   The file extension says .yaml but the CONTENT is JSON-syntax.
+   YAML 1.2 is a superset of JSON, so Hysteria's YAML parser
+   (gopkg.in/yaml.v3) reads either form. We emit JSON because:
 
-tls:
-  cert: "{{ stealth_vps_hysteria_effective_cert | trim }}"
-  key: "{{ stealth_vps_hysteria_effective_key | trim }}"
+     - the headless reloader at stealth_vps.reloader rewrites this
+       file after every users.index.json mutation, and it emits via
+       `json.dumps(sort_keys=True, indent=2)`. For molecule's
+       idempotence step to pass, the ansible template must produce
+       byte-identical output → both paths go through `to_nice_json`.
+     - JSON-syntax dodges YAML 1.1 traps (`yes`/`no`/`on`/`off` as
+       bool, leading-zero strings as int, etc.). A user labelled
+       `no` won't accidentally turn into `False: <password>`.
 
-# Salamander wraps the QUIC handshake so deep inspection can't tell it
-# apart from random noise. Required for any chance of bypass in 2026.
-obfs:
-  type: salamander
-  salamander:
-    password: "{{ stealth_vps_hysteria_state.obfs_password }}"
-
-# Single-password auth — enough for one operator + per-user invites via
-# additional generated passwords (handled in a later sprint).
-auth:
-  type: password
-  password: "{{ stealth_vps_hysteria_state.auth_password }}"
-
-# Everything that hits this port without valid Hysteria2 auth + obfs
-# password is reverse-proxied to the masquerade URL, so an active probe
-# sees a real third-party site.
-masquerade:
-  type: proxy
-  proxy:
-    url: "{{ stealth_vps_hysteria_masquerade_url }}"
-    rewriteHost: true
-
-# Brutal congestion-control bandwidth hints. Over-declaring causes
-# queueing; under-declaring caps throughput.
-bandwidth:
-  up: "{{ stealth_vps_hysteria_bandwidth_up }}"
-  down: "{{ stealth_vps_hysteria_bandwidth_down }}"
-{% if stealth_vps_metrics_enabled %}
-
-# Loopback JSON traffic-stats API. Scraped by the stealth-vps metrics
-# updater, which converts to Prometheus textfile format.
-trafficStats:
-  listen: "{{ stealth_vps_hysteria_traffic_stats_listen }}"
-{% endif %}
+   Rendering uses a Jinja dict literal + `to_nice_json`. Per-user mode
+   is gated on `stealth_vps_hysteria_per_user_enabled`. On first
+   converge ansible writes ONLY the default client; the reloader's
+   later pass fills in the rest of the index. ansible-lint flags the
+   multi-line dict (jinja[spacing]); disabled per-template.
+-#}
+{%- if stealth_vps_hysteria_per_user_enabled | bool -%}
+{%- set _auth = {
+  "type": "userpass",
+  "userpass": {
+    stealth_vps_reality_default_client_email: stealth_vps_hysteria_state.auth_password,
+  },
+} -%}
+{%- else -%}
+{%- set _auth = {
+  "type": "password",
+  "password": stealth_vps_hysteria_state.auth_password,
+} -%}
+{%- endif -%}
+{%- set _config = {
+  "listen": ":" ~ stealth_vps_hysteria_state.port,
+  "tls": {
+    "cert": stealth_vps_hysteria_effective_cert | trim,
+    "key": stealth_vps_hysteria_effective_key | trim,
+  },
+  "obfs": {
+    "type": "salamander",
+    "salamander": {"password": stealth_vps_hysteria_state.obfs_password},
+  },
+  "auth": _auth,
+  "masquerade": {
+    "type": "proxy",
+    "proxy": {
+      "url": stealth_vps_hysteria_masquerade_url,
+      "rewriteHost": true,
+    },
+  },
+  "bandwidth": {
+    "up": stealth_vps_hysteria_bandwidth_up,
+    "down": stealth_vps_hysteria_bandwidth_down,
+  },
+} -%}
+{%- if stealth_vps_metrics_enabled -%}
+{%- set _ = _config.update({"trafficStats": {"listen": stealth_vps_hysteria_traffic_stats_listen}}) -%}
+{%- endif -%}
+{# noqa: jinja[spacing] #}
+{{ _config | to_nice_json(sort_keys=true, indent=2) }}

@@ -258,5 +258,11 @@ stealth_vps_xray_keygen_bin: >-
 # tasks/hysteria_migrate_state.yml (v0.7 Block 2), which converts the
 # old single-password hysteria.state.yml to the per-user dict shape
 # preserving the existing password as the default client's value.
-stealth_vps_hysteria_per_user_enabled: false  # auto-flipped by role
-                                              # when panel_enabled=false
+# Default: per-user mode tracks panel mode. Panel ON → shared password
+# (3X-UI's data model uses one inbound, one auth, all clients ride the
+# same Hysteria2 listener). Panel OFF → headless mode, every client gets
+# its own auth token in users.index.json so revoking one user doesn't
+# break the others. Operators can override either way: panel-mode
+# headless backends + per-user is supported by the reloader, panel-mode
+# with per-user is a panel-API limitation we don't fight.
+stealth_vps_hysteria_per_user_enabled: "{{ not (stealth_vps_panel_enabled | bool) }}"
