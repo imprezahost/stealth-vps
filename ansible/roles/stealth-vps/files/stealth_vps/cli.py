@@ -510,6 +510,23 @@ def cmd_migrate_from_3xui(args: argparse.Namespace) -> int:
             return 1
         os.rename(backup, PANEL_STATE_PATH)
         print(f"✓ rolled back: restored {backup.name} → panel.state.yml")
+
+        # Restore x-ui — migrate stopped + disabled it; rollback puts
+        # it back. Operators who never want x-ui again can disable
+        # it manually after the rollback; doing it here matches the
+        # principle of least surprise (rollback = full undo).
+        if shutil.which("systemctl") is not None:
+            for verb in ("enable", "start"):
+                try:
+                    subprocess.run(
+                        ["systemctl", verb, "x-ui.service"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    print(f"✓ x-ui.service {verb}d")
+                except subprocess.CalledProcessError as exc:
+                    print(f"  (systemctl {verb} x-ui.service: {exc.stderr.strip() or 'not found'})")
         print("  Re-run `s-vps update` to converge with panel_enabled=true.")
         return 0
 
@@ -547,15 +564,40 @@ def cmd_migrate_from_3xui(args: argparse.Namespace) -> int:
     backup = f"{PANEL_STATE_PATH}.before-migrate-{ts}"
     os.rename(PANEL_STATE_PATH, backup)
     print(f"✓ panel mode disabled: panel.state.yml → {os.path.basename(backup)}")
+
+    # Stop x-ui before the headless converge so the standalone xray
+    # service that ansible installs next can bind the Reality port.
+    # `systemctl stop` is idempotent; failure is non-fatal (e.g. the
+    # unit was already gone after an earlier abort). We always disable
+    # too so a reboot doesn't start it again — operators rolling back
+    # via `--rollback` need to re-enable explicitly.
+    print()
+    if shutil.which("systemctl") is not None:
+        for verb in ("stop", "disable"):
+            try:
+                subprocess.run(
+                    ["systemctl", verb, "x-ui.service"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                print(f"✓ x-ui.service {verb}ped")
+            except subprocess.CalledProcessError as exc:
+                # Most common reason: already-stopped / already-disabled.
+                # Print stderr for clarity but don't fail the migrate.
+                print(f"  (systemctl {verb} x-ui.service: {exc.stderr.strip() or 'not found'})")
+    else:
+        print("  (skipping x-ui stop — systemctl not on PATH; do it manually)")
+
     print()
     print("Next steps:")
     print("  1. Re-run `s-vps update` so ansible converges with panel_enabled=false.")
     print("     The role installs the standalone Xray + hysteria-per-user units.")
+    print("       sudo STEALTH_PANEL_ENABLED=false s-vps update")
     print("  2. Run `s-vps diagnose` to validate the new path.")
-    print("  3. Once verified, stop + disable the panel:")
-    print("       systemctl disable --now x-ui.service")
     print()
-    print(f"Rollback (within this session): s-vps migrate from-3xui --rollback")
+    print("Rollback (within this session): `s-vps migrate from-3xui --rollback`")
+    print("  (also re-enables x-ui.service)")
     return 0
 
 

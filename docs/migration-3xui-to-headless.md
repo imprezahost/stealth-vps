@@ -25,6 +25,16 @@ Runbook for operators on a v0.6.x install who want to move to the v0.7+ headless
 
 ## One-shot cutover
 
+The CLI you need (`s-vps migrate`) only ships in v0.7.0+. If you're on v0.6.x, bring `s-vps` up to v0.7.x first via the normal update — the migrate command lands automatically:
+
+```bash
+sudo s-vps update v0.7.2        # gets the v0.7 CLI on disk
+                                # (this update still uses panel mode;
+                                # nothing functional changes yet)
+```
+
+Then run the cutover:
+
 ```bash
 # 1. Backup snapshot — strongly recommended. Anything goes wrong, you
 #    can restore /etc/stealth-vps + /etc/x-ui + /etc/xray verbatim.
@@ -33,27 +43,29 @@ sudo tar czf /root/stealth-vps-backup-$(date +%Y%m%d).tar.gz \
     /etc/x-ui \
     /etc/systemd/system/x-ui.service 2>/dev/null
 
-# 2. Rename panel.state.yml so select_backend() picks HeadlessBackend.
-#    The migrate command does the rename atomically + adds a timestamp
-#    so you can `--rollback` later if needed.
+# 2. Rename panel.state.yml + stop+disable x-ui.service (the latter
+#    frees the Reality port so the standalone xray installed by the
+#    next step can bind it). select_backend() now picks HeadlessBackend.
+#    The rename includes a timestamp so you can `--rollback` later if
+#    something goes wrong.
 sudo s-vps migrate from-3xui
 
-# 3. Re-run ansible with panel_enabled=false. `s-vps update` reads
-#    /etc/stealth-vps/installer.env to remember the flag — but the
-#    installer.env still says panel=true. Override on the command line:
+# 3. Re-run ansible with panel_enabled=false. The env override wins
+#    over `STEALTH_PANEL_ENABLED=true` in /etc/stealth-vps/installer.env
+#    on v0.7.1+ (v0.7.0 had a regression where source clobbered env;
+#    if you're stuck on v0.7.0, edit installer.env first instead).
 sudo STEALTH_PANEL_ENABLED=false s-vps update
 
 # 4. Verify the new layout came up clean.
 sudo s-vps diagnose
 sudo s-vps user list
 
-# 5. Once happy, disable the panel + Caddy (they're idle now).
-sudo systemctl disable --now x-ui.service
+# 5. Optional: also stop Caddy if you weren't using it for subscription URLs.
 sudo systemctl disable --now caddy.service   # only if you weren't using
                                              # Caddy for subscription URLs
 ```
 
-That's the whole flow. Total downtime is the duration of step 3 (typically 60-90 seconds on a 2-core VPS).
+That's the whole flow. Total downtime is the duration of step 3 (typically 60-90 seconds on a 2-core VPS). The migrate command already disabled x-ui in step 2; step 5 is just an optional Caddy stop if you weren't using subscription URLs.
 
 ## What changes on disk
 

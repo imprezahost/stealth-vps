@@ -23,7 +23,13 @@ Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray
 # `-confdir` would let xray merge multiple files; we keep one config.json
 # for now since the Reality inbound is the only thing we ship.
 ExecStart={{ stealth_vps_xray_bin }} run -config {{ stealth_vps_xray_config_dir }}/config.json
-ExecReload=/bin/kill -HUP $MAINPID
+# No `ExecReload=` on purpose. Xray-core does NOT install a SIGHUP
+# handler — sending SIGHUP just terminates the process. The
+# stealth_vps.reloader module knows this and issues `systemctl restart
+# xray.service` (rather than `reload`) when users.index.json changes.
+# Adding `ExecReload=/bin/kill -HUP $MAINPID` here is the trap v0.7.1
+# fell into — `systemctl reload xray.service` then SIGHUP-killed xray
+# and left the service inactive.
 
 Restart=on-failure
 RestartSec=5

@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.7.2)
-- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.0 ships the CLI-only path; v0.7.2 closes the loop so panel-mode bot users can migrate without losing the chat UX.
-- **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl reload xray.service` without running the bot as root.
+### Planned (v0.7.3)
+- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.x ships the CLI-only path; v0.7.3 closes the loop so panel-mode bot users can migrate without losing the chat UX.
+- **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl restart xray.service` + `systemctl reload hysteria-server.service` without running the bot as root.
 
 ### Planned (v1.0)
 - JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.7.2] - 2026-05-18
+
+Twenty-fourth tagged release. Third hotfix in the v0.7 ship sequence; closes the last two real-world Tokyo VPS smoke-test bugs that v0.7.1 didn't catch (the migration still failed because xray got SIGHUP-killed and the operator had to remember to stop x-ui themselves). After this release the documented migration runbook actually works end-to-end on Debian 12.9 + ansible-core 2.19.
+
+### Fixed
+
+- **`xray-standalone.service.j2` had `ExecReload=/bin/kill -HUP $MAINPID` — but xray-core has no SIGHUP handler.** Sending SIGHUP just terminates the process and systemd happily marks the service "deactivated successfully" (signal=HUP is a clean exit code as far as systemd's Restart=on-failure logic is concerned, so the unit doesn't get restarted). On every headless-mode `s-vps user add`, `Reloader.__call__` ran `systemctl reload xray.service` → SIGHUP-killed xray → next reload attempt failed with "service is not active". Two fixes in tandem:
+  - `stealth_vps/reloader.py` — `reload_service()` gains a `mode` kwarg ("reload" or "restart"). `Reloader.__call__` now uses `mode="restart"` for xray (because xray-core has no hot-reload) and `mode="reload"` for hysteria-server (Hysteria 2 DOES handle SIGHUP for config reload). Reality clients see a sub-second cutover instead of a permanent outage on user adds.
+  - `templates/xray-standalone.service.j2` — `ExecReload=` line removed. Keeping it was the trap that made `systemctl reload xray.service` actually destructive.
+- **`stealth_vps/cli.py` — `s-vps migrate from-3xui` now stops + disables x-ui.service automatically.** Previously the operator had to remember to do this manually between `migrate` and `s-vps update` so the freshly-installed standalone xray could bind the Reality port. Operators that forgot the step got a port-conflict failure deep inside the headless converge. `--rollback` symmetrically re-enables + starts x-ui so the panel-mode path comes back cleanly.
+- **`templates/hysteria-server.service.j2` — `ExecReload=/bin/kill -HUP $MAINPID` added.** Hysteria 2 handles SIGHUP for hot config reload; the upstream apernet/hysteria deb package's unit file doesn't include the line, so on first `Reloader.__call__` systemctl bailed with "Job type reload is not applicable for unit hysteria-server.service". With ExecReload= the per-user `auth.userpass` map gets refreshed on every `s-vps user add` without dropping in-flight QUIC sessions.
+- **`docs/migration-3xui-to-headless.md`** updated to the v0.7.2 runbook (no separate `systemctl disable x-ui.service` step needed — `s-vps migrate from-3xui` does it; explicit `s-vps update v0.7.2` first to get the new CLI on disk).
+
+### Tested on the Tokyo test VPS
+
+The full panel→headless cutover walked end-to-end without operator intervention beyond the four commands in the runbook. Standalone Xray comes up green on the Reality port, Hysteria 2 per-user `auth.userpass` map renders with the default client, `s-vps user add bob` mutates the index + restarts xray + SIGHUPs hysteria + emits the operator-facing URIs in one shot.
 
 ## [0.7.1] - 2026-05-18
 
