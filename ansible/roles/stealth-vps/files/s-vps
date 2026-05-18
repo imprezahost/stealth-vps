@@ -55,17 +55,29 @@ s_cmd_help() {
 s-vps — stealth-vps operator CLI
 
 Usage:
-  s-vps update           Re-run ansible-pull at the pinned release tag.
-                         To switch versions: s-vps update <tag>  (e.g. v0.7.0).
-  s-vps diagnose         Run the post-deploy health check.
-  s-vps status           Quick service-status summary.
-  s-vps version          Print installed stealth-vps version + tooling.
-  s-vps help             Show this help.
+  s-vps update                   Re-run ansible-pull at the pinned release tag.
+                                 To switch versions: s-vps update <tag>  (e.g. v0.7.0).
+  s-vps diagnose                 Run the post-deploy health check.
+  s-vps status                   Quick service-status summary.
+  s-vps version                  Print installed stealth-vps version + tooling.
+  s-vps help                     Show this help.
+
+User management (v0.7+):
+  s-vps user add LABEL           Add a user to users.index.json, SIGHUP services.
+  s-vps user revoke LABEL        Disable a user (does not delete the record).
+  s-vps user list [--json]       List users in the index.
+  s-vps user show LABEL [--qr]   Show one user's URIs + sub URL.
+
+Headless-mode helpers (v0.7+):
+  s-vps reload [--dry-run]       Re-render configs + SIGHUP (headless mode only).
+  s-vps migrate from-3xui        Cutover from 3X-UI panel to headless.
 
 Files:
-  /etc/stealth-vps/version          pinned release tag
-  /etc/stealth-vps/installer.env    optional env overrides (sourced)
-  /var/log/stealth-vps/             ansible-pull / install logs
+  /etc/stealth-vps/version              pinned release tag
+  /etc/stealth-vps/installer.env        optional env overrides (sourced)
+  /etc/stealth-vps/users.index.json     authoritative user list (v0.7+)
+  /etc/stealth-vps/reloader-args.json   Reloader kwargs (written by ansible, used by `s-vps user *`)
+  /var/log/stealth-vps/                 ansible-pull / install logs
 
 Documentation: https://github.com/imprezahost/stealth-vps
 EOF
@@ -211,6 +223,12 @@ main() {
     status)            s_cmd_status "$@" ;;
     version|--version) s_cmd_version "$@" ;;
     help|--help|-h)    s_cmd_help "$@" ;;
+    # v0.7+ Python-side verbs. exec hands the `$@` straight through so
+    # argparse's `--help` etc. land on the Python parser, not on this
+    # bash wrapper. Same exit code, no extra shell layer in the trace.
+    user|reload|migrate)
+      exec python3 -m stealth_vps.cli "${cmd}" "$@"
+      ;;
     *)
       echo "s-vps: unknown subcommand '${cmd}'" >&2
       echo "Try: s-vps help" >&2

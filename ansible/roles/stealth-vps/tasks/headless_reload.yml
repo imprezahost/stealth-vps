@@ -22,6 +22,44 @@
 # out from under it would crash 3X-UI on its next reconciliation pass.
 # ThreeXUIBackend handles mutations through the panel API instead.
 
+# Persist the reloader's effective kwargs as JSON so `s-vps user add /
+# revoke / reload` can reconstruct the same Reloader without
+# re-discovering all of the role's knobs at run time. The CLI loads
+# /etc/stealth-vps/reloader-args.json and feeds it to Reloader(**args).
+# Mode 0640 (group=root) — file contains no secrets directly, but
+# referencing the state files is enough for an attacker to enumerate
+# the deploy. Keep it out of `cat /etc/stealth-vps/*` casual reads.
+- name: Persist reloader kwargs for the s-vps CLI
+  ansible.builtin.copy:
+    content: "{{ {
+      'users_index_path': stealth_vps_users_index_path,
+      'reality_enabled': stealth_vps_reality_enabled | bool,
+      'reality_state_path': stealth_vps_panel_state_dir + '/reality.state.yml',
+      'xray_config_path': stealth_vps_xray_config_dir + '/config.json',
+      'xray_service': 'xray.service',
+      'xray_group': stealth_vps_xray_user,
+      'reality_dest': stealth_vps_reality_dest,
+      'reality_servernames': stealth_vps_reality_servernames,
+      'reality_flow': stealth_vps_reality_flow,
+      'hysteria_enabled': stealth_vps_hysteria_enabled | bool,
+      'hysteria_state_path': stealth_vps_panel_state_dir + '/hysteria.state.yml',
+      'hysteria_config_path': stealth_vps_hysteria_config_dir + '/config.yaml',
+      'hysteria_service': 'hysteria-server.service',
+      'hysteria_group': stealth_vps_hysteria_user,
+      'hysteria_per_user': stealth_vps_hysteria_per_user_enabled | bool,
+      'hysteria_tls_cert': (stealth_vps_hysteria_effective_cert | default('') | trim),
+      'hysteria_tls_key': (stealth_vps_hysteria_effective_key | default('') | trim),
+      'hysteria_masquerade_url': stealth_vps_hysteria_masquerade_url,
+      'hysteria_bandwidth_up': stealth_vps_hysteria_bandwidth_up,
+      'hysteria_bandwidth_down': stealth_vps_hysteria_bandwidth_down,
+      'hysteria_metrics_enabled': stealth_vps_metrics_enabled | bool,
+    } | to_nice_json(sort_keys=true, indent=2) }}"
+    dest: /etc/stealth-vps/reloader-args.json
+    owner: root
+    group: root
+    mode: '0640'
+  tags: [users, index, headless]
+
 - name: Compose reloader argv (base flags)
   # Building argv as a Jinja list (rather than a long `cmd:` string)
   # so empty-string args — `--hysteria-tls-cert ""` in default-scenario
