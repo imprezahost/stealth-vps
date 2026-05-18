@@ -300,12 +300,17 @@
 # --- Smoke test ----------------------------------------------------------
 
 - name: Wait for hysteria UDP port to be listening
+  # `ss sport = :PORT` filters server-side by listening port; output is
+  # empty when the port isn't bound, one+ line otherwise. `grep -q .`
+  # turns empty/non-empty into rc=1/0 cleanly. The previous version
+  # piped through `awk '{print $5}'` to grab the local-address column,
+  # but the column number isn't stable across iproute2 builds (some
+  # include the Netid column under -u, some don't). Using ss's own
+  # filter avoids the column-position trap and is also faster.
+  # `set -o pipefail` is harmless here (grep -q is the only thing that
+  # ever returns non-zero) but ansible-lint's risky-shell-pipe insists.
   ansible.builtin.shell:
-    # `set -o pipefail` so a failure anywhere in the pipe propagates to
-    # the outer command's rc — without it, `grep -E ...` failing returns
-    # 0 because `head -1` succeeded on empty input, and the `until:`
-    # loop never retries.
-    cmd: "set -o pipefail; ss -lunH | awk '{print $5}' | grep -E ':{{ stealth_vps_hysteria_state.port }}$' | head -1"
+    cmd: "set -o pipefail; ss -lunH 'sport = :{{ stealth_vps_hysteria_state.port }}' | grep -q ."
     executable: /bin/bash
   register: stealth_vps_hysteria_udp_check
   until: stealth_vps_hysteria_udp_check.rc == 0
