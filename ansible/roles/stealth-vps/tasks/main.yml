@@ -73,6 +73,23 @@
   ansible.builtin.include_tasks: users_index.yml
   tags: [users, index]
 
+# Headless-mode multi-client reload. In panel mode the 3X-UI panel API
+# is the source of truth — overwriting Xray's config.json out from
+# under it would crash the panel's reconciliation. ThreeXUIBackend
+# pushes updates through the API instead, so this whole block is
+# panel-mode-disabled at the `when:` gate.
+#
+# Also a no-op when BOTH reality and hysteria are off: the reloader
+# would just exit 0, but skipping the include avoids an extra
+# python-launch round-trip per converge in the molecule default
+# scenario (which has every protocol disabled).
+- name: Re-render multi-client configs from users.index.json (headless mode)
+  ansible.builtin.include_tasks: headless_reload.yml
+  when:
+    - not (stealth_vps_panel_enabled | bool)
+    - (stealth_vps_reality_enabled | bool) or (stealth_vps_hysteria_enabled | bool)
+  tags: [users, index, headless]
+
 - name: Install Telegram bot (opt-in)
   ansible.builtin.include_tasks: bot.yml
   when: stealth_vps_bot_enabled | bool
