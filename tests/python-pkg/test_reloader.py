@@ -519,8 +519,13 @@ def test_reloader_call_renders_hysteria_userpass(reloader_paths: dict[str, str])
     assert "alice-hy2-pw" in text
     assert "userpass" in text
 
+    # Hysteria 2 also doesn't support hot reload — its SIGHUP handler
+    # routes into the same graceful-shutdown path as SIGTERM. So the
+    # Reloader uses `restart` for both services. Test asserts the
+    # exact call so a future flip to real-reload (when Hysteria's
+    # #717 lands) trips this and forces a conscious update.
     mock_run.assert_called_once_with(
-        ["systemctl", "reload", "hysteria-server.service"],
+        ["systemctl", "restart", "hysteria-server.service"],
         check=True,
         capture_output=True,
         text=True,

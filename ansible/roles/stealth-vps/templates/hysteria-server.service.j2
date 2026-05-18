@@ -12,13 +12,15 @@ User={{ stealth_vps_hysteria_user }}
 Group={{ stealth_vps_hysteria_user }}
 WorkingDirectory={{ stealth_vps_hysteria_config_dir }}
 ExecStart={{ stealth_vps_hysteria_bin }} server --config {{ stealth_vps_hysteria_config_dir }}/config.yaml
-# SIGHUP makes Hysteria 2 re-read its config without dropping in-flight
-# QUIC sessions. Required for `s-vps user add` / `s-vps reload` in
-# headless mode — without ExecReload= the `systemctl reload` call
-# bails with "Job type reload is not applicable for unit ...". Upstream
-# apernet/hysteria's deb package ships the unit without ExecReload, so
-# we redefine it here through the role's own template.
-ExecReload=/bin/kill -HUP $MAINPID
+# No `ExecReload=` on purpose. Hysteria 2 doesn't have a real hot-
+# reload path: SIGHUP routes into the same graceful-shutdown handler
+# as SIGTERM/SIGINT and the server stops. v0.7.2 had
+# `ExecReload=/bin/kill -HUP $MAINPID` here as belt-and-suspenders for
+# `systemctl reload hysteria-server.service`, but that path silently
+# stopped the service every time a user was added or revoked.
+# stealth_vps.reloader now issues `systemctl restart` for both
+# services; if a future Hysteria release lands the hot-reload work
+# tracked at apernet/hysteria#717, the ExecReload= line comes back.
 Environment=HYSTERIA_LOG_LEVEL=info
 
 # Bind UDP on a non-privileged port (>1024), but allow CAP_NET_BIND_SERVICE
