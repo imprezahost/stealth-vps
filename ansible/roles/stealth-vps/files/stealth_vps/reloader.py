@@ -441,20 +441,22 @@ def render_hysteria_config_text(*args: Any, **kwargs: Any) -> str:
 def reload_service(name: str, *, dry_run: bool = False, mode: str = "reload") -> None:
     """`systemctl <mode> <name>` — mode is "reload" (SIGHUP) or "restart".
 
-    Hysteria 2 supports SIGHUP for hot config reload — `mode="reload"`
-    is preferred so in-flight QUIC sessions survive the rewrite.
+    Neither xray-core nor Hysteria 2 currently supports hot reload, so
+    the Reloader uses `mode="restart"` for both. The `mode` parameter
+    stays in case a future Hysteria release implements real SIGHUP
+    reload (apernet/hysteria#717); flipping back to `mode="reload"`
+    would then be a one-line change.
 
-    Xray-core does NOT install a SIGHUP handler; SIGHUP terminates the
-    process. So even though the upstream wisdom is "reload to avoid
-    dropping connections", a literal `systemctl reload xray.service`
-    just kills xray (and the upstream-style `ExecReload=/bin/kill -HUP
-    $MAINPID` doesn't reload it). Pass `mode="restart"` for xray — it
-    causes a sub-second cutover that drops in-flight Reality connections
-    but actually picks up the new config. The Reloader class wires
-    this in automatically.
+    Why hot reload doesn't work today:
+      - xray-core has no SIGHUP handler. Go's default behavior on
+        SIGHUP is to terminate the process; systemd then sees the
+        clean exit and leaves the service dead.
+      - Hysteria 2 wires SIGHUP into the same "received signal,
+        shutting down gracefully" path as SIGTERM/SIGINT — sending
+        SIGHUP just stops the daemon.
 
-    `dry_run=True` skips the call entirely — used by the molecule
-    headless verify and by `s-vps reload --dry-run`.
+    `dry_run=True` skips the subprocess call entirely — used by the
+    molecule headless verify and by `s-vps reload --dry-run`.
     """
     if mode not in ("reload", "restart"):
         raise ValueError(f"reload_service mode must be 'reload' or 'restart', got {mode!r}")
@@ -620,14 +622,26 @@ class Reloader:
             )
 
         # --- reloads ----------------------------------------------------
-        # xray-core has no SIGHUP handler → use restart. Drops in-flight
-        # Reality connections but actually picks up the new clients[]
-        # list. Hysteria 2 DOES handle SIGHUP for hot reload, so it gets
-        # the connection-preserving reload path.
+        # Both services use `restart` (not `reload`) because neither
+        # xray-core nor Hysteria 2 actually support hot reload:
+        #   - xray-core has no SIGHUP handler — Go's default is to
+        #     terminate the process. systemd then sees signal=HUP as a
+        #     "clean" exit (Restart=on-failure doesn't kick in) and
+        #     leaves the service dead.
+        #   - Hysteria 2 wires SIGHUP into its general "received signal,
+        #     shutting down gracefully" path (apernet/hysteria#717 tracks
+        #     real hot-reload support; until that lands, SIGHUP just
+        #     stops the server cleanly — same effective behaviour as Xray
+        #     but via an explicit handler).
+        # `restart` causes a sub-second cutover that drops in-flight
+        # connections; clients reconnect on their own retry loop. The
+        # `mode` kwarg stays on `reload_service` so a future Hysteria
+        # release with real SIGHUP-reload can flip to `mode="reload"`
+        # without restructuring the call.
         if xray_text is not None:
             reload_service(self.xray_service, dry_run=self.dry_run, mode="restart")
         if hy_text is not None:
-            reload_service(self.hysteria_service, dry_run=self.dry_run, mode="reload")
+            reload_service(self.hysteria_service, dry_run=self.dry_run, mode="restart")
 
 
 # --- CLI ----------------------------------------------------------------
