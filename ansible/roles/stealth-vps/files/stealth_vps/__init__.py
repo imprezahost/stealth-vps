@@ -32,6 +32,11 @@ from .reloader import (  # noqa: F401
     render_hysteria_config_text,
     load_state_file,
 )
+# Note: stealth_vps.cli is intentionally NOT imported here. The CLI is
+# invoked via `python3 -m stealth_vps.cli` (or the bash wrapper at
+# /usr/local/bin/s-vps) — keeping it out of the package's top-level
+# import path avoids paying for argparse construction on every
+# `import stealth_vps`, which the metrics updater + bot do at startup.
 from .subscription import (  # noqa: F401
     render_subscription_txt,
     write_subscription_file,
