@@ -401,6 +401,23 @@ def test_reload_service_invokes_systemctl_reload() -> None:
         assert args[0] == ["systemctl", "reload", "xray.service"]
 
 
+def test_reload_service_restart_mode_for_xray() -> None:
+    """xray-core ignores SIGHUP; `mode="restart"` is what the Reloader
+    actually uses to make xray pick up a new config. Test the mode
+    dispatch directly so a future signature change is caught here.
+    """
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        reloader.reload_service("xray.service", mode="restart")
+        args, _ = mock_run.call_args
+        assert args[0] == ["systemctl", "restart", "xray.service"]
+
+
+def test_reload_service_rejects_bad_mode() -> None:
+    with pytest.raises(ValueError, match="must be 'reload' or 'restart'"):
+        reloader.reload_service("xray.service", mode="recycle")
+
+
 def test_reload_service_raises_on_nonzero_exit() -> None:
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = subprocess.CalledProcessError(
@@ -467,10 +484,13 @@ def test_reloader_call_renders_xray_and_reloads_service(reloader_paths: dict[str
     cfg = json.loads(pathlib.Path(reloader_paths["xray_config_path"]).read_text())
     assert cfg["inbounds"][0]["settings"]["clients"][0]["email"] == "alice"
 
-    # systemctl reload xray was called exactly once.
+    # systemctl restart xray was called exactly once. Xray-core has no
+    # SIGHUP handler, so the Reloader uses `restart` (not `reload`) —
+    # otherwise SIGHUP from the legacy ExecReload= just terminates the
+    # process and leaves it inactive.
     mock_run.assert_called_once()
     args, _ = mock_run.call_args
-    assert args[0] == ["systemctl", "reload", "xray.service"]
+    assert args[0] == ["systemctl", "restart", "xray.service"]
 
 
 def test_reloader_call_renders_hysteria_userpass(reloader_paths: dict[str, str]) -> None:

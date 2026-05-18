@@ -438,24 +438,32 @@ def render_hysteria_config_text(*args: Any, **kwargs: Any) -> str:
 # --- systemctl wrapper --------------------------------------------------
 
 
-def reload_service(name: str, *, dry_run: bool = False) -> None:
-    """`systemctl reload <name>`. Wraps subprocess so the test path
-    can mock it cleanly. `dry_run=True` skips the call entirely — used
-    by the molecule headless verify and the `s-vps reload --dry-run`
-    inspect mode.
+def reload_service(name: str, *, dry_run: bool = False, mode: str = "reload") -> None:
+    """`systemctl <mode> <name>` — mode is "reload" (SIGHUP) or "restart".
 
-    `systemctl reload` (not `restart`): xray.service and
-    hysteria-server.service both ship ExecReload=/bin/kill -HUP $MAINPID
-    in the unit, so reload sends SIGHUP and the daemon re-parses the
-    config without dropping in-flight connections. Restart would kill
-    every active tunnel, which is unacceptable on a `s-vps user add`.
+    Hysteria 2 supports SIGHUP for hot config reload — `mode="reload"`
+    is preferred so in-flight QUIC sessions survive the rewrite.
+
+    Xray-core does NOT install a SIGHUP handler; SIGHUP terminates the
+    process. So even though the upstream wisdom is "reload to avoid
+    dropping connections", a literal `systemctl reload xray.service`
+    just kills xray (and the upstream-style `ExecReload=/bin/kill -HUP
+    $MAINPID` doesn't reload it). Pass `mode="restart"` for xray — it
+    causes a sub-second cutover that drops in-flight Reality connections
+    but actually picks up the new config. The Reloader class wires
+    this in automatically.
+
+    `dry_run=True` skips the call entirely — used by the molecule
+    headless verify and by `s-vps reload --dry-run`.
     """
+    if mode not in ("reload", "restart"):
+        raise ValueError(f"reload_service mode must be 'reload' or 'restart', got {mode!r}")
     if dry_run:
-        log.info("dry-run: skipping `systemctl reload %s`", name)
+        log.info("dry-run: skipping `systemctl %s %s`", mode, name)
         return
     try:
         subprocess.run(
-            ["systemctl", "reload", name],
+            ["systemctl", mode, name],
             check=True,
             capture_output=True,
             text=True,
@@ -467,7 +475,7 @@ def reload_service(name: str, *, dry_run: bool = False) -> None:
         raise ReloadError("systemctl not found on PATH") from exc
     except subprocess.CalledProcessError as exc:
         raise ReloadError(
-            f"`systemctl reload {name}` failed (rc={exc.returncode}): "
+            f"`systemctl {mode} {name}` failed (rc={exc.returncode}): "
             f"stderr={exc.stderr!r}"
         ) from exc
 
@@ -612,10 +620,14 @@ class Reloader:
             )
 
         # --- reloads ----------------------------------------------------
+        # xray-core has no SIGHUP handler → use restart. Drops in-flight
+        # Reality connections but actually picks up the new clients[]
+        # list. Hysteria 2 DOES handle SIGHUP for hot reload, so it gets
+        # the connection-preserving reload path.
         if xray_text is not None:
-            reload_service(self.xray_service, dry_run=self.dry_run)
+            reload_service(self.xray_service, dry_run=self.dry_run, mode="restart")
         if hy_text is not None:
-            reload_service(self.hysteria_service, dry_run=self.dry_run)
+            reload_service(self.hysteria_service, dry_run=self.dry_run, mode="reload")
 
 
 # --- CLI ----------------------------------------------------------------
