@@ -38,7 +38,7 @@ Selected when **all three** conditions hold:
 Triggered by **downloading then running**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.4/scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.0/scripts/install.sh -o install.sh
 sudo bash install.sh
 ```
 
@@ -53,7 +53,7 @@ is piped:
 
 ```bash
 # cloud-init / Terraform / Pulumi / one-liner
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.6.4/scripts/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.0/scripts/install.sh | sudo bash
 ```
 
 The pipe makes stdin a non-TTY, so the TUI is skipped and the installer
@@ -99,7 +99,7 @@ defaults; in env-var mode they ARE the configuration.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `STEALTH_VERSION` | `v0.6.4` | Release tag to deploy. `release.sh` bumps this. |
+| `STEALTH_VERSION` | `v0.7.0` | Release tag to deploy. `release.sh` bumps this. |
 | `STEALTH_REPO` | github upstream | Git URL. Override for forks / mirrors. |
 | `STEALTH_LOG_DIR` | `/var/log/stealth-vps` | Where install logs go. |
 | `STEALTH_DOMAIN` | empty | FQDN that resolves to this VPS, or empty for bare-IP install. |
@@ -191,4 +191,4 @@ Two rules that exist because we've broken them before:
    by `install.sh`.)
 
 Bumping the release tag in this file is handled by `scripts/release.sh`
-— don't edit `STEALTH_VERSION="${STEALTH_VERSION:-v0.6.4}"` by hand.
+— don't edit `STEALTH_VERSION="${STEALTH_VERSION:-v0.7.0}"` by hand.
