@@ -9,7 +9,7 @@ import * as fs from "fs";
 import { buildCloudInit } from "../../stealth-vps";
 
 const userData = buildCloudInit({
-  stealthVersion: "v0.7.0",
+  stealthVersion: "v0.7.1",
   sshPublicKey: fs.readFileSync(`${process.env.HOME}/.ssh/id_ed25519.pub`, "utf8"),
   sshPort: 22550,
   domain: "vpn.example.com",

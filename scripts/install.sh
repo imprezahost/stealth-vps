@@ -17,10 +17,10 @@
 #      v0.5.x so existing IaC users don't have to re-flow their templates.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.0/scripts/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.1/scripts/install.sh | bash
 #
 # Env vars honored by both modes (TUI uses them as defaults):
-#   STEALTH_VERSION              release tag to deploy (default: v0.7.0)
+#   STEALTH_VERSION              release tag to deploy (default: v0.7.1)
 #   STEALTH_REPO                 git URL (default: github.com/imprezahost/stealth-vps)
 #   STEALTH_DOMAIN               FQDN pointing at this host, "" = stay on IP
 #   STEALTH_BOT_ENABLED          true/false (default: false)
@@ -54,7 +54,7 @@ BANNER
 # ===========================================================================
 # Config (env overrides)
 # ===========================================================================
-STEALTH_VERSION="${STEALTH_VERSION:-v0.7.0}"
+STEALTH_VERSION="${STEALTH_VERSION:-v0.7.1}"
 STEALTH_REPO="${STEALTH_REPO:-https://github.com/imprezahost/stealth-vps.git}"
 STEALTH_LOG_DIR="${STEALTH_LOG_DIR:-/var/log/stealth-vps}"
 

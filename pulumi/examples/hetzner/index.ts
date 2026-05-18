@@ -25,7 +25,7 @@ const location = config.get("location") ?? "fsn1";              // Falkenstein
 const image = config.get("image") ?? "debian-12";
 const sshPublicKeyPath = config.get("sshPublicKeyPath") ?? `${process.env.HOME}/.ssh/id_ed25519.pub`;
 const sshPort = config.getNumber("sshPort") ?? 22550;
-const stealthVersion = config.get("stealthVersion") ?? "v0.7.0";
+const stealthVersion = config.get("stealthVersion") ?? "v0.7.1";
 
 const domain = config.get("domain") ?? null;
 const letsencryptEmail = config.get("letsencryptEmail") ?? "";
