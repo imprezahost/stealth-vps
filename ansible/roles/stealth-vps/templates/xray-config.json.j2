@@ -1,0 +1,86 @@
+{# Xray-core config.json for the stealth-vps standalone Reality inbound.
+   Rendered by tasks/reality_xray_standalone.yml from:
+     - {{ stealth_vps_panel_state_dir }}/reality.state.yml  (Reality state: port/keys/shortId + the default client_uuid)
+     - defaults/main.yml                                    (reality_dest, servernames, flow)
+
+   B2 ship: ONE client (the default seeded by reality_state.yml). The bot
+   + CLI will add more clients in B3 via HeadlessBackend, which re-renders
+   THIS file from users.index.json and SIGHUPs xray. The Ansible-side
+   template stays static / single-client; multi-client lives in the
+   Python reloader. Splitting it this way avoids a circular dep between
+   tasks/xray.yml's render step and tasks/users_index.yml's seed step
+   (they both look at the same state — but the Ansible template can't
+   read users.index.json until users_index.yml runs LATER in main.yml).
+
+   v0.6 panel-mode equivalent: the inbound that
+   tasks/reality_push_3xui.yml POSTs to /panel/api/inbounds/add. Same
+   Reality protocol on the wire — operators / clients can't tell the
+   difference.
+
+   Schema (Xray-core ≥1.8): https://xtls.github.io/config/
+#}
+{
+  "log": {
+    "loglevel": "warning"
+  },
+
+  "inbounds": [
+    {
+      "tag": "reality-in",
+      "listen": "0.0.0.0",
+      "port": {{ stealth_vps_reality_state.port }},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": {{ stealth_vps_reality_state.client_uuid | to_json }},
+            "email": {{ (stealth_vps_reality_state.client_email
+                         | default(stealth_vps_reality_default_client_email)) | to_json }},
+            "flow": {{ stealth_vps_reality_flow | to_json }}
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "xver": 0,
+          "dest": {{ stealth_vps_reality_dest | to_json }},
+          "serverNames": {{ stealth_vps_reality_servernames | to_json }},
+          "privateKey": {{ stealth_vps_reality_state.private_key | to_json }},
+          "shortIds": [{{ stealth_vps_reality_state.short_id | to_json }}]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "metadataOnly": false,
+        "routeOnly": false
+      }
+    }
+  ],
+
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
+    }
+  ],
+
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      }
+    ]
+  }
+}

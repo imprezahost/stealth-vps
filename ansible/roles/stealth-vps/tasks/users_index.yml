@@ -40,16 +40,30 @@
   tags: [users, index]
   block:
 
-    - name: Load reality state for seeding the index
-      ansible.builtin.include_vars:
-        file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
-        name: stealth_vps_reality_state
+    # `slurp` rather than `include_vars` for the same reason as
+    # reality_state.yml — include_vars reads from the controller, which
+    # only happens to be the remote on Path B. slurp+from_yaml works
+    # for both Path B and molecule (where controller ≠ remote).
+
+    - name: Read reality state from remote for seeding the index
+      ansible.builtin.slurp:
+        src: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+      register: stealth_vps_reality_state_raw
       # `xray.yml` runs before us in main.yml, so the file exists by now.
 
-    - name: Load hysteria state for seeding the index
-      ansible.builtin.include_vars:
-        file: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
-        name: stealth_vps_hysteria_state
+    - name: Set reality state fact from slurped YAML
+      ansible.builtin.set_fact:
+        stealth_vps_reality_state: "{{ stealth_vps_reality_state_raw.content | b64decode | from_yaml }}"
+
+    - name: Read hysteria state from remote for seeding the index
+      ansible.builtin.slurp:
+        src: "{{ stealth_vps_panel_state_dir }}/hysteria.state.yml"
+      register: stealth_vps_hysteria_state_raw
+      when: stealth_vps_hysteria_enabled | bool
+
+    - name: Set hysteria state fact from slurped YAML
+      ansible.builtin.set_fact:
+        stealth_vps_hysteria_state: "{{ stealth_vps_hysteria_state_raw.content | b64decode | from_yaml }}"
       when: stealth_vps_hysteria_enabled | bool
       # When Hysteria2 isn't enabled, the index still gets seeded for
       # the Reality client; hysteria_password just stays empty.

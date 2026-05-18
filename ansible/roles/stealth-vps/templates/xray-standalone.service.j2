@@ -1,0 +1,77 @@
+[Unit]
+# Standalone Xray-core for VLESS-Reality. Renders from
+# templates/xray-standalone.service.j2 by tasks/reality_xray_standalone.yml.
+# This unit is used ONLY in v0.7+ headless mode (panel_enabled=false).
+Description=stealth-vps standalone Xray-core (VLESS-Reality)
+Documentation=https://xtls.github.io/
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User={{ stealth_vps_xray_user }}
+Group={{ stealth_vps_xray_user }}
+WorkingDirectory={{ stealth_vps_xray_state_dir }}
+# Tell Xray where geoip.dat / geosite.dat live. Without this Xray
+# searches a handful of fallbacks (binary dir, CWD, /usr/share/xray)
+# — none of which are the path our reality_xray_binary.yml unpacks
+# the geo data to. The routing rule `geoip:private` (anti-SSRF) won't
+# load otherwise. Matches upstream install-release.sh's layout.
+Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray
+# `-confdir` would let xray merge multiple files; we keep one config.json
+# for now since the Reality inbound is the only thing we ship.
+ExecStart={{ stealth_vps_xray_bin }} run -config {{ stealth_vps_xray_config_dir }}/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+# --- Capabilities --------------------------------------------------------
+# Reality is configured on a random high port (40000-60000) by default —
+# no CAP_NET_BIND_SERVICE needed. We still grant it AmbientCapabilities
+# so operators that pin the port to 443 in defaults/main.yml don't have
+# to also remember to flip a separate flag.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# --- Hardening -----------------------------------------------------------
+# Same playbook as stealth-vps-bot.service (v0.6.0). The set is the
+# tightest non-DynamicUser policy we can apply without breaking Xray's
+# usage patterns (it needs to read /etc/xray/config.json + /etc/resolv.conf,
+# write nothing on disk in steady state, talk to the network).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+
+# Xray reads config.json (RO) and may write into its state dir
+# (rarely — geosite cache, etc.).
+ReadOnlyPaths={{ stealth_vps_xray_config_dir }}
+ReadWritePaths={{ stealth_vps_xray_state_dir }}
+
+# --- Logging -------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=xray
+
+[Install]
+WantedBy=multi-user.target

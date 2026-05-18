@@ -1,0 +1,147 @@
+---
+# Molecule verify for the `headless` scenario.
+#
+# Asserts that a converge with stealth_vps_panel_enabled=false produces
+# the v0.7 headless-mode layout on disk: standalone xray binary,
+# xray.service unit, /etc/xray/config.json rendered from users.index.json,
+# NO panel.state.yml, NO x-ui.service. The actual xray.service startup
+# is left for path-B / VPS smoke validation — systemd-in-docker can't
+# reliably bind a random high port the same way a real kernel does.
+
+- name: Verify headless-mode artifacts
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+
+    # --- panel is GONE -------------------------------------------------
+
+    - name: X-ui.service unit NOT installed in headless mode
+      ansible.builtin.stat:
+        path: /etc/systemd/system/x-ui.service
+      register: headless_x_ui_unit
+
+    - name: Assert no x-ui.service unit
+      ansible.builtin.assert:
+        that: not headless_x_ui_unit.stat.exists
+        fail_msg: >-
+          x-ui.service should NOT be installed when panel_enabled=false.
+          panel.yml is gated on that flag and shouldn't have run.
+
+    - name: Panel.state.yml NOT created in headless mode
+      ansible.builtin.stat:
+        path: /etc/stealth-vps/panel.state.yml
+      register: headless_panel_state
+
+    - name: Assert no panel.state.yml
+      ansible.builtin.assert:
+        that: not headless_panel_state.stat.exists
+        fail_msg: >-
+          panel.state.yml exists but panel_enabled=false. Either panel.yml
+          ran by mistake or the file leaked in from a prior panel-mode
+          deploy (the role should clean that up on cutover — but for
+          molecule's fresh-container case this should never have been
+          created).
+
+    # --- xray standalone IS THERE --------------------------------------
+
+    - name: Standalone xray binary present at /usr/local/bin/xray
+      ansible.builtin.stat:
+        path: /usr/local/bin/xray
+      register: headless_xray_bin
+
+    - name: Assert xray binary present + executable
+      ansible.builtin.assert:
+        that:
+          - headless_xray_bin.stat.exists
+          - headless_xray_bin.stat.executable
+        fail_msg: "Standalone Xray binary missing or not executable."
+
+    - name: Xray.service unit installed
+      ansible.builtin.stat:
+        path: /etc/systemd/system/xray.service
+      register: headless_xray_unit
+
+    - name: Assert xray.service unit present + has hardening flags
+      ansible.builtin.assert:
+        that:
+          - headless_xray_unit.stat.exists
+          - headless_xray_unit.stat.mode == '0644'
+
+    - name: Read xray.service for hardening flag spot-checks
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/xray.service
+      register: headless_xray_unit_content
+
+    - name: Assert systemd unit has the hardening flags we expect
+      ansible.builtin.assert:
+        that:
+          - "'NoNewPrivileges=true' in (headless_xray_unit_content.content | b64decode)"
+          - "'ProtectSystem=strict' in (headless_xray_unit_content.content | b64decode)"
+          - "'MemoryDenyWriteExecute=true' in (headless_xray_unit_content.content | b64decode)"
+          - "'User=xray' in (headless_xray_unit_content.content | b64decode)"
+
+    # --- config.json renders cleanly from the index --------------------
+
+    - name: /etc/xray/config.json present
+      ansible.builtin.stat:
+        path: /etc/xray/config.json
+      register: headless_xray_config
+
+    - name: Assert config.json present, mode 0640, group=xray
+      ansible.builtin.assert:
+        that:
+          - headless_xray_config.stat.exists
+          - headless_xray_config.stat.mode == '0640'
+          - headless_xray_config.stat.gr_name == 'xray'
+
+    - name: Read config.json + parse as JSON
+      ansible.builtin.slurp:
+        src: /etc/xray/config.json
+      register: headless_xray_config_raw
+
+    - name: Assert config.json is valid JSON and has the Reality inbound shape
+      # B2: exactly one client (the default seeded from reality.state.yml).
+      # B3 will land the multi-client path via HeadlessBackend's reloader
+      # — this assertion gets relaxed to `>= 1` at that point.
+      ansible.builtin.assert:
+        that:
+          - cfg.inbounds | length == 1
+          - cfg.inbounds[0].protocol == 'vless'
+          - cfg.inbounds[0].streamSettings.security == 'reality'
+          - cfg.inbounds[0].settings.clients | length == 1
+          - cfg.inbounds[0].settings.clients[0].flow == 'xtls-rprx-vision'
+          - cfg.inbounds[0].settings.clients[0].email == 'stealth-vps-default'
+        fail_msg: >-
+          /etc/xray/config.json does not match the expected Reality shape.
+          Check the xray-config.json.j2 template against the rendered
+          output: {{ cfg | to_nice_json }}
+      vars:
+        cfg: "{{ headless_xray_config_raw.content | b64decode | from_json }}"
+
+    # --- users.index.json was seeded -----------------------------------
+
+    - name: Users.index.json present at the role's pinned path
+      ansible.builtin.stat:
+        path: /etc/stealth-vps/users.index.json
+      register: headless_users_index
+
+    - name: Read users.index.json from remote
+      # `lookup('file', ...)` reads from the Ansible CONTROLLER, which on
+      # molecule is the runner container — NOT the test instance where
+      # the role just wrote the file. slurp goes through the connection
+      # plugin so it reads the actual remote file.
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/users.index.json
+      register: headless_users_index_raw
+      when: headless_users_index.stat.exists
+
+    - name: Assert users.index.json schema v1 + default client present
+      ansible.builtin.assert:
+        that:
+          - headless_users_index.stat.exists
+          - idx.version == 1
+          - idx.users | length >= 1
+        fail_msg: "users.index.json missing or empty after a successful converge."
+      vars:
+        idx: "{{ headless_users_index_raw.content | b64decode | from_json }}"

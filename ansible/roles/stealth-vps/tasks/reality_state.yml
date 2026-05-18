@@ -13,9 +13,22 @@
 # the 3X-UI panel (for now). In v0.7.0 headless mode, the path resolves
 # to `/usr/local/bin/xray` instead via a `stealth_vps_xray_bin` var.
 
+- name: Ensure stealth-vps state directory exists
+  # In panel mode panel.yml creates this dir before xray.yml runs; in
+  # headless mode (v0.7+) panel.yml is skipped, so reality_state.yml has
+  # to own its parent. Mode/owner mirror panel.yml's so a panel→headless
+  # cutover doesn't churn perms on the existing dir.
+  ansible.builtin.file:
+    path: "{{ stealth_vps_panel_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0711'
+  tags: [xray, reality]
+
 - name: Probe xray binary used for crypto generation
   ansible.builtin.stat:
-    path: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }}"
+    path: "{{ stealth_vps_xray_keygen_bin | trim }}"
   register: stealth_vps_xray_bin_stat
   tags: [xray, reality]
 
@@ -23,10 +36,11 @@
   ansible.builtin.assert:
     that: stealth_vps_xray_bin_stat.stat.exists
     fail_msg: >-
-      xray binary missing under {{ stealth_vps_panel_dir }}/bin/. In
-      panel mode this comes from the 3X-UI install — run `--tags panel`
-      first. In headless mode (v0.7+) the binary is installed
-      standalone by `reality_xray_standalone.yml`.
+      xray binary missing at {{ stealth_vps_xray_keygen_bin | trim }}.
+      In panel mode the binary comes from the 3X-UI install — run
+      `--tags panel` first. In headless mode (v0.7+, panel_enabled=false)
+      the standalone binary is installed by `reality_xray_binary.yml`
+      which runs first in xray.yml's wrapper.
   tags: [xray, reality]
 
 # --- Reality state (generate once, reuse forever) ------------------------
@@ -37,10 +51,24 @@
   register: stealth_vps_reality_state_stat
   tags: [xray, reality]
 
-- name: Load existing reality state when present
-  ansible.builtin.include_vars:
-    file: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
-    name: stealth_vps_reality_state
+# `slurp` + `set_fact` rather than `include_vars`: include_vars reads
+# from the Ansible CONTROLLER, which on Path B (ansible runs on the VPS)
+# is the same machine as the remote — so it accidentally works. In
+# molecule the controller is the runner container, NOT the test
+# instance, so include_vars can't see /etc/stealth-vps/reality.state.yml
+# even though we just wrote it on the target. slurp goes through the
+# normal Ansible connection plugin, so it works on both.
+
+- name: Read existing reality state from the remote
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/reality.state.yml"
+  register: stealth_vps_reality_state_raw
+  when: stealth_vps_reality_state_stat.stat.exists
+  tags: [xray, reality]
+
+- name: Set reality state fact from slurped YAML
+  ansible.builtin.set_fact:
+    stealth_vps_reality_state: "{{ stealth_vps_reality_state_raw.content | b64decode | from_yaml }}"
   when: stealth_vps_reality_state_stat.stat.exists
   tags: [xray, reality]
 
@@ -49,16 +77,29 @@
   tags: [xray, reality]
   block:
 
-    - name: Generate X25519 keypair via bundled xray
+    - name: Generate X25519 keypair via xray
       ansible.builtin.command:
-        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }} x25519"
+        cmd: "{{ stealth_vps_xray_keygen_bin | trim }} x25519"
       register: stealth_vps_x25519_raw
       changed_when: false
       no_log: true
 
-    - name: Generate client UUID via bundled xray
+    - name: Debug x25519 output structure (key material redacted)
+      # Sanity-check that the x25519 output matches the regex patterns
+      # below. Each base64 value (43+ chars of [A-Za-z0-9_-]) is replaced
+      # with `<REDACTED>` so we keep line prefixes ("PrivateKey:",
+      # "Password:", "PublicKey:") visible in the log but never leak the
+      # private key. Safe to keep in steady-state — first-run only.
+      ansible.builtin.debug:
+        msg: >-
+          {{ stealth_vps_x25519_raw.stdout_lines
+             | map('regex_replace', '[A-Za-z0-9_/+-]{20,}', '<REDACTED>')
+             | list }}
+        verbosity: 0
+
+    - name: Generate client UUID via xray
       ansible.builtin.command:
-        cmd: "{{ stealth_vps_panel_dir }}/bin/xray-linux-{{ stealth_vps_arch }} uuid"
+        cmd: "{{ stealth_vps_xray_keygen_bin | trim }} uuid"
       register: stealth_vps_uuid_raw
       changed_when: false
 
@@ -74,13 +115,20 @@
       # convert template outputs to strings, which then break the
       # 3X-UI POST that expects port:int. ansible-lint's jinja[spacing]
       # rule flags the multi-line form; disabled per-task.
+      #
+      # Regex patterns are defensive across Xray-core release history:
+      #   v1.8.x:     `Private key: ...` / `Public key: ...`
+      #   v1.8.x late: `PrivateKey: ...` / `Password(PublicKey): ...`
+      #   v25.x:      `PrivateKey: ...` / `Password: ...` (also `PublicKey: ...`)
+      # The non-greedy `Password[^:]*` swallows the legacy `(PublicKey)`
+      # suffix; the alternation also matches the newer `PublicKey:` line.
       ansible.builtin.set_fact:
         stealth_vps_reality_state: "{{ {
           'port': (range(stealth_vps_reality_port_min, stealth_vps_reality_port_max + 1) | random),
           'private_key': (stealth_vps_x25519_raw.stdout
-            | regex_search('PrivateKey:\\s+(\\S+)', '\\1') | first),
+            | regex_search('(?:PrivateKey|Private key):\\s+(\\S+)', '\\1') | first),
           'public_key': (stealth_vps_x25519_raw.stdout
-            | regex_search('PublicKey\\):\\s+(\\S+)', '\\1') | first),
+            | regex_search('(?:Password[^:]*|PublicKey|Public key):\\s+(\\S+)', '\\1') | first),
           'client_uuid': (stealth_vps_uuid_raw.stdout | trim),
           'client_email': stealth_vps_reality_default_client_email,
           'short_id': (stealth_vps_shortid_raw.stdout | trim),

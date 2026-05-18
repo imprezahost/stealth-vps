@@ -28,6 +28,16 @@
 # just work via the panel. The bundled xray under /usr/local/x-ui/
 # does the actual protocol work.
 
+- name: Install standalone Xray binary (headless mode — must precede reality_state)
+  # reality_state.yml uses {{ stealth_vps_xray_keygen_bin }} to mint X25519
+  # + UUID. In headless mode that resolves to /usr/local/bin/xray, which
+  # this task installs. In panel mode the binary already exists at
+  # {{ panel_dir }}/bin/xray-linux-{{ arch }} from the 3X-UI install, and
+  # this branch is skipped entirely.
+  ansible.builtin.include_tasks: reality_xray_binary.yml
+  when: not (stealth_vps_panel_enabled | bool)
+  tags: [xray, reality]
+
 - name: Generate Reality state (panel-independent)
   ansible.builtin.include_tasks: reality_state.yml
   tags: [xray, reality]
@@ -35,4 +45,14 @@
 - name: Push Reality inbound to 3X-UI panel
   ansible.builtin.include_tasks: reality_push_3xui.yml
   when: stealth_vps_panel_enabled | bool
+  tags: [xray, reality]
+
+- name: Configure standalone Xray service (headless mode)
+  # Renders /etc/xray/config.json from users.index.json + reality.state.yml,
+  # drops the hardened systemd unit, starts the service. Runs ONLY when
+  # the panel is disabled — `when:` here mirrors the inverse of the
+  # `push_3xui` gate above. Mutex enforced naturally by the pair of
+  # mutually-exclusive `when:` clauses; no explicit assert.
+  ansible.builtin.include_tasks: reality_xray_standalone.yml
+  when: not (stealth_vps_panel_enabled | bool)
   tags: [xray, reality]
