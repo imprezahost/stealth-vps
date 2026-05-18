@@ -28,7 +28,7 @@ pulumi config set --secret hcloudToken "$(cat ~/.hetzner-token)"
 pulumi config set serverName        stealth-vps-fsn1
 pulumi config set serverType        cax11
 pulumi config set location          fsn1
-pulumi config set stealthVersion    v0.6.3
+pulumi config set stealthVersion    v0.6.4
 # Optional LE:
 # pulumi config set domain            vpn.example.com
 # pulumi config set letsencryptEmail  ops@example.com
@@ -84,4 +84,4 @@ For a fleet (one stealth-vps per region), use `pulumi.ComponentResource` to wrap
 
 ## Compatibility note
 
-The Pulumi `hcloud` provider is community-maintained (`@pulumi/hcloud`). At v0.6.3 we pin `^1.21.0`. If the upstream provider's resource API changes (renamed properties, etc.), the example may need a port — same risk as the Terraform `hetznercloud/hcloud` provider pin. We track the major versions in the example's `package.json`.
+The Pulumi `hcloud` provider is community-maintained (`@pulumi/hcloud`). At v0.6.4 we pin `^1.21.0`. If the upstream provider's resource API changes (renamed properties, etc.), the example may need a port — same risk as the Terraform `hetznercloud/hcloud` provider pin. We track the major versions in the example's `package.json`.

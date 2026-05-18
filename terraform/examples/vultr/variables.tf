@@ -49,7 +49,7 @@ variable "ssh_port" {
 variable "stealth_version" {
   description = "stealth-vps release tag to pin the cloud-init bootstrap to."
   type        = string
-  default     = "v0.6.3"
+  default     = "v0.6.4"
 }
 
 variable "domain" {
