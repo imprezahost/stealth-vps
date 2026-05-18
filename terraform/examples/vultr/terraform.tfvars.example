@@ -42,7 +42,7 @@ ssh_key_label       = "stealth-vps"
 ssh_port = 22550
 
 # Release pin
-stealth_version = "v0.7.0"
+stealth_version = "v0.7.1"
 
 # Optional: Let's Encrypt ---------------------------------------------------
 # Point a DNS A record at the ipv4 output BEFORE running apply.

@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.7.1)
-- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.0 ships the CLI-only path; v0.7.1 closes the loop so panel-mode bot users can migrate without losing the chat UX.
+### Planned (v0.7.2)
+- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.0 ships the CLI-only path; v0.7.2 closes the loop so panel-mode bot users can migrate without losing the chat UX.
 - **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl reload xray.service` without running the bot as root.
 
 ### Planned (v1.0)
@@ -19,6 +19,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.7.1] - 2026-05-18
+
+Twenty-third tagged release. Hotfix for two v0.7.0 regressions that block the panel→headless migration runbook on real-world VPSes. Caught by the Tokyo VPS smoke test of v0.7.0; the molecule scenarios passed in CI because the alpine-ansible image uses an older ansible-core that behaves differently from production Debian 12.9.
+
+### Fixed
+
+- **`tasks/reality_xray_standalone.yml` — `xray -test -config %s` missing `-format=json`.** Xray-core decides config format from the file *extension*. ansible-core ≥ 2.16 names the template's temp file `/root/.ansible/tmp/<...>/source` (no extension), so `xray -test` errors with `Failed to get format of <tmp>` and the template task fails. The alpine ansible in CI keeps `.json` on the temp file so molecule passed; Tokyo's Debian 12.9 + ansible-core 2.19 doesn't. Adding `-format=json` makes the validate format-explicit across ansible-core versions.
+- **`tasks/cli_wrapper.yml` — `installer.env` overrode operator env.** The file used bare `KEY=value` lines; `s-vps update` sourced it and UNCONDITIONALLY overwrote any env var the operator had already exported. The migration doc says `sudo STEALTH_PANEL_ENABLED=false s-vps update` for the headless cutover — that command silently fell back to the persisted `=true` and the role kept reinstalling panel mode. Switch to POSIX `: "${VAR:=default}"` (default-if-unset) so the operator's env wins, as documented. Behaviour unchanged when no env is set.
+
+### Verified on the Tokyo test VPS
+
+End-to-end migration from v0.6.4 panel mode → v0.7.1 headless mode walked the runbook in `docs/migration-3xui-to-headless.md` without surprises:
+
+```bash
+sudo s-vps update v0.7.0          # gets the v0.7 CLI (still panel mode)
+sudo s-vps migrate from-3xui      # renames panel.state.yml
+sudo systemctl stop x-ui          # frees Reality port
+sudo STEALTH_PANEL_ENABLED=false s-vps update v0.7.1   # converges headless
+sudo s-vps diagnose
+sudo s-vps user list
+sudo s-vps user add bob
+```
+
+Standalone Xray + per-user Hysteria2 came up clean. Reality handshake validated; per-user Hysteria2 auth verified by adding `bob` and confirming his password appears in the rendered `auth.userpass` map and that he can authenticate independently of the seed default client.
 
 ## [0.7.0] - 2026-05-18
 
