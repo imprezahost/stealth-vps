@@ -1,10 +1,10 @@
 # stealth-vps
 
-> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x / v0.7 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.7.2),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
+> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x / v0.7 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.7.3),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
 
 ---
 
-> **状态: v0.7.2(alpha)。** 当前版本继续包含 v0.5.x / v0.6.x 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、Terraform/Pulumi IaC、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点)。**v0.7 新增无面板模式**:`panel_enabled=false` 时角色安装独立的 Xray-core systemd 单元(`/usr/local/bin/xray`,带 NoNewPrivileges / ProtectSystem=strict / MemoryDenyWriteExecute 等加固),Hysteria2 切换到每用户 `auth.userpass` 模式(吊销单个用户不会影响其他人),`stealth_vps.reloader` Python 模块从 `users.index.json` 重新渲染两份配置并在每次变更时 `systemctl restart xray` + `systemctl reload hysteria-server`。新增 `s-vps user add/revoke/list/show`、`s-vps reload`、`s-vps migrate from-3xui` 等 CLI 动作。v0.7.1/v0.7.2 修复了东京 VPS 烟雾测试中暴露的三个 v0.7.0 回归(xray validate `-format=json`、installer.env 环境变量覆盖、xray 用 `restart` 而非 `reload` 因为 xray-core 没有 SIGHUP handler)。Telegram 机器人对 HeadlessBackend 的接入排期到 v0.7.3。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/headless-mode.md](docs/headless-mode.md)。
+> **状态: v0.7.3(alpha)。** 当前版本继续包含 v0.5.x / v0.6.x 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、Terraform/Pulumi IaC、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点)。**v0.7 新增无面板模式**(已在东京 VPS 端到端验证):`panel_enabled=false` 时角色安装独立的 Xray-core systemd 单元(带 NoNewPrivileges / ProtectSystem=strict / MemoryDenyWriteExecute 加固),Hysteria2 切换到每用户 `auth.userpass` 模式,`stealth_vps.reloader` Python 模块从 `users.index.json` 重新渲染两份配置并在每次变更时重启两个服务(xray-core 和 Hysteria 2 目前都不支持热重载)。新增 `s-vps user add/revoke/list/show`、`s-vps reload`、`s-vps migrate from-3xui` 等 CLI 动作。v0.7.1/v0.7.2/v0.7.3 修复了东京 VPS 烟雾测试中暴露的四个 v0.7.0 回归(xray validate `-format=json`、installer.env 环境变量覆盖、xray + hysteria 都需要 `restart` 而非 `reload`)。Telegram 机器人对 HeadlessBackend 的接入排期到 v0.7.4。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/headless-mode.md](docs/headless-mode.md)。
 
 一个可复用的工具集,用于在受限网络环境中搭建注重隐私的 VPS。在 3X-UI 面板背后部署 VLESS-Reality + Hysteria2,带合理的安全加固、真正可用的 fail2ban 配置,以及内置的可观测性方案。
 
@@ -51,14 +51,14 @@
 适合一台刚开通、只想跑起来的 VPS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.2/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.3/scripts/install.sh | bash
 ```
 
 这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.6.4 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.2/scripts/install.sh \
-  | STEALTH_VERSION=v0.7.2 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.3/scripts/install.sh \
+  | STEALTH_VERSION=v0.7.3 bash
 ```
 
 ### 2. Ansible(推荐用于可重复部署)
@@ -81,9 +81,9 @@ Provider-agnostic —— 从类型化的 HCL 输入(SSH 公钥、域名、版本
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.7.2"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.7.3"
 
-  stealth_version = "v0.7.2"
+  stealth_version = "v0.7.3"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"

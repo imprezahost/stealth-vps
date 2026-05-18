@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.7.3)
-- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.x ships the CLI-only path; v0.7.3 closes the loop so panel-mode bot users can migrate without losing the chat UX.
-- **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl restart xray.service` + `systemctl reload hysteria-server.service` without running the bot as root.
+### Planned (v0.7.4)
+- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.x ships the CLI-only path; v0.7.4 closes the loop so panel-mode bot users can migrate without losing the chat UX.
+- **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl restart xray.service` + `systemctl restart hysteria-server.service` without running the bot as root.
 
 ### Planned (v1.0)
 - JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
@@ -19,6 +19,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.7.3] - 2026-05-18
+
+Twenty-fifth tagged release. Fourth (and final) v0.7 hotfix: closes the symmetric `reload`/`restart` bug for Hysteria 2 that v0.7.2 missed by assuming the upstream daemon supports SIGHUP-as-hot-reload. It doesn't — apernet/hysteria#717 tracks the missing feature. With this fix, the documented migration runbook + `s-vps user add` / `revoke` cycle works end-to-end on Tokyo VPS without any operator intervention.
+
+### Fixed
+
+- **`stealth_vps/reloader.py` — Hysteria 2 also gets `systemctl restart`, not `reload`.** Hysteria 2's SIGHUP handler routes into the same `received signal, shutting down gracefully` path as SIGTERM/SIGINT. v0.7.2 sent `systemctl reload hysteria-server.service` after every user mutation, which cleanly stopped the daemon and left the service inactive. Switch the Reloader to `mode="restart"` for both services. The `mode` kwarg on `reload_service` stays so a future Hysteria release with real hot reload (when apernet/hysteria#717 lands) is a one-line update.
+- **`templates/hysteria-server.service.j2` — drop `ExecReload=/bin/kill -HUP $MAINPID`.** v0.7.2 added it to make the broken `systemctl reload` call land somewhere; since the actual semantics of SIGHUP for Hysteria 2 are "stop the daemon", the line was a footgun. Removed.
+- Updated reloader pytest case that asserted on the hysteria reload call to expect `restart` instead. 171 cases pass (same as v0.7.2).
+
+### Tested on the Tokyo test VPS
+
+Full panel→headless cutover walked the runbook from `docs/migration-3xui-to-headless.md` end-to-end:
+
+```bash
+sudo s-vps update v0.7.3            # gets the v0.7 CLI on disk
+sudo s-vps migrate from-3xui        # renames panel.state.yml + stops x-ui
+sudo STEALTH_PANEL_ENABLED=false s-vps update
+sudo s-vps user add bob             # ✓ added user 'bob'; printed VLESS + Hysteria2 URIs
+sudo s-vps user revoke bob          # ✓ revoked
+sudo s-vps user list --include-disabled
+# bob shows STATUS=REVOKED, stealth-vps-default stays enabled
+```
+
+After the `user add`, both `xray.service` and `hysteria-server.service` stay `active`; both configs list bob; the operator-visible URIs were emitted. After `user revoke`, bob is filtered out of both configs; both services still active.
+
+Combined with v0.7.0, v0.7.1, v0.7.2, this concludes the v0.7 ship sequence. Operators on a working v0.7.x install upgrade to v0.7.3 via `s-vps update v0.7.3`; fresh installs should pin v0.7.3 directly.
 
 ## [0.7.2] - 2026-05-18
 
