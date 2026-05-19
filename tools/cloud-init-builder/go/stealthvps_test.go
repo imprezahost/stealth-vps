@@ -15,7 +15,7 @@ func TestMinimumRequiredArgs(t *testing.T) {
 	if !strings.HasPrefix(out, "#cloud-config") {
 		t.Errorf("output should start with #cloud-config, got: %q", out[:30])
 	}
-	if !strings.Contains(out, "stealth-vps v0.7.4 cloud-init bootstrap finished") {
+	if !strings.Contains(out, "stealth-vps v0.8.0 cloud-init bootstrap finished") {
 		t.Errorf("output should mention the version, got: %s", out)
 	}
 }
@@ -23,7 +23,7 @@ func TestMinimumRequiredArgs(t *testing.T) {
 func TestInvalidStealthVersion(t *testing.T) {
 	_, err := BuildCloudInit(Args{
 		SSHPublicKey:   "ssh-ed25519 AAAA test@example.com",
-		StealthVersion: "0.7.4", // missing leading v
+		StealthVersion: "0.8.0", // missing leading v
 	})
 	if err == nil || !strings.Contains(err.Error(), "SemVer tag") {
 		t.Errorf("expected SemVer validation error, got: %v", err)
@@ -116,8 +116,8 @@ func TestBuildAllSplitOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.StealthVersion != "v0.7.4" {
-		t.Errorf("expected v0.7.4, got %q", result.StealthVersion)
+	if result.StealthVersion != "v0.8.0" {
+		t.Errorf("expected v0.8.0, got %q", result.StealthVersion)
 	}
 	if strings.HasPrefix(result.ExtraVarsYAML, "#cloud-config") {
 		t.Error("ExtraVarsYAML should not include the cloud-config header")

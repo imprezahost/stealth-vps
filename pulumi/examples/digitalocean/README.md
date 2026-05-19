@@ -28,7 +28,7 @@ pulumi up
 | `size` | `s-1vcpu-1gb` | `s-1vcpu-1gb` (~$6/mo) up to whatever |
 | `image` | `debian-12-x64` | Debian 12 x64 only — DO doesn't have arm64 droplets |
 | `sshPort` | `22550` | |
-| `stealthVersion` | `v0.7.4` | |
+| `stealthVersion` | `v0.8.0` | |
 | `domain` | `null` | Enables Let's Encrypt when set |
 | `letsencryptEmail` | `""` | Required when `domain` is set |
 | `realityDest` | `www.microsoft.com:443` | |

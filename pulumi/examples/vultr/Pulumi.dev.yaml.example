@@ -10,7 +10,7 @@ config:
   stealth-vps-vultr:osId: 477                              # Debian 12 x64
   stealth-vps-vultr:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
   stealth-vps-vultr:sshPort: 22550
-  stealth-vps-vultr:stealthVersion: v0.7.4
+  stealth-vps-vultr:stealthVersion: v0.8.0
   # Optional LE:
   # stealth-vps-vultr:domain: vpn.example.com
   # stealth-vps-vultr:letsencryptEmail: ops@example.com

@@ -29,7 +29,7 @@ def test_minimum_required_args() -> None:
         StealthVpsArgs(ssh_public_key="ssh-ed25519 AAAA test@example.com")
     )
     assert out.startswith("#cloud-config")
-    assert "stealth-vps v0.7.4 cloud-init bootstrap finished" in out
+    assert "stealth-vps v0.8.0 cloud-init bootstrap finished" in out
 
 
 def test_invalid_stealth_version_rejected() -> None:
@@ -37,7 +37,7 @@ def test_invalid_stealth_version_rejected() -> None:
         build_cloud_init(
             StealthVpsArgs(
                 ssh_public_key="ssh-ed25519 AAAA test@example.com",
-                stealth_version="0.7.4",  # missing the leading `v`
+                stealth_version="0.8.0",  # missing the leading `v`
             )
         )
 
@@ -118,7 +118,7 @@ def test_build_all_returns_split_outputs() -> None:
         StealthVpsArgs(ssh_public_key="ssh-ed25519 AAAA test@example.com")
     )
     assert set(result.keys()) == {"cloud_init", "extra_vars_yaml", "stealth_version"}
-    assert result["stealth_version"] == "v0.7.4"
+    assert result["stealth_version"] == "v0.8.0"
     # extra_vars_yaml is a YAML doc, no #cloud-config header.
     assert not result["extra_vars_yaml"].startswith("#cloud-config")
     assert "stealth_vps_reality_dest" in result["extra_vars_yaml"]

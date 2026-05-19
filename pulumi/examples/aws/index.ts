@@ -38,7 +38,7 @@ const serverName = config.get("serverName") ?? "stealth-vps";
 const sshPublicKeyPath =
   config.get("sshPublicKeyPath") ?? `${process.env.HOME}/.ssh/id_ed25519.pub`;
 const sshPort = config.getNumber("sshPort") ?? 22550;
-const stealthVersion = config.get("stealthVersion") ?? "v0.7.4";
+const stealthVersion = config.get("stealthVersion") ?? "v0.8.0";
 
 const domain = config.get("domain") ?? null;
 const letsencryptEmail = config.get("letsencryptEmail") ?? "";

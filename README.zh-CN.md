@@ -1,10 +1,10 @@
 # stealth-vps
 
-> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x / v0.7 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.7.4),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
+> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x / v0.7 / v0.8 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.8.0),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
 
 ---
 
-> **状态: v0.7.4(alpha)。** 当前版本继续包含 v0.5.x / v0.6.x 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、Terraform/Pulumi IaC、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点)。**v0.7 新增无面板模式**(已在东京 VPS 端到端验证,包含 Telegram 机器人):`panel_enabled=false` 时角色安装独立的 Xray-core systemd 单元,Hysteria2 切换到每用户 `auth.userpass` 模式,`stealth_vps.reloader` Python 模块从 `users.index.json` 重新渲染两份配置并在每次变更时重启两个服务。新增 `s-vps user add/revoke/list/show`、`s-vps reload`、`s-vps migrate from-3xui` 等 CLI 动作。**v0.7.4 接入了机器人的 HeadlessBackend** 派发逻辑(同样基于 `panel.state.yml` 是否存在),并通过细粒度的 `/etc/sudoers.d/` 规则让运行在 `stealth-vps-bot` 用户下的机器人可以触发服务重启 —— 无需以 root 运行机器人。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/headless-mode.md](docs/headless-mode.md)。
+> **状态: v0.8.0(alpha)。** 当前版本继续包含 v0.5.x / v0.6.x / v0.7 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板或无面板模式、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点)。**v0.8 新增运维工具集 + IaC 三件套**:`s-vps user purge LABEL`(硬删除,幂等)+ `s-vps user rotate LABEL`(重新颁发凭据,保留 label + created_at 审计锚点)。Pulumi 新增 AWS / DigitalOcean / Vultr / Proxmox VE 四个示例,与 Terraform 示例树完全对应。**独立的 Python 和 Go cloud-init builder**(`tools/cloud-init-builder/`)— 纯标准库,与 TypeScript 源代码字节级一致,可嵌入任意 IaC 工具链。**工具链共有 213 个自动化测试**(194 pytest + 9 Python builder + 10 Go builder)。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/headless-mode.md](docs/headless-mode.md)。
 
 一个可复用的工具集,用于在受限网络环境中搭建注重隐私的 VPS。在 3X-UI 面板背后部署 VLESS-Reality + Hysteria2,带合理的安全加固、真正可用的 fail2ban 配置,以及内置的可观测性方案。
 
@@ -51,14 +51,14 @@
 适合一台刚开通、只想跑起来的 VPS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.4/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh | bash
 ```
 
 这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.6.4 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.4/scripts/install.sh \
-  | STEALTH_VERSION=v0.7.4 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh \
+  | STEALTH_VERSION=v0.8.0 bash
 ```
 
 ### 2. Ansible(推荐用于可重复部署)
@@ -81,9 +81,9 @@ Provider-agnostic —— 从类型化的 HCL 输入(SSH 公钥、域名、版本
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.7.4"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.8.0"
 
-  stealth_version = "v0.7.4"
+  stealth_version = "v0.8.0"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"

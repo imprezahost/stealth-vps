@@ -16,7 +16,7 @@ cloud_init = build_cloud_init(StealthVpsArgs(
     ssh_public_key=key,
     domain="vpn.example.com",
     letsencrypt_email="ops@example.com",
-    stealth_version="v0.7.4",
+    stealth_version="v0.8.0",
 ))
 ```
 
@@ -37,7 +37,7 @@ cd tools/cloud-init-builder/python
 pip install -e .
 ```
 
-Or via `pip install -e git+https://github.com/imprezahost/stealth-vps.git@v0.7.4#egg=stealth-vps-cloudinit&subdirectory=tools/cloud-init-builder/python`.
+Or via `pip install -e git+https://github.com/imprezahost/stealth-vps.git@v0.8.0#egg=stealth-vps-cloudinit&subdirectory=tools/cloud-init-builder/python`.
 
 PyPI publishing comes with v0.9.0.
 
@@ -54,7 +54,7 @@ Tests assert byte-parity against fixed-input fixtures. If the TS source changes,
 ```bash
 cd pulumi/stealth-vps
 npm run build
-node -e "console.log(require('./bin').buildCloudInit({sshPublicKey:'ssh-ed25519 AAAA test@example.com',stealthVersion:'v0.7.4'}))" \
+node -e "console.log(require('./bin').buildCloudInit({sshPublicKey:'ssh-ed25519 AAAA test@example.com',stealthVersion:'v0.8.0'}))" \
   > ../../tools/cloud-init-builder/python/tests/fixtures/default.expected
 ```
 

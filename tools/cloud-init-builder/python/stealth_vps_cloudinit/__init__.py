@@ -17,7 +17,7 @@ import dataclasses
 import re
 from typing import Any, Mapping
 
-__version__ = "0.7.4"
+__version__ = "0.8.0"
 __all__ = [
     "StealthVpsArgs",
     "build_cloud_init",
@@ -26,7 +26,7 @@ __all__ = [
 
 
 _DEFAULTS = {
-    "stealth_version": "v0.7.4",
+    "stealth_version": "v0.8.0",
     "ssh_port": 22550,
     "reality_dest": "www.microsoft.com:443",
     "reality_servernames": ("www.microsoft.com",),
@@ -49,7 +49,7 @@ class StealthVpsArgs:
     """
 
     ssh_public_key: str
-    stealth_version: str = "v0.7.4"
+    stealth_version: str = "v0.8.0"
     ssh_port: int = 22550
     domain: str | None = None
     letsencrypt_email: str = ""
@@ -63,7 +63,7 @@ class StealthVpsArgs:
 def _validate(args: StealthVpsArgs) -> None:
     if not _SEMVER_TAG_RE.match(args.stealth_version):
         raise ValueError(
-            f"stealth_version must be a SemVer tag like 'v0.7.4' or 'v0.7.4-rc.1', "
+            f"stealth_version must be a SemVer tag like 'v0.8.0' or 'v0.8.0-rc.1', "
             f"got: {args.stealth_version!r}"
         )
     if not args.ssh_public_key or not _SSH_KEY_PREFIX_RE.match(args.ssh_public_key):

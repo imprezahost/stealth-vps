@@ -53,7 +53,7 @@ pulumi up
 | `bridge` | `vmbr0` | Network bridge |
 | `ipv4Cidr` | `dhcp` | Or `"10.0.0.50/24"` with `ipv4Gateway` |
 | `sshPort` | `22550` | |
-| `stealthVersion` | `v0.7.4` | |
+| `stealthVersion` | `v0.8.0` | |
 
 ## After `pulumi up`
 

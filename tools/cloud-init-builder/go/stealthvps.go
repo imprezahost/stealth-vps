@@ -17,7 +17,7 @@ import (
 )
 
 // Version is the stealth-vps release this builder defaults to.
-const Version = "v0.7.4"
+const Version = "v0.8.0"
 
 // Args mirrors the TS StealthVpsArgs interface 1-to-1, with Go-idiomatic
 // field names. SSHPublicKey is the only required field; everything else
@@ -74,7 +74,7 @@ func applyDefaults(a Args) Args {
 
 func validate(a Args) error {
 	if !semverTagRE.MatchString(a.StealthVersion) {
-		return fmt.Errorf("StealthVersion must be a SemVer tag like 'v0.7.4' or 'v0.7.4-rc.1', got: %q", a.StealthVersion)
+		return fmt.Errorf("StealthVersion must be a SemVer tag like 'v0.8.0' or 'v0.8.0-rc.1', got: %q", a.StealthVersion)
 	}
 	if a.SSHPublicKey == "" || !sshKeyPrefixRE.MatchString(a.SSHPublicKey) {
 		return fmt.Errorf("SSHPublicKey must start with a supported key type (ssh-ed25519, ssh-rsa, ecdsa-sha2-*)")

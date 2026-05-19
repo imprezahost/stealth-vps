@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stealth-vps-cloudinit"
-version = "0.7.4"
+version = "0.8.0"
 description = "Python port of the stealth-vps cloud-init builder (mirror of pulumi/stealth-vps/src/index.ts)"
 readme = "README.md"
 license = { text = "MIT" }
