@@ -182,7 +182,7 @@
     cmd: "{{ stealth_vps_panel_dir }}/x-ui setting -getCert true"
   register: stealth_vps_panel_current_cert
   changed_when: false
-  when: stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length > 0
   tags: [panel, 3xui]
 
 - name: Bind the Let's Encrypt cert to the 3X-UI panel (HTTPS)
@@ -202,7 +202,7 @@
   when:
     - stealth_vps_domain
     - (stealth_vps_tls_dir + '/fullchain.pem')
-        not in (stealth_vps_panel_current_cert.stdout | default(''))
+        not in (stealth_vps_panel_current_cert.stdout | default('', true))
   changed_when: true
   register: stealth_vps_panel_cert_apply
   tags: [panel, 3xui]

@@ -126,7 +126,7 @@ go-test:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-molecule:
+.molecule-base: &molecule-base
   stage: test
   # python:3.12-slim (Debian-based) instead of docker:24 (Alpine).
   # Alpine's musl libc + pip ship a known pyexpat ABI mismatch
@@ -140,51 +140,6 @@ molecule:
   variables:
     DOCKER_TLS_CERTDIR: ""
     DOCKER_HOST: tcp://docker:2375
-  before_script:
-    # Install the Docker CLI from Docker's own apt repo. `docker.io`
-    # from Debian also works but `--no-install-recommends` strips its
-    # /usr/bin/docker symlink in some image-vintage combinations; using
-    # `docker-ce-cli` is the upstream-supported path.
-    - apt-get update -qq
-    - apt-get install -yqq --no-install-recommends git ca-certificates curl gnupg
-    - install -m 0755 -d /etc/apt/keyrings
-    - curl -fsSL https://download.docker.com/linux/debian/gpg
-        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    - chmod a+r /etc/apt/keyrings/docker.gpg
-    - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg]
-        https://download.docker.com/linux/debian bookworm stable"
-        > /etc/apt/sources.list.d/docker.list
-    - apt-get update -qq
-    - apt-get install -yqq --no-install-recommends docker-ce-cli
-    - which docker && docker --version
-    - python -m pip install --quiet --upgrade pip
-    - pip install --quiet
-        "ansible-core>=2.14,<2.18" "molecule>=24"
-        "molecule-plugins[docker]" "docker"
-    # molecule-plugins/docker/playbooks/destroy.yml uses
-    # `community.docker.docker_container` — install it alongside the
-    # project's own collections.
-    - ansible-galaxy collection install -r ansible/requirements.yml
-    - ansible-galaxy collection install community.docker
-    # Molecule shells out to `ansible-playbook --syntax-check site.yml`
-    # which needs the repo's roles_path to find `stealth-hardening`.
-    # Same fix as the ansible-lint job — point Ansible at our config.
-    - export ANSIBLE_CONFIG=$CI_PROJECT_DIR/ansible.cfg
-    - export ANSIBLE_ROLES_PATH=$CI_PROJECT_DIR/ansible/roles
-  script:
-    - export ANSIBLE_CONFIG=$CI_PROJECT_DIR/ansible.cfg
-    - export ANSIBLE_ROLES_PATH=$CI_PROJECT_DIR/ansible/roles
-    # molecule discovers scenarios via `./molecule/<name>/molecule.yml`
-    # relative to CWD — so we cd into `tests/` (parent of `molecule/`),
-    # not into the scenario dir itself. Older molecule (v6) accepted
-    # being run from inside a scenario; v24+ removed that.
-    - cd tests
-    # Run both scenarios — default (panel mode) and headless (v0.7
-    # panel_enabled=false). `molecule test` per scenario cleans up
-    # after itself; running them sequentially in one job keeps total
-    # DinD overhead low.
-    - molecule test --scenario-name default
-    - molecule test --scenario-name headless
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -192,6 +147,71 @@ molecule:
   # python:3.12-slim + docker-ce-cli + DinD stack). Real-VPS
   # validation (docs/development.md path B) still lives — molecule
   # catches container-tolerant regressions, the VPS catches the rest.
+
+.molecule-pre: &molecule-pre
+  # Install the Docker CLI from Docker's own apt repo. `docker.io`
+  # from Debian also works but `--no-install-recommends` strips its
+  # /usr/bin/docker symlink in some image-vintage combinations; using
+  # `docker-ce-cli` is the upstream-supported path.
+  - apt-get update -qq
+  - apt-get install -yqq --no-install-recommends git ca-certificates curl gnupg
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/debian/gpg
+      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  - chmod a+r /etc/apt/keyrings/docker.gpg
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg]
+      https://download.docker.com/linux/debian bookworm stable"
+      > /etc/apt/sources.list.d/docker.list
+  - apt-get update -qq
+  - apt-get install -yqq --no-install-recommends docker-ce-cli
+  - which docker && docker --version
+  - python -m pip install --quiet --upgrade pip
+
+.molecule-run: &molecule-run
+  - ansible-galaxy collection install -r ansible/requirements.yml
+  - ansible-galaxy collection install community.docker
+  - export ANSIBLE_CONFIG=$CI_PROJECT_DIR/ansible.cfg
+  - export ANSIBLE_ROLES_PATH=$CI_PROJECT_DIR/ansible/roles
+  # molecule discovers scenarios via `./molecule/<name>/molecule.yml`
+  # relative to CWD — so we cd into `tests/` (parent of `molecule/`),
+  # not into the scenario dir itself. Older molecule (v6) accepted
+  # being run from inside a scenario; v24+ removed that.
+  - cd tests
+  # Run both scenarios — default (panel mode) and headless (v0.7
+  # panel_enabled=false). `molecule test` per scenario cleans up
+  # after itself; running them sequentially in one job keeps total
+  # DinD overhead low.
+  - molecule test --scenario-name default
+  - molecule test --scenario-name headless
+
+molecule:
+  # Pinned at ansible-core 2.14-2.17 — covers the Debian 11 / Ubuntu
+  # 20.04+22.04 LTS install base. ansible-core 2.18+ goes into the
+  # parallel `molecule-newer` job below.
+  <<: *molecule-base
+  before_script:
+    - *molecule-pre
+    - pip install --quiet
+        "ansible-core>=2.14,<2.18" "molecule>=24"
+        "molecule-plugins[docker]" "docker"
+  script: *molecule-run
+
+molecule-newer:
+  # Pinned at ansible-core 2.19+ — covers Debian 12.9 / Ubuntu 24.04+,
+  # which is what the Tokyo VPS smoke runs on. Added in v0.8.1 after
+  # the v0.7 hotfix train (xray validate `-format=json`, installer.env
+  # POSIX defaults, sudoers/systemctl restart vs reload) kept slipping
+  # past the `>=2.14,<2.18` molecule job: that pin's template-tmp-file
+  # naming kept `.json` extensions, hiding the bug class. Pin at 2.19
+  # exclusive of 3.0 so an upstream major release doesn't silently
+  # change the contract.
+  <<: *molecule-base
+  before_script:
+    - *molecule-pre
+    - pip install --quiet
+        "ansible-core>=2.19,<3.0" "molecule>=24"
+        "molecule-plugins[docker]" "docker"
+  script: *molecule-run
 
 # ---------------------------------------------------------------------------
 # PROBE — probe-resistance suite against a live staging deploy

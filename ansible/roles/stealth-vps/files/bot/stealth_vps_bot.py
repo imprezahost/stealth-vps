@@ -42,16 +42,19 @@ from typing import Any, Callable
 sys.path.insert(0, "/usr/local/lib")
 
 from stealth_vps import (  # noqa: E402
-    Reloader,
-    ThreeXUIBackend,
-    ThreeXUIClient,
     UserBackend,
-    build_hysteria2_uri,
-    build_vless_uri,
     state,
     write_subscription_file,
 )
-from stealth_vps.backends_headless import HeadlessBackend  # noqa: E402
+from stealth_vps.bot_core import (  # noqa: E402
+    BotConfig,
+    UriRenderConfig,
+    backend_is_headless,
+    build_uris_for_user,
+    collect_seed_hysteria_password,
+    make_backend,
+    sub_url_for,
+)
 from stealth_vps.subscription import remove_subscription_file  # noqa: E402
 
 from telegram import Update  # noqa: E402
@@ -192,90 +195,60 @@ def admin_only(handler: Callable) -> Callable:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers — backend dispatch + URI rendering moved to stealth_vps.bot_core
+# in v0.8.1 so they can be pytest'd without a python-telegram-bot install.
+# The bot module is now a thin async dispatcher; all the testable logic
+# lives in bot_core.
 # ---------------------------------------------------------------------------
-def _build_headless_reloader() -> Reloader:
-    """Reconstruct a Reloader from the kwargs the role's
-    `headless_reload.yml` writes to /etc/stealth-vps/reloader-args.json
-    on every converge. Mirrors `stealth_vps.cli._build_reloader` exactly
-    — same JSON file, same fallbacks — so a bot-triggered `/user add`
-    produces byte-identical xray + hysteria configs to what the CLI
-    would write. `use_sudo=USE_SUDO` because the bot runs as the
-    `stealth-vps-bot` system user and needs the sudoers drop-in's
-    NOPASSWD rule to `systemctl restart` the services.
-    """
-    try:
-        with open(RELOADER_ARGS_PATH, "r", encoding="utf-8") as f:
-            args: dict[str, Any] = json.load(f)
-    except FileNotFoundError:
-        log.warning(
-            "no reloader-args.json at %s — falling back to package defaults. "
-            "Run `s-vps update` so ansible regenerates the file.",
-            RELOADER_ARGS_PATH,
-        )
-        args = {}
-    # The role serialises servernames as a list; Reloader's kwarg is
-    # iterable so either form works, but accept the CSV string form too
-    # in case an operator hand-edits the JSON.
-    if isinstance(args.get("reality_servernames"), str):
-        args["reality_servernames"] = [
-            s.strip() for s in args["reality_servernames"].split(",") if s.strip()
-        ]
-    args["use_sudo"] = USE_SUDO
-    return Reloader(**args)
 
 
-def _make_backend() -> UserBackend:
-    """Return the right `UserBackend` for the bot to talk through.
-
-    Selection rule (same as `stealth_vps.select_backend`):
-      * panel.state.yml on disk → panel mode → ThreeXUIBackend.
-      * panel.state.yml absent  → headless mode → HeadlessBackend +
-        Reloader (which re-renders Xray/Hysteria configs from
-        users.index.json and SIGHUPs / restarts the services on
-        every add/revoke).
-
-    The `PANEL_ENABLED` env var is the OPERATOR'S INTENT (set by
-    installer.env); `panel.state.yml`'s presence is the ON-DISK FACT.
-    We dispatch on the fact, not the intent, so a half-finished
-    migration (panel disabled in the env but state file still around)
-    still talks to the running panel until ansible converges away
-    from it.
-    """
-    if os.path.exists(PANEL_STATE_PATH):
-        if not PANEL_URL or not PANEL_USERNAME or not PANEL_PASSWORD:
-            raise RuntimeError(
-                "panel.state.yml present but bot.env is missing panel credentials. "
-                "Re-run `s-vps update` to regenerate /etc/stealth-vps/bot.env."
-            )
-        client = ThreeXUIClient(
-            base_url=PANEL_URL,
-            username=PANEL_USERNAME,
-            password=PANEL_PASSWORD,
-            verify_tls=False,  # 127.0.0.1 loopback, self-signed
-        )
-        return ThreeXUIBackend(
-            client,
-            reality_remark=REALITY_REMARK,
-            reality_flow=REALITY_FLOW,
-            users_index_path=USERS_INDEX,
-        )
-    # Headless mode: every add/revoke goes through HeadlessBackend +
-    # Reloader. add() generates a fresh per-user Hysteria2 password
-    # (so revoking one user doesn't break the others), so unlike
-    # the panel-mode path we DON'T copy the shared password from the
-    # seed default client.
-    return HeadlessBackend(
+def _bot_config() -> BotConfig:
+    """Pack the env-fed module constants into a BotConfig the
+    `stealth_vps.bot_core` dispatchers consume."""
+    return BotConfig(
         users_index_path=USERS_INDEX,
-        reloader=_build_headless_reloader(),
+        panel_state_path=PANEL_STATE_PATH,
+        reloader_args_path=RELOADER_ARGS_PATH,
+        panel_url=PANEL_URL,
+        panel_username=PANEL_USERNAME,
+        panel_password=PANEL_PASSWORD,
+        reality_remark=REALITY_REMARK,
+        reality_flow=REALITY_FLOW,
+        use_sudo=USE_SUDO,
     )
 
 
+def _uri_render_config() -> UriRenderConfig:
+    """Pack URI-builder inputs from module env vars."""
+    return UriRenderConfig(
+        public_host=PUBLIC_HOST,
+        reality_port=REALITY_PORT,
+        reality_sni=REALITY_SNI,
+        reality_pubkey=REALITY_PUBKEY,
+        reality_short_id=REALITY_SHORTID,
+        reality_fingerprint=REALITY_FINGERPRINT,
+        reality_flow=REALITY_FLOW,
+        reality_remark=REALITY_REMARK,
+        hysteria_enabled=HYSTERIA_ENABLED,
+        hysteria_port=HYSTERIA_PORT,
+        hysteria_sni=HYSTERIA_SNI,
+        hysteria_obfs_type=HYSTERIA_OBFS_TYPE,
+        hysteria_obfs_password=HYSTERIA_OBFS_PASSWORD,
+        hysteria_remark=HYSTERIA_REMARK,
+        hysteria_insecure=HYSTERIA_INSECURE,
+        hysteria_port_hop_min=int(HYSTERIA_HOP_MIN) if HYSTERIA_HOP_MIN else None,
+        hysteria_port_hop_max=int(HYSTERIA_HOP_MAX) if HYSTERIA_HOP_MAX else None,
+    )
+
+
+def _make_backend() -> UserBackend:
+    """Thin wrapper around `bot_core.make_backend` — kept for the
+    legacy call sites in the async handlers below."""
+    return make_backend(_bot_config())
+
+
 def _backend_is_headless(backend: UserBackend) -> bool:
-    """True when the active backend is HeadlessBackend. Used by the
-    /user add handler to skip the panel-mode shared-password copy.
-    """
-    return isinstance(backend, HeadlessBackend)
+    return backend_is_headless(backend)
 
 
 def _systemctl_is_active(unit: str) -> str:
@@ -299,40 +272,13 @@ def _systemctl_unit_exists(unit: str) -> bool:
 
 
 def _build_uris_for_user(rec: dict[str, Any]) -> list[str]:
-    """Return the list of connection URIs for a user record."""
-    uris = [build_vless_uri(
-        uuid=rec["reality_uuid"],
-        host=PUBLIC_HOST,
-        port=REALITY_PORT,
-        sni=REALITY_SNI,
-        public_key=REALITY_PUBKEY,
-        short_id=REALITY_SHORTID,
-        fingerprint=REALITY_FINGERPRINT,
-        flow=REALITY_FLOW,
-        remark=REALITY_REMARK,
-    )]
-    if HYSTERIA_ENABLED and rec.get("hysteria_password"):
-        port_hop = None
-        if HYSTERIA_HOP_MIN and HYSTERIA_HOP_MAX:
-            port_hop = (int(HYSTERIA_HOP_MIN), int(HYSTERIA_HOP_MAX))
-        uris.append(build_hysteria2_uri(
-            password=rec["hysteria_password"],
-            host=PUBLIC_HOST,
-            port=HYSTERIA_PORT,
-            sni=HYSTERIA_SNI,
-            obfs_type=HYSTERIA_OBFS_TYPE,
-            obfs_password=HYSTERIA_OBFS_PASSWORD,
-            port_hop_range=port_hop,
-            insecure=HYSTERIA_INSECURE,
-            remark=HYSTERIA_REMARK,
-        ))
-    return uris
+    """Thin wrapper around `bot_core.build_uris_for_user` — kept for the
+    legacy call sites in the async handlers below."""
+    return build_uris_for_user(rec, _uri_render_config())
 
 
 def _sub_url_for(token: str) -> str:
-    if not SUBSCRIPTION_PUBLIC_URL:
-        return ""
-    return SUBSCRIPTION_PUBLIC_URL.rstrip("/") + "/" + token
+    return sub_url_for(token, SUBSCRIPTION_PUBLIC_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -480,23 +426,17 @@ async def _user_add(update: Update, label: str):
     # Hysteria2 password sourcing differs by backend:
     #   - Panel mode (ThreeXUIBackend): 3X-UI's data model has one
     #     shared Hysteria password across all clients on the inbound,
-    #     so we copy it from the existing default-client record.
-    #     Without that, the new client's URI would reference a password
-    #     the running Hysteria daemon doesn't accept.
+    #     so we copy it from the existing default-client record via
+    #     `collect_seed_hysteria_password`. Without that, the new
+    #     client's URI would reference a password the running Hysteria
+    #     daemon doesn't accept.
     #   - Headless mode (HeadlessBackend): per-user auth.userpass is
-    #     the whole point — let `.add()` mint a fresh random password
-    #     and write it into both users.index.json and the rendered
-    #     /etc/hysteria/config.yaml on the same reload cycle.
-    hysteria_pw = ""
-    if not _backend_is_headless(backend):
-        try:
-            idx = state.load_users_index(USERS_INDEX)
-            for _label, rec in idx["users"].items():
-                if rec.get("hysteria_password"):
-                    hysteria_pw = rec["hysteria_password"]
-                    break
-        except Exception as exc:
-            log.warning("could not read users.index.json to seed hysteria_pw: %s", exc)
+    #     the whole point — let `.add()` mint a fresh random password.
+    hysteria_pw = (
+        ""
+        if _backend_is_headless(backend)
+        else collect_seed_hysteria_password(USERS_INDEX)
+    )
     try:
         rec = backend.add(label, hysteria_password=hysteria_pw)
     except Exception as exc:

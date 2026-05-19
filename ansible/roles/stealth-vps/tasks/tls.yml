@@ -21,11 +21,11 @@
       and the 3X-UI panel stays on HTTP. To enable Let's Encrypt, set
       stealth_vps_domain (and stealth_vps_tls_email) in inventory or via
       -e on the command line, then re-apply with --tags tls.
-  when: not stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length == 0
   tags: [tls, acme]
 
 - name: Enable TLS via Let's Encrypt
-  when: stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length > 0
   tags: [tls, acme]
   block:
 
@@ -102,11 +102,11 @@
       # acme.sh returns rc=0 even when already issued recently — that's
       # fine. Mark changed only when it actually wrote a new cert.
       changed_when: >-
-        'Cert success' in (stealth_vps_acme_issue.stdout | default(''))
-        or 'Your cert is in' in (stealth_vps_acme_issue.stdout | default(''))
+        'Cert success' in (stealth_vps_acme_issue.stdout | default('', true))
+        or 'Your cert is in' in (stealth_vps_acme_issue.stdout | default('', true))
       failed_when: >-
         stealth_vps_acme_issue.rc != 0
-        and 'Domains not changed' not in (stealth_vps_acme_issue.stdout | default(''))
+        and 'Domains not changed' not in (stealth_vps_acme_issue.stdout | default('', true))
 
     - name: Install cert into the TLS dir + register reload command for renewals
       # acme.sh --install-cert always rewrites the destination files and
