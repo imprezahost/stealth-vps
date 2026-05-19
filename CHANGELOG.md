@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.7.4)
-- **Telegram bot HeadlessBackend integration** — `/user add`, `/user revoke`, `/sub` route through `HeadlessBackend` when `panel.state.yml` is absent. v0.7.x ships the CLI-only path; v0.7.4 closes the loop so panel-mode bot users can migrate without losing the chat UX.
-- **`s-vps` sudoers drop-in** for the bot user so `/user add` triggers `systemctl restart xray.service` + `systemctl restart hysteria-server.service` without running the bot as root.
+### Planned (v0.8.0)
+- **Hard-delete users** — `s-vps user purge LABEL` removes the record outright (current `revoke` keeps the row with `enabled: false` for audit).
+- **`s-vps user rotate LABEL`** — re-issue UUID + Hysteria password + sub_token without losing the label / created_at trail.
+- **Full Pulumi example tree** (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
 
 ### Planned (v1.0)
 - JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
@@ -19,6 +20,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+
+## [0.7.4] - 2026-05-19
+
+Twenty-sixth tagged release. Closes the bot-side gap in the v0.7 headless story: the Telegram bot now dispatches on `/etc/stealth-vps/panel.state.yml` presence, same rule as `stealth_vps.select_backend()` + the `s-vps` CLI. After this release, the panel→headless migration runbook keeps `/user add` / `/user revoke` / `/sub` working without any operator-visible change.
+
+### Added
+
+- **`stealth_vps/reloader.py` — `use_sudo` kwarg** on both `reload_service()` and the `Reloader` class. When True the systemctl calls are prefixed with `sudo -n` (non-interactive). The bot, which runs as the `stealth-vps-bot` system user, sets this so `/user add` can trigger `systemctl restart xray.service` + `systemctl restart hysteria-server.service` without escalating to root. CLI driver gains a matching `--use-sudo` flag.
+- **`stealth-vps-bot.service` sudoers drop-in** at `/etc/sudoers.d/stealth-vps-bot-reloader`. Scoped tight: `Cmnd_Alias STEALTH_RELOAD = /bin/systemctl restart xray.service, /bin/systemctl restart hysteria-server.service` + `stealth-vps-bot ALL=(root) NOPASSWD: STEALTH_RELOAD`. Mode 0440, validated by `visudo -cf` before install. Removed automatically on the inverse (headless → panel) rollback.
+- **Four new pytest cases** in `test_reloader.py` covering the sudo prefix, the missing-sudoers ReloadError path, the end-to-end `Reloader.__call__` threading, and the CLI `--use-sudo` flag. 175 pkg tests pass total (was 171 after v0.7.3).
+
+### Changed
+
+- **`stealth_vps_bot.py:_make_backend()`** dispatches on `os.path.exists(panel_state_path)`. Panel mode (file present) still uses `ThreeXUIBackend` against the panel API; headless mode constructs `HeadlessBackend` with a fresh `Reloader` rebuilt from `/etc/stealth-vps/reloader-args.json` — exactly the JSON kwargs the role's `headless_reload.yml` task writes.
+- **`stealth_vps_bot.py:_user_add()`** skips the panel-mode "copy hysteria_password from the seed default client" step in headless mode. `HeadlessBackend.add()` generates a fresh per-user password instead, matching the `auth.userpass` map the reloader writes. Panel-mode behaviour unchanged.
+- **`templates/stealth-vps-bot.env.j2`** gains `STEALTH_VPS_BOT_USE_SUDO` (true in headless mode, false in panel mode), `STEALTH_VPS_BOT_PANEL_STATE_PATH`, and `STEALTH_VPS_BOT_RELOADER_ARGS_PATH` to let the bot find the dispatch + reloader-config inputs without hard-coding them.
+
+### Migration notes
+
+A bot already running on a v0.7.3 headless install picks up the changes on the next `s-vps update`. No operator action beyond that — the role drops the sudoers file, regenerates bot.env, and restarts the bot service.
+
+Operators upgrading from v0.6.x panel mode AND wanting the bot to work in headless mode should:
+1. Run `s-vps update v0.7.4` first (still panel mode; bot keeps working through panel API).
+2. Run `s-vps migrate from-3xui` (renames panel.state.yml, stops + disables x-ui).
+3. Run `STEALTH_PANEL_ENABLED=false s-vps update` to converge headless.
+
+After step 3, the bot transparently switches to `HeadlessBackend`. Existing `/user add` Telegram message history stays valid — the index format hasn't changed since v0.6.0.
 
 ## [0.7.3] - 2026-05-18
 
