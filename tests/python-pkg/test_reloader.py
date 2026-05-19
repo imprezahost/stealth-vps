@@ -418,6 +418,57 @@ def test_reload_service_rejects_bad_mode() -> None:
         reloader.reload_service("xray.service", mode="recycle")
 
 
+def test_reload_service_use_sudo_prefixes_command() -> None:
+    """When the caller (bot, running as `stealth-vps-bot`) sets
+    `use_sudo=True`, the command is `sudo -n systemctl restart ...`
+    instead of `systemctl restart ...`. `-n` is non-interactive so a
+    missing sudoers rule fails immediately instead of hanging.
+    """
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        reloader.reload_service("xray.service", mode="restart", use_sudo=True)
+        args, _ = mock_run.call_args
+        assert args[0] == ["sudo", "-n", "systemctl", "restart", "xray.service"]
+
+
+def test_reload_service_use_sudo_missing_sudoers_surfaces_as_reloaderror() -> None:
+    """`sudo -n` exits 1 when the caller lacks the NOPASSWD rule.
+    `reload_service` should turn that into a ReloadError so the
+    bot's catch-all error handler shows a readable message instead
+    of a CalledProcessError stack trace.
+    """
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["sudo", "-n", "systemctl", "restart", "xray.service"],
+            stderr="sudo: a password is required",
+        )
+        with pytest.raises(reloader.ReloadError, match="password is required"):
+            reloader.reload_service("xray.service", mode="restart", use_sudo=True)
+
+
+def test_reloader_call_threads_use_sudo_through(reloader_paths: dict[str, str]) -> None:
+    """End-to-end: a Reloader constructed with use_sudo=True passes the
+    flag down to reload_service for every service it restarts. Catches
+    regression where threading the kwarg through Reloader.__call__
+    silently dropped the value.
+    """
+    r = reloader.Reloader(
+        users_index_path=reloader_paths["users_index_path"],
+        reality_enabled=True,
+        reality_state_path=reloader_paths["reality_state_path"],
+        xray_config_path=reloader_paths["xray_config_path"],
+        xray_group=None,
+        hysteria_enabled=False,
+        use_sudo=True,
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        r()
+    args, _ = mock_run.call_args
+    assert args[0] == ["sudo", "-n", "systemctl", "restart", "xray.service"]
+
+
 def test_reload_service_raises_on_nonzero_exit() -> None:
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = subprocess.CalledProcessError(
@@ -696,6 +747,36 @@ def test_cli_main_returns_one_on_reload_error(
         ]
     )
     assert rc == 1
+
+
+def test_cli_main_use_sudo_flag(reloader_paths: dict[str, str]) -> None:
+    """`--use-sudo` on the CLI threads through to the systemctl call.
+    The bot-mode `s-vps user add` reaches the reloader by spawning
+    `python3 -m stealth_vps.reloader ... --use-sudo`, so this lock
+    catches a future regression that drops the flag at the argparse
+    layer.
+    """
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        reloader.main(
+            [
+                "--users-index-path",
+                reloader_paths["users_index_path"],
+                "--reality-enabled",
+                "true",
+                "--reality-state-path",
+                reloader_paths["reality_state_path"],
+                "--xray-config-path",
+                reloader_paths["xray_config_path"],
+                "--xray-group",
+                "",
+                "--hysteria-enabled",
+                "false",
+                "--use-sudo",
+            ]
+        )
+    args, _ = mock_run.call_args
+    assert args[0][:2] == ["sudo", "-n"]
 
 
 def test_cli_main_servernames_comma_split(reloader_paths: dict[str, str]) -> None:

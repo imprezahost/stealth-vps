@@ -438,7 +438,13 @@ def render_hysteria_config_text(*args: Any, **kwargs: Any) -> str:
 # --- systemctl wrapper --------------------------------------------------
 
 
-def reload_service(name: str, *, dry_run: bool = False, mode: str = "reload") -> None:
+def reload_service(
+    name: str,
+    *,
+    dry_run: bool = False,
+    mode: str = "reload",
+    use_sudo: bool = False,
+) -> None:
     """`systemctl <mode> <name>` — mode is "reload" (SIGHUP) or "restart".
 
     Neither xray-core nor Hysteria 2 currently supports hot reload, so
@@ -455,29 +461,36 @@ def reload_service(name: str, *, dry_run: bool = False, mode: str = "reload") ->
         shutting down gracefully" path as SIGTERM/SIGINT — sending
         SIGHUP just stops the daemon.
 
+    `use_sudo=True` prefixes the command with `sudo -n` so a non-root
+    caller (notably the bot, which runs as the `stealth-vps-bot`
+    system user) can trigger a service reload. The Ansible role drops
+    a matching `/etc/sudoers.d/stealth-vps-bot-reloader` granting
+    NOPASSWD for exactly these two systemctl calls — `sudo -n` (non-
+    interactive) bails immediately if the sudoers rule isn't in place,
+    which surfaces as a clean ReloadError instead of hanging waiting
+    for a password.
+
     `dry_run=True` skips the subprocess call entirely — used by the
     molecule headless verify and by `s-vps reload --dry-run`.
     """
     if mode not in ("reload", "restart"):
         raise ValueError(f"reload_service mode must be 'reload' or 'restart', got {mode!r}")
+    cmd: list[str] = ["systemctl", mode, name]
+    if use_sudo:
+        cmd = ["sudo", "-n", *cmd]
     if dry_run:
-        log.info("dry-run: skipping `systemctl %s %s`", mode, name)
+        log.info("dry-run: skipping `%s`", " ".join(cmd))
         return
     try:
-        subprocess.run(
-            ["systemctl", mode, name],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
     except FileNotFoundError as exc:
-        # systemctl not on PATH — happens on test runners that aren't
-        # systemd hosts. Re-raise as ReloadError so HeadlessBackend can
-        # surface a clear message instead of a generic OSError.
-        raise ReloadError("systemctl not found on PATH") from exc
+        # systemctl (or sudo) not on PATH — happens on test runners that
+        # aren't systemd hosts. Re-raise as ReloadError so HeadlessBackend
+        # can surface a clear message instead of a generic OSError.
+        raise ReloadError(f"{cmd[0]} not found on PATH") from exc
     except subprocess.CalledProcessError as exc:
         raise ReloadError(
-            f"`systemctl {mode} {name}` failed (rc={exc.returncode}): "
+            f"`{' '.join(cmd)}` failed (rc={exc.returncode}): "
             f"stderr={exc.stderr!r}"
         ) from exc
 
@@ -527,6 +540,7 @@ class Reloader:
         hysteria_metrics_enabled: bool = False,
         # control
         dry_run: bool = False,
+        use_sudo: bool = False,
     ) -> None:
         self.users_index_path = users_index_path
         # xray
@@ -553,6 +567,7 @@ class Reloader:
         self.hysteria_metrics_enabled = hysteria_metrics_enabled
         # control
         self.dry_run = dry_run
+        self.use_sudo = use_sudo
 
     def __call__(self) -> None:
         """Run the full reload cycle. Implements `ReloadCallback`."""
@@ -639,9 +654,19 @@ class Reloader:
         # release with real SIGHUP-reload can flip to `mode="reload"`
         # without restructuring the call.
         if xray_text is not None:
-            reload_service(self.xray_service, dry_run=self.dry_run, mode="restart")
+            reload_service(
+                self.xray_service,
+                dry_run=self.dry_run,
+                mode="restart",
+                use_sudo=self.use_sudo,
+            )
         if hy_text is not None:
-            reload_service(self.hysteria_service, dry_run=self.dry_run, mode="restart")
+            reload_service(
+                self.hysteria_service,
+                dry_run=self.dry_run,
+                mode="restart",
+                use_sudo=self.use_sudo,
+            )
 
 
 # --- CLI ----------------------------------------------------------------
@@ -706,6 +731,13 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
         "containers (molecule, dev VMs) where the services aren't actually "
         "running.",
     )
+    p.add_argument(
+        "--use-sudo",
+        action="store_true",
+        help="Prefix systemctl calls with `sudo -n` so a non-root caller "
+        "(e.g. the bot user) can trigger service restarts. Requires a "
+        "matching sudoers rule — see tasks/bot.yml's drop-in.",
+    )
     return p
 
 
@@ -737,6 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         hysteria_bandwidth_down=args.hysteria_bandwidth_down,
         hysteria_metrics_enabled=args.hysteria_metrics_enabled,
         dry_run=args.dry_run,
+        use_sudo=args.use_sudo,
     )
     try:
         r()

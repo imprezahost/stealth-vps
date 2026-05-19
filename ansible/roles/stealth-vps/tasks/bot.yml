@@ -143,6 +143,48 @@
     mode: '2770'
   tags: [bot]
 
+# --- sudoers drop-in (headless mode only) --------------------------------
+# In v0.7+ headless mode the bot calls `stealth_vps.Reloader` after every
+# `/user add` and `/user revoke`. The reloader runs `systemctl restart
+# xray.service` + `systemctl restart hysteria-server.service` to pick up
+# the rewritten config files. Those commands need root; the bot user
+# does not.
+#
+# Drop a sudoers rule scoped to exactly those two commands, no others.
+# `NOPASSWD` because the bot runs non-interactive and can't answer a
+# password prompt. `visudo -cf %s` validates the file before installing
+# it so a typo here doesn't lock the host out of `sudo` entirely.
+# Skipped in panel mode — ThreeXUIBackend talks to the panel API and
+# doesn't need to touch systemctl.
+- name: Install /etc/sudoers.d/stealth-vps-bot-reloader for headless mode
+  ansible.builtin.copy:
+    # `Cmnd_Alias` keeps the two systemctl entries on their own line so
+    # the file under yamllint stays inside the 120-col limit, and the
+    # final user rule reads as one statement. visudo -cf below catches
+    # any syntax slip before the file lands on disk.
+    content: |
+      # Managed by stealth-vps role (tasks/bot.yml).
+      # Grants the Telegram bot user permission to restart the two
+      # services the headless Reloader rewrites configs for. Scoped
+      # tight — no wildcard, no other commands.
+      Cmnd_Alias STEALTH_RELOAD = /bin/systemctl restart xray.service, \
+                                  /bin/systemctl restart hysteria-server.service
+      stealth-vps-bot ALL=(root) NOPASSWD: STEALTH_RELOAD
+    dest: /etc/sudoers.d/stealth-vps-bot-reloader
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: not (stealth_vps_panel_enabled | bool)
+  tags: [bot]
+
+- name: Remove sudoers drop-in when reverting to panel mode
+  ansible.builtin.file:
+    path: /etc/sudoers.d/stealth-vps-bot-reloader
+    state: absent
+  when: stealth_vps_panel_enabled | bool
+  tags: [bot]
+
 # --- bot.env (config + secrets) ------------------------------------------
 
 - name: Load panel state for bot.env
