@@ -1,0 +1,4 @@
+---
+name: stealth-vps-vultr
+runtime: nodejs
+description: stealth-vps on Vultr — Pulumi mirror of terraform/examples/vultr/

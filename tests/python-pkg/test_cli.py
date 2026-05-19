@@ -207,6 +207,118 @@ def test_user_revoke_unknown_label_errors(reloader_args_json: str, capsys) -> No
 
 
 # ---------------------------------------------------------------------------
+# user purge
+# ---------------------------------------------------------------------------
+
+
+def test_user_purge_removes_row_and_calls_reloader(
+    users_index_path: str,
+    reloader_args_json: str,
+    capsys,
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "purge", "alice"])
+
+    assert rc == 0
+    idx = state.load_users_index(users_index_path)
+    assert "alice" not in idx["users"]
+    fake_reloader.assert_called_once_with()
+    assert "purged user 'alice'" in capsys.readouterr().out
+
+
+def test_user_purge_idempotent_for_missing_label(
+    users_index_path: str,
+    reloader_args_json: str,
+    capsys,
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "purge", "never-existed"])
+    # Exit 0 (no-op success) + helpful message on stdout.
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "was not in the index" in out
+    # Reload still fires — see purge docstring on why.
+    fake_reloader.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# user rotate
+# ---------------------------------------------------------------------------
+
+
+def test_user_rotate_replaces_creds_preserves_created_at(
+    users_index_path: str,
+    reloader_args_json: str,
+    capsys,
+) -> None:
+    before = state.load_users_index(users_index_path)["users"]["alice"]
+
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "rotate", "alice"])
+
+    assert rc == 0
+    after = state.load_users_index(users_index_path)["users"]["alice"]
+    # Creds rolled.
+    assert after["reality_uuid"] != before["reality_uuid"]
+    assert after["sub_token"] != before["sub_token"]
+    assert after["hysteria_password"] != before["hysteria_password"]
+    # Anchors preserved.
+    assert after["created_at"] == before["created_at"]
+    assert after["enabled"] is True
+
+    fake_reloader.assert_called_once_with()
+    out = capsys.readouterr().out
+    assert "rotated credentials for 'alice'" in out
+    assert "preserved" in out
+    assert "OLD credentials are now invalid" in out
+
+
+def test_user_rotate_explicit_hysteria_password(
+    users_index_path: str,
+    reloader_args_json: str,
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main([
+            "user", "rotate", "alice",
+            "--hysteria-password", "EMERGENCY-FIXED-PW",
+        ])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["alice"]
+    assert rec["hysteria_password"] == "EMERGENCY-FIXED-PW"
+
+
+def test_user_rotate_re_enables_revoked_user(
+    users_index_path: str,
+    reloader_args_json: str,
+) -> None:
+    state.revoke_user("alice", users_index_path)
+    assert state.get_user("alice", users_index_path)["enabled"] is False
+
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "rotate", "alice"])
+
+    assert rc == 0
+    assert state.get_user("alice", users_index_path)["enabled"] is True
+
+
+def test_user_rotate_unknown_label_errors(
+    reloader_args_json: str,
+    capsys,
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "rotate", "never-existed"])
+    assert rc == 1
+    fake_reloader.assert_not_called()
+    assert "not found" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
 # user list
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,4 @@
+---
+name: stealth-vps-digitalocean
+runtime: nodejs
+description: stealth-vps on DigitalOcean — Pulumi mirror of terraform/examples/digitalocean/

@@ -1,0 +1,14 @@
+{
+  "name": "stealth-vps-vultr",
+  "version": "0.7.4",
+  "private": true,
+  "dependencies": {
+    "@ediri/vultr": "^2.0.0",
+    "@pulumi/pulumi": "^3.0.0",
+    "stealth-vps": "file:../../stealth-vps"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

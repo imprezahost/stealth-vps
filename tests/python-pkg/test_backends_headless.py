@@ -186,3 +186,86 @@ def test_get_returns_record_or_none(users_index_path: str) -> None:
     assert rec is not None
     assert rec["enabled"] is True
     assert backend.get("nobody") is None
+
+
+# ---------------------------------------------------------------------------
+# HeadlessBackend.purge
+# ---------------------------------------------------------------------------
+
+
+def test_purge_removes_row_then_reloads(users_index_path: str) -> None:
+    backend, reloader = _make_backend(users_index_path)
+    backend.purge("alice")
+
+    idx = state.load_users_index(users_index_path)
+    assert "alice" not in idx["users"]
+    reloader.assert_called_once_with()
+
+
+def test_purge_missing_label_still_reloads(users_index_path: str) -> None:
+    """Idempotent: purging a non-existent label is treated as success.
+    Reload still fires — cheap, and ensures on-disk configs are
+    consistent with the index in case of any drift.
+    """
+    backend, reloader = _make_backend(users_index_path)
+    backend.purge("never-existed")
+    reloader.assert_called_once_with()
+
+
+def test_purge_then_add_same_label_works(users_index_path: str) -> None:
+    """Purge frees the label slot — vs revoke, which keeps the row and
+    would force add to error with 'already exists'."""
+    backend, _ = _make_backend(users_index_path)
+    backend.purge("alice")
+    rec = backend.add("alice")
+    assert rec["enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# HeadlessBackend.rotate
+# ---------------------------------------------------------------------------
+
+
+def test_rotate_replaces_creds_preserves_created_at(users_index_path: str) -> None:
+    backend, reloader = _make_backend(users_index_path)
+    before = state.get_user("alice", users_index_path)
+    assert before is not None
+    old_uuid = before["reality_uuid"]
+    old_sub = before["sub_token"]
+    old_hy = before["hysteria_password"]
+    old_created = before["created_at"]
+
+    after = backend.rotate("alice")
+
+    assert after["reality_uuid"] != old_uuid
+    assert after["sub_token"] != old_sub
+    assert after["hysteria_password"] != old_hy
+    # The audit anchor stays.
+    assert after["created_at"] == old_created
+    assert after["enabled"] is True
+
+    # Index reflects the same — rotate writes through update_user.
+    idx_rec = state.get_user("alice", users_index_path)
+    assert idx_rec == after
+    reloader.assert_called_once_with()
+
+
+def test_rotate_re_enables_revoked_user(users_index_path: str) -> None:
+    backend, _ = _make_backend(users_index_path)
+    backend.revoke("alice")
+
+    rec = backend.rotate("alice")
+    assert rec["enabled"] is True
+
+
+def test_rotate_missing_label_does_not_reload(users_index_path: str) -> None:
+    backend, reloader = _make_backend(users_index_path)
+    with pytest.raises(state.StateError, match="not found"):
+        backend.rotate("never-existed")
+    reloader.assert_not_called()
+
+
+def test_rotate_explicit_hysteria_password_honoured(users_index_path: str) -> None:
+    backend, _ = _make_backend(users_index_path)
+    rec = backend.rotate("alice", hysteria_password="FIXED-PW-FOR-MIGRATION")
+    assert rec["hysteria_password"] == "FIXED-PW-FOR-MIGRATION"

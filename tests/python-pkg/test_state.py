@@ -235,6 +235,83 @@ def test_revoke_user_idempotent_via_double_call(users_index_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# purge_user
+# ---------------------------------------------------------------------------
+
+
+def test_purge_user_removes_row_outright(users_index_path: str) -> None:
+    state.purge_user("alice", users_index_path)
+    data = state.load_users_index(users_index_path)
+    assert "alice" not in data["users"]
+
+
+def test_purge_user_idempotent_for_missing_label(users_index_path: str) -> None:
+    """Purging a label that isn't there is a clean no-op — does NOT raise.
+    Operators run `s-vps user purge LABEL` defensively; surfacing an
+    error would force them to guard every call.
+    """
+    before = state.load_users_index(users_index_path)
+    state.purge_user("never-existed", users_index_path)
+    after = state.load_users_index(users_index_path)
+    assert before == after
+
+
+def test_purge_user_then_add_reuses_label(users_index_path: str) -> None:
+    """After a purge the label slot is fully free — subsequent `add_user`
+    with the same label works (vs revoke, which would block with
+    "already exists").
+    """
+    state.purge_user("alice", users_index_path)
+    state.add_user(
+        "alice",
+        reality_uuid="11111111-1111-1111-1111-111111111111",
+        hysteria_password="new-pw",
+        sub_token="new-sub-token",
+        created_at="2026-06-01T00:00:00Z",
+        path=users_index_path,
+    )
+    rec = state.get_user("alice", users_index_path)
+    assert rec is not None
+    assert rec["reality_uuid"] == "11111111-1111-1111-1111-111111111111"
+    # created_at is the NEW one — purge erased the old row entirely.
+    assert rec["created_at"] == "2026-06-01T00:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# update_user (rotate primitive)
+# ---------------------------------------------------------------------------
+
+
+def test_update_user_patches_specified_fields_only(users_index_path: str) -> None:
+    state.update_user(
+        "alice",
+        reality_uuid="22222222-2222-2222-2222-222222222222",
+        path=users_index_path,
+    )
+    rec = state.get_user("alice", users_index_path)
+    assert rec is not None
+    assert rec["reality_uuid"] == "22222222-2222-2222-2222-222222222222"
+    # Unspecified fields preserved.
+    assert rec["hysteria_password"] == "alice-hy2-pw"
+    assert rec["sub_token"] == "alice-sub-token"
+    assert rec["created_at"] == "2026-01-01T00:00:00Z"
+    assert rec["enabled"] is True
+
+
+def test_update_user_can_re_enable_revoked(users_index_path: str) -> None:
+    state.revoke_user("alice", users_index_path)
+    state.update_user("alice", enabled=True, path=users_index_path)
+    rec = state.get_user("alice", users_index_path)
+    assert rec is not None
+    assert rec["enabled"] is True
+
+
+def test_update_user_missing_label_raises(users_index_path: str) -> None:
+    with pytest.raises(state.StateError, match="not found"):
+        state.update_user("nobody", reality_uuid="x", path=users_index_path)
+
+
+# ---------------------------------------------------------------------------
 # get_user / list_users
 # ---------------------------------------------------------------------------
 

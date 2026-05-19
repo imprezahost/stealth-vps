@@ -105,6 +105,23 @@ pytest:
     # so `import stealth_vps` resolves to the source tree directly — no
     # install step needed. The pkg is pure stdlib.
     - pytest tests/python-pkg/ -v
+    # Also test the standalone cloud-init builder Python port. Lives
+    # in its own pyproject so the test runs against the packaged code
+    # path (vs the pure-stdlib in-tree path that pytest --rootdir picks).
+    - PYTHONPATH=tools/cloud-init-builder/python pytest tools/cloud-init-builder/python/tests/ -v
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+go-test:
+  # Go port of the cloud-init builder — byte-parity tests against the
+  # TS source live in the same package. Cheap job (~30s), runs in
+  # parallel with pytest.
+  stage: test
+  image: golang:1.22-alpine
+  script:
+    - cd tools/cloud-init-builder/go
+    - go test -v ./...
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

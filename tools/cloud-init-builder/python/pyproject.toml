@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stealth-vps-cloudinit"
+version = "0.7.4"
+description = "Python port of the stealth-vps cloud-init builder (mirror of pulumi/stealth-vps/src/index.ts)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Impreza Host", email = "thiago.santos@impreza.email" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/imprezahost/stealth-vps"
+Source = "https://github.com/imprezahost/stealth-vps/tree/main/tools/cloud-init-builder/python"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stealth_vps_cloudinit*"]

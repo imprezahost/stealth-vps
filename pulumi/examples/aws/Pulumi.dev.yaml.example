@@ -1,0 +1,18 @@
+# Copy to Pulumi.dev.yaml (NOT committed — already in .gitignore by Pulumi).
+# AWS credentials come from the standard chain (AWS_PROFILE, ~/.aws/credentials,
+# or an IAM role) — they are NOT set here.
+
+config:
+  stealth-vps-aws:region: eu-central-1
+  stealth-vps-aws:architecture: amd64           # or arm64 (then use t4g.* instanceType)
+  stealth-vps-aws:instanceType: t3.micro
+  stealth-vps-aws:serverName: stealth-vps
+  stealth-vps-aws:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
+  stealth-vps-aws:sshPort: 22550
+  stealth-vps-aws:stealthVersion: v0.7.4
+  # Optional Let's Encrypt — uncomment to enable:
+  # stealth-vps-aws:domain: vpn.example.com
+  # stealth-vps-aws:letsencryptEmail: ops@example.com
+  stealth-vps-aws:realityDest: www.microsoft.com:443
+  stealth-vps-aws:hysteriaPortHoppingMin: 49152
+  stealth-vps-aws:hysteriaPortHoppingMax: 65535

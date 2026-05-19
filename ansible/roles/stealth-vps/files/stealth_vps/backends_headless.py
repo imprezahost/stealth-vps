@@ -135,6 +135,40 @@ class HeadlessBackend(UserBackend):
         state.revoke_user(label, self.users_index_path)
         self.reloader()
 
+    def purge(self, label: str) -> None:
+        """Hard-delete from the index then reload. Idempotent: purging a
+        non-existent label still triggers the reload (cheap, ensures
+        on-disk configs match the index even if it drifted).
+        """
+        state.purge_user(label, self.users_index_path)
+        self.reloader()
+
+    def rotate(self, label: str, *, hysteria_password: str = "") -> dict[str, Any]:
+        """Re-issue creds. Generates fresh UUID + Hysteria pw + sub_token,
+        preserves label + created_at, flips enabled=True. Reload writes
+        the new values to the rendered configs.
+        """
+        rec = state.get_user(label, self.users_index_path)
+        if rec is None:
+            raise state.StateError(f"user {label!r} not found in the index — use `add` instead")
+        new_uuid = str(uuid_mod.uuid4())
+        new_sub_token = _new_sub_token()
+        # If the caller passed a Hysteria password use it; otherwise
+        # mint a fresh per-user one (matches `add`'s headless-mode
+        # behaviour — the rotate use-case is "creds leaked, replace
+        # them with brand new ones", so we don't keep the old.
+        new_hy_pw = hysteria_password or _new_hysteria_password()
+        index = state.update_user(
+            label,
+            reality_uuid=new_uuid,
+            hysteria_password=new_hy_pw,
+            sub_token=new_sub_token,
+            enabled=True,
+            path=self.users_index_path,
+        )
+        self.reloader()
+        return index["users"][label]
+
     # ----- reads ----------------------------------------------------------
 
     def list(self, include_disabled: bool = False) -> list[tuple[str, dict[str, Any]]]:

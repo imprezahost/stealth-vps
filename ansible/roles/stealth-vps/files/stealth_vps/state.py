@@ -135,12 +135,63 @@ def revoke_user(label: str, path: str = USERS_INDEX_PATH) -> dict[str, Any]:
     """Set users[label].enabled = false. Does NOT delete the record —
     keeping the row around lets the operator see "this label was used
     and revoked" rather than a label disappearing. Hard delete is a
-    separate, explicit operation (not wired in v0.6.0).
+    separate, explicit operation (`purge_user`, wired in v0.8.0).
     """
     data = load_users_index(path)
     if label not in data["users"]:
         raise StateError(f"user {label!r} not found in the index")
     data["users"][label]["enabled"] = False
+    save_users_index(data, path)
+    return data
+
+
+def purge_user(label: str, path: str = USERS_INDEX_PATH) -> dict[str, Any]:
+    """Hard-delete a user from the index. Removes the row outright; the
+    audit trail goes away with it. Operators wanting an audit-keeping
+    revoke should use `revoke_user`. This exists for the case where a
+    user is being completely cleaned up (e.g. ex-employee, leaked creds
+    they want untraceable, GDPR-style erasure).
+
+    Idempotent: purging a non-existent label is a no-op, returns the
+    unchanged index. Caller distinguishes "user was there" via the
+    pre-purge `get_user` call if needed.
+    """
+    data = load_users_index(path)
+    if label in data["users"]:
+        del data["users"][label]
+        save_users_index(data, path)
+    return data
+
+
+def update_user(
+    label: str,
+    *,
+    reality_uuid: str | None = None,
+    hysteria_password: str | None = None,
+    sub_token: str | None = None,
+    enabled: bool | None = None,
+    path: str = USERS_INDEX_PATH,
+) -> dict[str, Any]:
+    """Patch one or more fields of an existing user. Returns the updated
+    index. Raises StateError on unknown label.
+
+    Used by `rotate_user`: the rotate operation needs to set three
+    fields atomically (new uuid + new hy pw + new sub_token) while
+    preserving `created_at` and `label`. A single load → mutate → save
+    keeps the atomic rename pattern intact.
+    """
+    data = load_users_index(path)
+    if label not in data["users"]:
+        raise StateError(f"user {label!r} not found in the index")
+    rec = data["users"][label]
+    if reality_uuid is not None:
+        rec["reality_uuid"] = reality_uuid
+    if hysteria_password is not None:
+        rec["hysteria_password"] = hysteria_password
+    if sub_token is not None:
+        rec["sub_token"] = sub_token
+    if enabled is not None:
+        rec["enabled"] = enabled
     save_users_index(data, path)
     return data
 
