@@ -7,10 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.8.0)
-- **Hard-delete users** — `s-vps user purge LABEL` removes the record outright (current `revoke` keeps the row with `enabled: false` for audit).
-- **`s-vps user rotate LABEL`** — re-issue UUID + Hysteria password + sub_token without losing the label / created_at trail.
-- **Full Pulumi example tree** (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+### Planned (v0.8.1)
+- **CI parity with production**: a second molecule job using `python:3.12-slim`-based ansible-core 2.19 to catch the bug class the v0.7 hotfix train kept stepping on (alpine ansible behaves different than Debian/Ubuntu ansible).
+- **Bot module refactor for testability** — extract `_make_backend`/`_build_headless_reloader`/`_build_uris_for_user` from `stealth_vps_bot.py` into a `bot_core` submodule that doesn't import `telegram` at module level. Adds pytest coverage to the bot dispatch path.
+- **arm64 smoke pipeline** — provision a Hetzner CAX11 (ARM Ampere, ~€3.79/mo), register it as a second CI runner alongside the Tokyo amd64 one.
+- **zh-CN docs sync** by the maintainer (community native review remains a v1.0 goal).
+
+### Planned (v0.9.0)
+- **Encrypted backup/restore** via `age`: `s-vps backup` produces `stealth-vps-backup-<host>-<ts>.tar.gz.age`, `s-vps restore <file>` validates + extracts. Operator-supplied public key in installer.env; optional daily systemd timer.
+- **Continuous health-check Prometheus exporter** on `:9102` — turns `s-vps diagnose`'s checks into always-on gauges (`stealth_vps_panel_up`, `stealth_vps_cert_days_remaining`, etc.) so operators can alert *before* something breaks.
+- **Subscription TTL** — `sub_token` gets optional `expires_at`; Caddy returns 410 Gone past it; bot/CLI verbs to `renew`/extend.
+- **Auto-update opt-in** — systemd timer that applies patch releases of the same minor automatically (`v0.9.1 → v0.9.2` OK, `v0.9.x → v0.10.0` not).
+
+### Planned (v0.10.0)
+- **Multi-node** — control plane pushes `users.index.json` over SSH to N data nodes, per-node Reality keys, subscription bundles include all-node URIs. ADR locked: push from control + per-node keys (operator decision recorded).
+
+### Planned (v0.11.0)
+- **Wireguard fallback** + Xray protocol additions (XHTTP, VMess+WS, Trojan-Go, SS-2022) gated on per-protocol enable flags.
+
+### Planned (v0.12.0)
+- **Subscription bridge web UI** — `/.well-known/stealth-vps-onboard/<token>` detects user-agent and shows QR + deep-link for Hiddify Next / V2Box / NekoBox.
+
+### Planned (v0.13.0 / v0.14.0)
+- **Native Android client** (Kotlin, NetworkExtension equivalent + Xray/Hysteria via NDK) then **iOS** (Swift, NetworkExtension). Caminho C from the strategic plan — build from scratch, no fork. Long horizon (~6-9 months per platform solo).
 
 ### Planned (v1.0)
 - JA4 + JA4S in `tls_fingerprint_compare.py` (FoxIO 2023+ spec, cross-validated against `ja4-python`).
@@ -19,7 +38,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitLab shell-executor runner fix (`apt-get: Permission denied`).
 - zh-CN native-speaker review pass.
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
-- Additional Pulumi examples (AWS / DO / Vultr / Proxmox) + Python / Go ports of the cloud-init builder.
+- Signed releases (cosign + GPG).
+- External security audit.
+
+## [0.8.0] - 2026-05-19
+
+Twenty-seventh tagged release. Opens the v0.8 line with the three items the v0.7.x "Planned" section flagged: hard-delete + rotate verbs, Pulumi multi-provider examples, and standalone Python + Go ports of the cloud-init builder. No headless-mode regressions or behaviour changes — purely additive.
+
+### Added
+
+- **`s-vps user purge LABEL`** — hard-deletes a user. Removes the row from `users.index.json` outright (vs `revoke` which keeps the row with `enabled: false` for audit). Cleans up the per-user subscription file. Triggers a reload so the on-disk Xray + Hysteria configs reflect the deletion. **Idempotent**: purging a non-existent label is a clean no-op, returns success — operators can run it defensively without guard logic. Works in both panel mode (calls `del_client` on 3X-UI then wipes the index row) and headless mode (index wipe + reloader).
+- **`s-vps user rotate LABEL`** — re-issues an existing user's credentials. Generates fresh `reality_uuid` + `hysteria_password` + `sub_token`; **preserves** `label` + `created_at` so the audit trail of when the user was first issued stays intact. Flips `enabled: true` if the user was revoked — operators wanting a permanent revoke should use `revoke` or `purge`. Prints the new VLESS + Hysteria2 URIs + sub URL on success plus a warning that the old credentials are now invalid. `--hysteria-password OVERRIDE` lets migrations reuse a known password (rare; default is fresh-random).
+- **Pulumi examples for AWS, DigitalOcean, Vultr, Proxmox VE** under `pulumi/examples/`. Each mirrors the corresponding `terraform/examples/<provider>/` shape: same resources, same configuration knobs, byte-identical cloud-init body via the shared `pulumi/stealth-vps` builder. Operators on Pulumi-Python or Pulumi-Go are now first-class — see below.
+- **Python port of the cloud-init builder** at `tools/cloud-init-builder/python/` (package `stealth_vps_cloudinit`). Pure stdlib (no PyYAML, no jinja2), `pyproject.toml` ready for PyPI publishing in v0.9.0. 9 pytest cases including byte-parity fixture support against the TS source.
+- **Go port of the cloud-init builder** at `tools/cloud-init-builder/go/` (module `github.com/imprezahost/stealth-vps/tools/cloud-init-builder/go`). Pure stdlib (no `gopkg.in/yaml.v3`), `go.mod` pinned to Go 1.22. 10 test cases. New `go-test` CI job runs them on every push (~30 s).
+- **Backend ABC extensions**: `UserBackend.purge()` + `UserBackend.rotate()` are now part of the abstract interface. Both `ThreeXUIBackend` and `HeadlessBackend` implement them. Bot pickup follows automatically because the bot already uses `select_backend()` (v0.7.4 wiring).
+- **State helpers**: `state.purge_user()` (hard delete) + `state.update_user()` (patch arbitrary fields atomically, used by `rotate`). 12 new pytest cases for the state primitives.
+
+### Changed
+
+- **`s-vps user revoke` help text** updated to say "keeps the row with enabled=false" so operators understand the difference vs the new `purge`.
+- **`tasks/headless_reload.yml`** — `# noqa: jinja[spacing]` added on the reloader-args.json compose task. Same pattern as `reality_state.yml` + `users_index.yml` (existing `noqa` exemptions for multi-line dict literals).
+
+### Tests
+
+- 194 pytest cases for the stealth_vps package (was 175 after v0.7.4). +19 cover purge + rotate + state helpers across CLI, headless backend, and state module.
+- 9 pytest cases for the Python cloud-init builder port.
+- 10 Go test cases for the Go cloud-init builder port.
+- **Total stealth-vps toolkit: 213 automated tests** across 3 languages.
+
+### Migration notes
+
+`users.index.json` schema is unchanged (still v1). Existing automation that calls `revoke` keeps working — `purge` is a new verb, not a behaviour change of an existing one. Operators upgrading from v0.7.4 hit `s-vps update v0.8.0` and the new verbs become available; no migration step needed.
+
+Pulumi examples + builder ports live under `pulumi/examples/` and `tools/cloud-init-builder/` respectively — opting in is one `cd` away.
 
 ## [0.7.4] - 2026-05-19
 

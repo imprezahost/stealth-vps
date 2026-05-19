@@ -22,7 +22,7 @@ config:
   stealth-vps-proxmox:ipv6Cidr: auto
   stealth-vps-proxmox:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
   stealth-vps-proxmox:sshPort: 22550
-  stealth-vps-proxmox:stealthVersion: v0.7.4
+  stealth-vps-proxmox:stealthVersion: v0.8.0
   # stealth-vps-proxmox:domain: vpn.example.com
   # stealth-vps-proxmox:letsencryptEmail: ops@example.com
   stealth-vps-proxmox:realityDest: www.microsoft.com:443

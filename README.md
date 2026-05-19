@@ -1,6 +1,6 @@
 # stealth-vps
 
-> **Status: v0.7.4 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel **OR headless mode** (v0.7+), Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04), both default + headless scenarios green. External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + a TypeScript Pulumi reference. Probe-resistance test suite: 5/5 scenarios runnable; v0.5.3's first end-to-end pen-test validated Reality reverse-proxy fallback under all four comparators against a real deploy. **v0.7 ships headless mode** end-to-end validated on Tokyo VPS, including the Telegram bot: 3X-UI optional via `panel_enabled=false`, standalone Xray-core systemd unit, Hysteria2 per-user `auth.userpass` so revoking one user doesn't break the others, `stealth_vps.reloader` Python module re-renders configs from `users.index.json` and restarts both services on every mutation (neither xray-core nor Hysteria 2 supports hot reload yet), new `s-vps user add/revoke/list/show`, `s-vps reload`, `s-vps migrate from-3xui` CLI verbs. v0.7.4 lights up the bot's `HeadlessBackend` dispatch + a scoped sudoers drop-in so `/user add` works in panel-less mode without running the bot as root. See [CHANGELOG.md](CHANGELOG.md) + [docs/headless-mode.md](docs/headless-mode.md).
+> **Status: v0.8.0 (alpha).** Full stack: VLESS-Reality + Hysteria2 (port hopping), 3X-UI panel **OR headless mode** (v0.7+), Let's Encrypt automation, SSH/UFW/fail2ban/unattended-upgrades hardening, Spamhaus DROP via ipset, kernel tuning. **amd64 + arm64** (Oracle Ampere, AWS Graviton, Hetzner CAX). Observability: per-protocol Prometheus metrics on `:9100`, drop-in Grafana dashboard, Prometheus alert rules. Client walkthroughs for Android, Windows, iOS, macOS. Multi-platform Molecule (Debian 12 + Ubuntu 22.04 + 24.04), both default + headless scenarios green. External GitHub PRs auto-mirror to internal GitLab CI. **IaC ready in three flavors**: Terraform module with five worked examples (Hetzner, AWS, DigitalOcean, Vultr, Proxmox VE) + **Pulumi-TypeScript with the same five providers** (v0.8+) + **standalone Python and Go cloud-init builders** (v0.8+) for any IaC layer your team already runs. Probe-resistance test suite: 5/5 scenarios runnable. **v0.7 ships headless mode** end-to-end validated on Tokyo VPS, including the Telegram bot; **v0.8 adds operator UX**: `s-vps user purge` (hard-delete) + `s-vps user rotate` (re-issue creds preserving the audit anchor). **213 automated tests** across the toolkit (194 pytest + 9 Python builder + 10 Go builder). See [CHANGELOG.md](CHANGELOG.md) + [docs/headless-mode.md](docs/headless-mode.md).
 
 A reproducible toolkit to set up a privacy-focused VPS for restrictive networks. Installs VLESS-Reality + Hysteria2 behind the 3X-UI panel, with sane hardening, working fail2ban, and built-in observability. Comes with an interactive installer that you can press Enter through and an operator CLI (`s-vps`) for everything afterwards.
 
@@ -61,7 +61,7 @@ Pick the one that matches your workflow. All four apply the same configuration.
 Download then run with a TTY — you get a whiptail prompt sequence (domain optional, services checklist, bot token if you want it, summary confirm). Pressing Enter through every prompt produces a working install on the VPS's public IP.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.4/scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh -o install.sh
 sudo bash install.sh
 ```
 
@@ -72,7 +72,7 @@ After it finishes you get an ANSI QR code for the default Reality URI, a post-de
 For cloud-init / Terraform user-data / scripted deploys that don't have a TTY. Byte-compatible with v0.5.x — same `STEALTH_*` env vars.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.4/scripts/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh | sudo bash
 ```
 
 Override defaults with env vars before the pipe:
@@ -82,7 +82,7 @@ STEALTH_DOMAIN=vpn.example.com \
 STEALTH_TLS_EMAIL=ops@example.com \
 STEALTH_BOT_ENABLED=true \
 STEALTH_BOT_TOKEN=12345:abc... \
-  curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.7.4/scripts/install.sh | sudo bash
+  curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh | sudo bash
 ```
 
 Full env-var list in [`docs/installer-ux.md`](docs/installer-ux.md). Re-run any time with `s-vps update` — your original choices stay pinned to `/etc/stealth-vps/installer.env`.
@@ -105,9 +105,9 @@ For provider-agnostic Terraform, [`terraform/modules/stealth-vps/`](terraform/mo
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.7.4"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.8.0"
 
-  stealth_version   = "v0.7.4"
+  stealth_version   = "v0.8.0"
   ssh_public_key    = file("~/.ssh/id_ed25519.pub")
   domain            = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
@@ -174,7 +174,8 @@ Sponsorship doesn't change the code — the same template runs on any provider's
 | v0.7.1 | **Hotfix for two v0.7.0 regressions caught by the Tokyo smoke test**: `tasks/reality_xray_standalone.yml`'s `xray -test -config %s` validate failed on ansible-core ≥ 2.16 because the template's temp file has no `.json` extension and xray needs `-format=json` to skip extension-based format detection. And `cli_wrapper.yml`'s `installer.env` rendered bare `KEY=value` lines that overrode operator env vars on every source — so `STEALTH_PANEL_ENABLED=false s-vps update` (the migration runbook's headless converge step) silently fell back to the persisted `=true` and kept reinstalling panel mode. Switch to POSIX `: "${VAR:=default}"` (default-if-unset). Molecule didn't catch either because the alpine ansible there behaves differently. | shipped 2026-05-18 |
 | v0.7.2 | **Third v0.7 hotfix — `reload` vs `restart` semantics**. v0.7.0/v0.7.1's reloader sent `systemctl reload xray.service`, but Xray-core has no SIGHUP handler — SIGHUP just terminates the process and systemd marks it "deactivated successfully", so every `s-vps user add` killed Xray and left it dead. Reloader now uses `mode="restart"` for xray (sub-second cutover, Reality clients reconnect). `templates/xray-standalone.service.j2` lost the misleading `ExecReload=/bin/kill -HUP $MAINPID` line. `s-vps migrate from-3xui` now stops + disables `x-ui.service` itself so the standalone Xray installed by the next converge can bind the Reality port. v0.7.2 also INCORRECTLY assumed Hysteria 2 supports SIGHUP-as-hot-reload (it doesn't — same path as SIGTERM); that asymmetry was fixed in v0.7.3. | shipped 2026-05-18 |
 | v0.7.3 | **Fourth (and final) v0.7 hotfix — Hysteria 2 also needs restart, not reload.** Hysteria 2's SIGHUP handler routes into the same graceful-shutdown path as SIGTERM (apernet/hysteria#717 tracks the missing real hot reload). v0.7.2 still ran `systemctl reload hysteria-server` after every user mutation, which cleanly stopped the daemon and left the service inactive. Switch both services to `mode="restart"`, drop the now-misleading `ExecReload=` from `hysteria-server.service.j2`. End-to-end migration runbook (`s-vps update v0.7.3` → `migrate from-3xui` → headless converge → `user add bob` → `user revoke bob`) walked clean on Tokyo VPS with no operator intervention. The `mode` kwarg stays in `reload_service` so a future Hysteria release with real hot reload flips back to `reload` in one line. | shipped 2026-05-18 |
-| **v0.7.4** | **Telegram bot HeadlessBackend wiring** — closes the bot-side gap in the v0.7 headless story. `_make_backend()` dispatches on `panel.state.yml` presence (same rule as `stealth_vps.select_backend` + the CLI), so a panel→headless cutover keeps `/user add` / `/user revoke` / `/sub` working transparently. `Reloader` gains a `use_sudo` kwarg + `tasks/bot.yml` drops a tight `/etc/sudoers.d/stealth-vps-bot-reloader` (Cmnd_Alias scoped to two `systemctl restart` invocations, validated by `visudo -cf`) so the bot doesn't need to run as root. 175 pytest pass (was 171); 4 new cases cover the sudo prefix + missing-sudoers ReloadError + Reloader threading + CLI flag. | **shipped 2026-05-19** |
+| v0.7.4 | **Telegram bot HeadlessBackend wiring** — closes the bot-side gap in the v0.7 headless story. `_make_backend()` dispatches on `panel.state.yml` presence (same rule as `stealth_vps.select_backend` + the CLI), so a panel→headless cutover keeps `/user add` / `/user revoke` / `/sub` working transparently. `Reloader` gains a `use_sudo` kwarg + `tasks/bot.yml` drops a tight `/etc/sudoers.d/stealth-vps-bot-reloader` (Cmnd_Alias scoped to two `systemctl restart` invocations, validated by `visudo -cf`) so the bot doesn't need to run as root. 175 pytest pass (was 171); 4 new cases cover the sudo prefix + missing-sudoers ReloadError + Reloader threading + CLI flag. | shipped 2026-05-19 |
+| **v0.8.0** | **Operator UX + IaC trifecta**. `s-vps user purge LABEL` (hard delete, idempotent) and `s-vps user rotate LABEL` (re-issue UUID + Hysteria pw + sub_token preserving label + created_at audit anchor). Pulumi examples for AWS / DigitalOcean / Vultr / Proxmox VE — matches the Terraform example tree. **Standalone Python and Go cloud-init builders** under `tools/cloud-init-builder/` — pure-stdlib byte-parity with the TypeScript source, drop into any IaC layer your team already runs (Pulumi-Py, Pulumi-Go, Terraform CDK-for-Go, raw boto3/hcloud-go). 194 pytest cases (was 175) + 9 Python builder + 10 Go builder = **213 automated tests** across 3 languages. CI gains a `go-test` job. | **shipped 2026-05-19** |
 | v1.0.0 | Probe-resistance CI suite (full, with JA4 + JA4S + golden snapshots), signed releases, security audit | roadmap |
 
 Track the [CHANGELOG](CHANGELOG.md) for what's actually shipped.

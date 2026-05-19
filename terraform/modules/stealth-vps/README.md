@@ -6,9 +6,9 @@ Generates the cloud-init `user_data` string that bootstraps a stealth-vps VPS. P
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.7.4"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.8.0"
 
-  stealth_version = "v0.7.4"
+  stealth_version = "v0.8.0"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   ssh_port        = 22550
   domain          = "vpn.example.com"
@@ -38,7 +38,7 @@ resource "hcloud_server" "vps" {
 
 | Name | Type | Default | Required | Description |
 |---|---|---|:---:|---|
-| `stealth_version` | string | `"v0.7.4"` | no | Release tag the cloud-init bootstrap pins to. Validated against `^v\d+\.\d+\.\d+...$`. |
+| `stealth_version` | string | `"v0.8.0"` | no | Release tag the cloud-init bootstrap pins to. Validated against `^v\d+\.\d+\.\d+...$`. |
 | `ssh_public_key` | string | — | **yes** | Full SSH public-key line. Validated to start with `ssh-ed25519` / `ssh-rsa` / `ecdsa-sha2-*`. |
 | `ssh_port` | number | `22550` | no | Non-default SSH port the hardening role moves to. 1024 < n < 65536. |
 | `domain` | string | `null` | no | DNS name pointing at this VPS → enables Let's Encrypt. `null` keeps self-signed Hysteria2 + HTTP panel. |

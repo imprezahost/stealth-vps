@@ -34,7 +34,7 @@ AWS credentials come from the standard chain (`AWS_PROFILE`, `~/.aws/credentials
 | `instanceType` | `t3.micro` | `t3.*` for amd64, `t4g.*` for arm64 |
 | `serverName` | `stealth-vps` | Tag + key-pair name prefix |
 | `sshPort` | `22550` | Non-default SSH port the hardening role moves to |
-| `stealthVersion` | `v0.7.4` | Release tag pinned in cloud-init |
+| `stealthVersion` | `v0.8.0` | Release tag pinned in cloud-init |
 | `domain` | `null` | DNS name; enables Let's Encrypt |
 | `letsencryptEmail` | `""` | Required when `domain` is set |
 | `realityDest` | `www.microsoft.com:443` | TLS 1.3 + X25519 + HTTP/2 dest |

@@ -28,7 +28,7 @@ pulumi up
 | `plan` | `vc2-1c-1gb` | amd64 only on Vultr's compute plans |
 | `osId` | `477` | Debian 12 x64. Check `https://api.vultr.com/v2/os` for current IDs |
 | `sshPort` | `22550` | |
-| `stealthVersion` | `v0.7.4` | |
+| `stealthVersion` | `v0.8.0` | |
 | `domain` | `null` | Enables LE |
 | `letsencryptEmail` | `""` | |
 

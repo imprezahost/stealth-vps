@@ -36,7 +36,7 @@ Hand `cloudInit` to whatever provider's "create instance" call. The bytes match 
 ## Install
 
 ```bash
-go get github.com/imprezahost/stealth-vps/tools/cloud-init-builder/go@v0.7.4
+go get github.com/imprezahost/stealth-vps/tools/cloud-init-builder/go@v0.8.0
 ```
 
 ## Tests

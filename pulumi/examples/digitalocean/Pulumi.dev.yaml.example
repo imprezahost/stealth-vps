@@ -10,7 +10,7 @@ config:
   stealth-vps-digitalocean:image: debian-12-x64
   stealth-vps-digitalocean:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
   stealth-vps-digitalocean:sshPort: 22550
-  stealth-vps-digitalocean:stealthVersion: v0.7.4
+  stealth-vps-digitalocean:stealthVersion: v0.8.0
   # Optional LE — uncomment to enable:
   # stealth-vps-digitalocean:domain: vpn.example.com
   # stealth-vps-digitalocean:letsencryptEmail: ops@example.com

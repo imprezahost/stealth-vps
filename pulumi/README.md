@@ -50,7 +50,7 @@ const userData = buildCloudInit({
 });
 ```
 
-## Limitations at v0.7.4
+## Limitations at v0.8.0
 
 - TypeScript only. Pulumi has first-class Python / Go / .NET / Java SDKs; the cloud-init builder ports trivially to any of them (it's a string template), but we've shipped one canonical TypeScript version to keep the maintenance surface small. Patches welcome.
 - One example (Hetzner). AWS / DigitalOcean / Vultr / Proxmox examples land later — same as Terraform's example tree took several sprints to fill.

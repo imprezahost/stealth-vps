@@ -1,6 +1,6 @@
 {
   "name": "stealth-vps-vultr",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "private": true,
   "dependencies": {
     "@ediri/vultr": "^2.0.0",
