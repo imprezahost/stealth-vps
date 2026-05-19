@@ -356,6 +356,75 @@ def cmd_user_revoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_user_purge(args: argparse.Namespace) -> int:
+    """Hard-delete a user. Unlike `revoke` (which keeps the row with
+    enabled=false), purge wipes the record outright. Idempotent — a
+    purge of a non-existent label is treated as success.
+
+    Also cleans up the per-user subscription file (best-effort: a
+    missing sub file is fine, an unreadable one logs but doesn't fail
+    the command).
+    """
+    backend = _select_backend_for_cli()
+    # Capture the sub_token BEFORE purging so we can clean up the
+    # subscription file even though `purge` will wipe the row.
+    rec = backend.get(args.label)
+    sub_token = rec.get("sub_token") if rec else None
+    try:
+        backend.purge(args.label)
+    except state.StateError as exc:
+        # Should be rare — purge is meant to be idempotent. Surface
+        # whatever the backend complained about.
+        print(f"s-vps: {exc}", file=sys.stderr)
+        return 1
+    if sub_token:
+        try:
+            from .subscription import remove_subscription_file
+            remove_subscription_file(sub_token)
+        except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+            print(f"  (subscription file cleanup skipped: {exc})")
+    if rec is None:
+        print(f"✓ user {args.label!r} was not in the index (no-op)")
+    else:
+        print(f"✓ purged user {args.label!r}")
+    return 0
+
+
+def cmd_user_rotate(args: argparse.Namespace) -> int:
+    """Re-issue credentials for an existing user. Generates fresh UUID +
+    Hysteria password + sub_token; preserves the label + created_at. If
+    the user was revoked, this re-enables them — operators wanting a
+    permanent revoke should use `revoke` or `purge`.
+    """
+    backend = _select_backend_for_cli()
+    try:
+        rec = backend.rotate(args.label, hysteria_password=args.hysteria_password or "")
+    except state.StateError as exc:
+        print(f"s-vps: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"✓ rotated credentials for {args.label!r}")
+    print(f"  reality_uuid     : {rec['reality_uuid']}")
+    print(f"  hysteria_password: {rec['hysteria_password']}")
+    print(f"  sub_token        : {rec['sub_token']}")
+    print(f"  created_at       : {rec.get('created_at', '-')} (preserved)")
+
+    reality, hysteria = _load_states_for_render()
+    uris = _render_user_uris(args.label, rec, reality_state=reality, hysteria_state=hysteria)
+    if uris:
+        print()
+        if "vless" in uris:
+            print(f"  vless URI       : {uris['vless']}")
+        if "hysteria2" in uris:
+            print(f"  hysteria2 URI   : {uris['hysteria2']}")
+        if "sub" in uris:
+            print(f"  subscription URL: {uris['sub']}")
+    print()
+    print("⚠ The OLD credentials are now invalid — share the new URIs / sub URL")
+    print("  with the user. Existing client connections will be dropped on next reload.")
+    return 0
+
+
 def cmd_user_list(args: argparse.Namespace) -> int:
     # Read directly from the index — no need to construct a backend for
     # a read-only op. This also means `user list` works on a half-broken
@@ -627,9 +696,29 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_user_add)
 
-    p = user_sub.add_parser("revoke", help="disable a user (does not delete)")
+    p = user_sub.add_parser("revoke", help="disable a user (keeps the row with enabled=false)")
     p.add_argument("label")
     p.set_defaults(func=cmd_user_revoke)
+
+    p = user_sub.add_parser(
+        "purge",
+        help="hard-delete a user (removes the row outright; idempotent)",
+    )
+    p.add_argument("label")
+    p.set_defaults(func=cmd_user_purge)
+
+    p = user_sub.add_parser(
+        "rotate",
+        help="re-issue an existing user's credentials (new UUID + hy pw + sub_token)",
+    )
+    p.add_argument("label")
+    p.add_argument(
+        "--hysteria-password",
+        default="",
+        help="override the auto-generated Hysteria2 password (rare; usually "
+             "you want a fresh random one — the default).",
+    )
+    p.set_defaults(func=cmd_user_rotate)
 
     p = user_sub.add_parser("list", help="list users in the index")
     p.add_argument("--include-disabled", action="store_true",

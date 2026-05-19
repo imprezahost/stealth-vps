@@ -59,6 +59,26 @@ class UserBackend(ABC):
     def get(self, label: str) -> dict[str, Any] | None:
         """Return the record or None."""
 
+    @abstractmethod
+    def purge(self, label: str) -> None:
+        """Hard-delete a user. Removes the row from the index AND the
+        runtime config (panel-mode: del_client; headless: re-render
+        without this user). Idempotent — purging a non-existent label
+        is a clean no-op so operators can run it repeatedly without
+        guarding.
+        """
+
+    @abstractmethod
+    def rotate(self, label: str, *, hysteria_password: str = "") -> dict[str, Any]:
+        """Re-issue an existing user's credentials. Generates fresh
+        reality_uuid + hysteria_password (unless overridden) + sub_token;
+        preserves label + created_at; flips enabled=True if was revoked.
+        Returns the updated record. Raises StateError on unknown label.
+
+        Use case: client device compromised, want new creds without
+        losing the audit trail of when the label was originally issued.
+        """
+
 
 class ThreeXUIBackend(UserBackend):
     """Panel-mode backend: every mutation hits the 3X-UI API first,
@@ -156,3 +176,64 @@ class ThreeXUIBackend(UserBackend):
 
     def get(self, label: str) -> dict[str, Any] | None:
         return state.get_user(label, self.users_index_path)
+
+    def purge(self, label: str) -> None:
+        """Panel-mode purge: del_client on the panel (best-effort) then
+        remove from the index. Idempotent — if the label isn't in the
+        index we still try the panel delete in case state drifted.
+        """
+        rec = state.get_user(label, self.users_index_path)
+        if rec is not None:
+            inbound = self._get_reality_inbound()
+            try:
+                self.client.del_client(inbound_id=inbound["id"], client_uuid=rec["reality_uuid"])
+            except ThreeXUIError:
+                # Already gone from the panel — keep going so the index
+                # gets the hard-delete regardless.
+                pass
+        state.purge_user(label, self.users_index_path)
+
+    def rotate(self, label: str, *, hysteria_password: str = "") -> dict[str, Any]:
+        """Panel-mode rotate: del_client old UUID + add_client with new
+        UUID, then patch the index. The label slot stays — operator
+        keeps the audit trail of when this user was first issued.
+        """
+        rec = state.get_user(label, self.users_index_path)
+        if rec is None:
+            raise state.StateError(f"user {label!r} not found in the index — use `add` instead")
+        inbound = self._get_reality_inbound()
+        # Best-effort delete of the old client. Tolerate "already gone"
+        # since panel state can drift.
+        try:
+            self.client.del_client(inbound_id=inbound["id"], client_uuid=rec["reality_uuid"])
+        except ThreeXUIError:
+            pass
+
+        new_uuid = str(uuid_mod.uuid4())
+        new_sub_token = _new_sub_token()
+        new_hy_pw = hysteria_password or rec.get("hysteria_password", "")
+
+        self.client.add_client_to_inbound(
+            inbound_id=inbound["id"],
+            client={
+                "id": new_uuid,
+                "flow": self.reality_flow,
+                "email": label,
+                "limitIp": 0,
+                "totalGB": 0,
+                "expiryTime": 0,
+                "enable": True,
+                "tgId": "",
+                "subId": "",
+                "reset": 0,
+            },
+        )
+        index = state.update_user(
+            label,
+            reality_uuid=new_uuid,
+            hysteria_password=new_hy_pw,
+            sub_token=new_sub_token,
+            enabled=True,
+            path=self.users_index_path,
+        )
+        return index["users"][label]

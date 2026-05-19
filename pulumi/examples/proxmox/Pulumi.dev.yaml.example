@@ -1,0 +1,28 @@
+# Copy to Pulumi.dev.yaml. Prefer
+#   pulumi config set --secret pmApiTokenSecret <value>
+# over editing this file directly.
+
+config:
+  stealth-vps-proxmox:pmApiUrl: https://pve1.lab.example.com:8006/api2/json
+  stealth-vps-proxmox:pmApiTokenId: root@pam!pulumi
+  stealth-vps-proxmox:pmApiTokenSecret:
+    secure: REPLACE-WITH-pulumi-config-set--secret-pmApiTokenSecret
+  stealth-vps-proxmox:pmTlsInsecure: true                  # set false when the API cert is real
+  stealth-vps-proxmox:node: pve1                            # Proxmox node hostname
+  stealth-vps-proxmox:vmid: 9100                            # numeric VM ID for the new VM
+  stealth-vps-proxmox:vmName: stealth-vps
+  stealth-vps-proxmox:cloneTemplate: 9000                   # vmid of the cloud-init-ready Debian 12 template
+  stealth-vps-proxmox:storage: local-lvm
+  stealth-vps-proxmox:snippetsStorage: local                # datastore-id that holds snippets (NOT a path)
+  stealth-vps-proxmox:cores: 2
+  stealth-vps-proxmox:memory: 2048
+  stealth-vps-proxmox:bridge: vmbr0
+  stealth-vps-proxmox:ipv4Cidr: dhcp                        # or "10.0.0.50/24" with ipv4Gateway
+  # stealth-vps-proxmox:ipv4Gateway: 10.0.0.1                # required when ipv4Cidr is static
+  stealth-vps-proxmox:ipv6Cidr: auto
+  stealth-vps-proxmox:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
+  stealth-vps-proxmox:sshPort: 22550
+  stealth-vps-proxmox:stealthVersion: v0.7.4
+  # stealth-vps-proxmox:domain: vpn.example.com
+  # stealth-vps-proxmox:letsencryptEmail: ops@example.com
+  stealth-vps-proxmox:realityDest: www.microsoft.com:443

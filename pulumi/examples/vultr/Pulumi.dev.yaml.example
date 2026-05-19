@@ -1,0 +1,19 @@
+# Copy to Pulumi.dev.yaml. Prefer `pulumi config set --secret vultrApiKey <value>`
+# over editing this file directly.
+
+config:
+  stealth-vps-vultr:vultrApiKey:
+    secure: REPLACE-WITH-pulumi-config-set--secret-vultrApiKey
+  stealth-vps-vultr:serverName: stealth-vps
+  stealth-vps-vultr:region: fra                            # fra/ams/lon/sea/atl/...
+  stealth-vps-vultr:plan: vc2-1c-1gb                       # ~$6/mo, amd64 only
+  stealth-vps-vultr:osId: 477                              # Debian 12 x64
+  stealth-vps-vultr:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
+  stealth-vps-vultr:sshPort: 22550
+  stealth-vps-vultr:stealthVersion: v0.7.4
+  # Optional LE:
+  # stealth-vps-vultr:domain: vpn.example.com
+  # stealth-vps-vultr:letsencryptEmail: ops@example.com
+  stealth-vps-vultr:realityDest: www.microsoft.com:443
+  stealth-vps-vultr:hysteriaPortHoppingMin: 49152
+  stealth-vps-vultr:hysteriaPortHoppingMax: 65535

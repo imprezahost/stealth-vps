@@ -1,0 +1,4 @@
+---
+name: stealth-vps-proxmox
+runtime: nodejs
+description: stealth-vps on Proxmox VE — Pulumi mirror of terraform/examples/proxmox/

@@ -1,0 +1,4 @@
+---
+name: stealth-vps-aws
+runtime: nodejs
+description: stealth-vps on AWS EC2 — Pulumi mirror of terraform/examples/aws/

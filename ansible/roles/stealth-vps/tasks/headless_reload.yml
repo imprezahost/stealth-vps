@@ -29,7 +29,11 @@
 # Mode 0640 (group=root) — file contains no secrets directly, but
 # referencing the state files is enough for an attacker to enumerate
 # the deploy. Keep it out of `cat /etc/stealth-vps/*` casual reads.
-- name: Persist reloader kwargs for the s-vps CLI
+- name: Persist reloader kwargs for the s-vps CLI  # noqa: jinja[spacing]
+  # Multi-line Jinja dict literal — same pattern (and noqa exemption) as
+  # the Compose-state tasks in reality_state.yml + users_index.yml.
+  # ansible-lint's jinja[spacing] expects single-line dict expressions,
+  # but flattening this loses readability for a 21-key blob.
   ansible.builtin.copy:
     content: "{{ {
       'users_index_path': stealth_vps_users_index_path,

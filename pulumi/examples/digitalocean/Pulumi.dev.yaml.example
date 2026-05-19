@@ -1,0 +1,19 @@
+# Copy to Pulumi.dev.yaml. Prefer `pulumi config set --secret doToken <value>`
+# over editing this file directly.
+
+config:
+  stealth-vps-digitalocean:doToken:
+    secure: REPLACE-WITH-pulumi-config-set--secret-doToken
+  stealth-vps-digitalocean:serverName: stealth-vps
+  stealth-vps-digitalocean:region: fra1                  # fra1/ams3/nyc3/sfo3/sgp1/...
+  stealth-vps-digitalocean:size: s-1vcpu-1gb             # ~$6/mo
+  stealth-vps-digitalocean:image: debian-12-x64
+  stealth-vps-digitalocean:sshPublicKeyPath: ~/.ssh/id_ed25519.pub
+  stealth-vps-digitalocean:sshPort: 22550
+  stealth-vps-digitalocean:stealthVersion: v0.7.4
+  # Optional LE — uncomment to enable:
+  # stealth-vps-digitalocean:domain: vpn.example.com
+  # stealth-vps-digitalocean:letsencryptEmail: ops@example.com
+  stealth-vps-digitalocean:realityDest: www.microsoft.com:443
+  stealth-vps-digitalocean:hysteriaPortHoppingMin: 49152
+  stealth-vps-digitalocean:hysteriaPortHoppingMax: 65535
