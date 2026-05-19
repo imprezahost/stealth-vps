@@ -31,14 +31,14 @@ write_files:
         - www.microsoft.com
       # Pin the on-disk version marker so `s-vps update` knows which tag
       # to re-deploy. release.sh keeps this in sync with the -C flag below.
-      stealth_vps_release_tag: "v0.8.0"
+      stealth_vps_release_tag: "v0.8.1"
 
 runcmd:
   - mkdir -p /var/log/stealth-vps
   - |
     ansible-pull \
       -U https://github.com/imprezahost/stealth-vps.git \
-      -C v0.8.0 \
+      -C v0.8.1 \
       -i 'localhost,' \
       -c local \
       -e "@/etc/stealth-vps/extra-vars.yml" \

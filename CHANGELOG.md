@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.8.1)
-- **CI parity with production**: a second molecule job using `python:3.12-slim`-based ansible-core 2.19 to catch the bug class the v0.7 hotfix train kept stepping on (alpine ansible behaves different than Debian/Ubuntu ansible).
-- **Bot module refactor for testability** — extract `_make_backend`/`_build_headless_reloader`/`_build_uris_for_user` from `stealth_vps_bot.py` into a `bot_core` submodule that doesn't import `telegram` at module level. Adds pytest coverage to the bot dispatch path.
-- **arm64 smoke pipeline** — provision a Hetzner CAX11 (ARM Ampere, ~€3.79/mo), register it as a second CI runner alongside the Tokyo amd64 one.
-- **zh-CN docs sync** by the maintainer (community native review remains a v1.0 goal).
-
 ### Planned (v0.9.0)
 - **Encrypted backup/restore** via `age`: `s-vps backup` produces `stealth-vps-backup-<host>-<ts>.tar.gz.age`, `s-vps restore <file>` validates + extracts. Operator-supplied public key in installer.env; optional daily systemd timer.
 - **Continuous health-check Prometheus exporter** on `:9102` — turns `s-vps diagnose`'s checks into always-on gauges (`stealth_vps_panel_up`, `stealth_vps_cert_days_remaining`, etc.) so operators can alert *before* something breaks.
@@ -40,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Signed releases (cosign + GPG).
 - External security audit.
+
+## [0.8.1] - 2026-05-19
+
+Twenty-eighth tagged release. No new operator-facing features — purely preventive / quality work. The headline change: **a second molecule job pinned at `ansible-core>=2.19` runs alongside the existing `2.14-2.17` job on every push**, catching the bug class that bit the v0.7 hotfix train.
+
+### Added
+
+- **`molecule-newer` CI job** at `ansible-core>=2.19,<3.0` (matches Tokyo's Debian 12.9 + ansible-core 2.19 — what production hosts upgrade to). Runs the same `default` + `headless` scenarios as the existing `molecule` job (which stays pinned at `2.14-2.17` for older Debian / Ubuntu LTS coverage). Both share `*molecule-base` + `*molecule-pre` + `*molecule-run` YAML anchors so the duplication is minimal. The new job immediately caught two `when:` regressions that ansible 2.19's stricter conditional evaluation refuses but 2.14-2.17 silently tolerated — see Fixed below.
+- **`stealth_vps/bot_core.py`** — 295 LOC module hosting the testable dispatch + URI rendering logic that previously lived inline in `files/bot/stealth_vps_bot.py`. Public surface: `BotConfig` + `UriRenderConfig` dataclasses, `make_backend`, `build_headless_reloader`, `backend_is_headless`, `build_uris_for_user`, `sub_url_for`, `collect_seed_hysteria_password`. The Telegram entry point becomes a thin async dispatcher that packs env vars into the typed configs and delegates.
+- **20 new pytest cases** in `tests/python-pkg/test_bot_core.py` covering: backend dispatch on panel.state.yml presence (3 cases including missing-credentials fail-loud), `build_headless_reloader` CSV servernames coercion + missing-file fallback + malformed-JSON fail-loud + use_sudo passthrough, URI rendering for both backends (port-hop range, insecure flag toggling on no-domain), `sub_url_for` trailing-slash handling, `collect_seed_hysteria_password` first-non-empty / missing-index. 214 pytest pass total (was 194 after v0.8.0).
+- **arm64 smoke runbook** in `docs/operations.md` — the concrete CLI cycle (add → rotate → purge) operators run on a freshly provisioned arm64 host (Hetzner CAX, Oracle Ampere, AWS Graviton). Documents the `Xray-linux-arm64-v8a` archive-naming quirk (already handled by the role's arch map). Registering an arm64 CI runner is a separate operator step.
+- **`README.zh-CN.md` roadmap table** catches up to v0.8.0 — adds rows for v0.5.9/v0.6.x/v0.7.x/v0.8.0 + every planned block through v1.0. Translation by the maintainer; community native review still slated for v1.0.
+
+### Fixed
+
+- **Bare-variable `when:` clauses crashed on ansible-core 2.19's strict conditional evaluation.** `when: stealth_vps_domain` and `when: not stealth_vps_domain` (7 callsites in `tls.yml`, `hysteria.yml`, `panel.yml`) raised `Conditional result (False) was derived from value of type 'NoneType'` when `stealth_vps_domain` was YAML `null` (the default when the operator doesn't set a domain). Rewrote as `when: stealth_vps_domain | default('', true) | length > 0` — `default('', true)` substitutes for None too (vs plain `default('')` which only catches undefined), giving the `| length` filter a real string to work with. Pure-boolean output, identical semantics on both ansible-core branches.
+- **Caught by the new `molecule-newer` job on the same MR that introduced it** — exactly the bug class the parity job is designed to surface. v0.7.0-v0.7.3's regression train would have been caught earlier if the parity job had existed then.
 
 ## [0.8.0] - 2026-05-19
 

@@ -1,10 +1,10 @@
 # stealth-vps
 
-> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x / v0.7 / v0.8 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.8.0),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
+> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x / v0.6.x / v0.7 / v0.8 起新增的功能尚未同步到中文版。安装命令链接已更新到当前 release(v0.8.1),但功能描述、roadmap 表格等仍停留在 v0.5.1 时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
 
 ---
 
-> **状态: v0.8.0(alpha)。** 当前版本继续包含 v0.5.x / v0.6.x / v0.7 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板或无面板模式、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点)。**v0.8 新增运维工具集 + IaC 三件套**:`s-vps user purge LABEL`(硬删除,幂等)+ `s-vps user rotate LABEL`(重新颁发凭据,保留 label + created_at 审计锚点)。Pulumi 新增 AWS / DigitalOcean / Vultr / Proxmox VE 四个示例,与 Terraform 示例树完全对应。**独立的 Python 和 Go cloud-init builder**(`tools/cloud-init-builder/`)— 纯标准库,与 TypeScript 源代码字节级一致,可嵌入任意 IaC 工具链。**工具链共有 213 个自动化测试**(194 pytest + 9 Python builder + 10 Go builder)。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/headless-mode.md](docs/headless-mode.md)。
+> **状态: v0.8.1(alpha)。** 当前版本继续包含 v0.5.x / v0.6.x / v0.7 所有基线功能(VLESS-Reality + Hysteria2、3X-UI 面板或无面板模式、Let's Encrypt 自动签发、SSH/UFW/fail2ban 加固、Spamhaus DROP、内核调优、amd64+arm64、Prometheus 可观测性、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点)。**v0.8 新增运维工具集 + IaC 三件套**:`s-vps user purge LABEL`(硬删除,幂等)+ `s-vps user rotate LABEL`(重新颁发凭据,保留 label + created_at 审计锚点)。Pulumi 新增 AWS / DigitalOcean / Vultr / Proxmox VE 四个示例,与 Terraform 示例树完全对应。**独立的 Python 和 Go cloud-init builder**(`tools/cloud-init-builder/`)— 纯标准库,与 TypeScript 源代码字节级一致,可嵌入任意 IaC 工具链。**工具链共有 213 个自动化测试**(194 pytest + 9 Python builder + 10 Go builder)。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/headless-mode.md](docs/headless-mode.md)。
 
 一个可复用的工具集,用于在受限网络环境中搭建注重隐私的 VPS。在 3X-UI 面板背后部署 VLESS-Reality + Hysteria2,带合理的安全加固、真正可用的 fail2ban 配置,以及内置的可观测性方案。
 
@@ -51,14 +51,14 @@
 适合一台刚开通、只想跑起来的 VPS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.1/scripts/install.sh | bash
 ```
 
 这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.6.4 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.0/scripts/install.sh \
-  | STEALTH_VERSION=v0.8.0 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.1/scripts/install.sh \
+  | STEALTH_VERSION=v0.8.1 bash
 ```
 
 ### 2. Ansible(推荐用于可重复部署)
@@ -81,9 +81,9 @@ Provider-agnostic —— 从类型化的 HCL 输入(SSH 公钥、域名、版本
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.8.0"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.8.1"
 
-  stealth_version = "v0.8.0"
+  stealth_version = "v0.8.1"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
@@ -139,7 +139,7 @@ Hetzner Cloud 的端到端示例位于 [`terraform/examples/hetzner/`](terraform
 | v0.6.1 - v0.6.4 | **东京 VPS 烟雾测试驱动的 bug 修复**:面板 scheme 自动探测、`installer.env` ternary 修复、健康检查从 state 文件读端口、Hysteria UDP 端口监听检查的 `ss` 列号 bug | 已发布 2026-05-15 / 18 |
 | v0.7.0 - v0.7.4 | **无面板模式(Headless mode)**:`panel_enabled=false` 时角色安装独立 Xray-core systemd unit + Hysteria2 每用户 `auth.userpass`。`stealth_vps.reloader` Python 模块从 `users.index.json` 重新渲染配置并重启服务。新增 `s-vps user add/revoke/list/show`、`s-vps reload`、`s-vps migrate from-3xui` CLI 动作。Telegram 机器人在 v0.7.4 接入 HeadlessBackend 派发 + sudoers 细粒度规则。v0.7.1/v0.7.2/v0.7.3 修复了东京 VPS 烟雾测试中暴露的回归(xray validate `-format=json`、installer.env 环境变量覆盖、xray + hysteria 都需要 restart 而非 reload)。 | 已发布 2026-05-18 / 19 |
 | **v0.8.0** | **运维 UX + IaC 三件套**:`s-vps user purge`(硬删除,幂等)+ `s-vps user rotate`(重新颁发凭据,保留 label + created_at 审计锚点)。Pulumi 新增 AWS / DigitalOcean / Vultr / Proxmox VE 四个端到端示例。独立的 **Python 和 Go cloud-init builder** 端口(`tools/cloud-init-builder/`)— 纯标准库,与 TypeScript 源代码字节级一致。CI 新增 `go-test` 任务。工具链共有 213 个自动化测试。 | **已发布 2026-05-19** |
-| v0.8.1 | CI 与生产环境对齐(Debian + ansible-core 2.19 第二个 molecule 任务)、机器人模块重构使其可测试(提取 `bot_core` 子模块)、arm64 测试机器准备(Hetzner CAX11)、zh-CN 文档同步 | 计划中 |
+| **v0.8.1** | **CI 与生产环境对齐 + 机器人重构**:新增 `molecule-newer` 任务(`ansible-core>=2.19,<3.0`,与东京 VPS 一致)与现有 `2.14-2.17` 任务并行运行,在同一个 MR 中就捕获了 7 处 `when:` 条件的 NoneType 问题。从机器人模块抽出 `stealth_vps/bot_core.py`(295 LOC)使派发逻辑可在没有 `python-telegram-bot` 的测试环境中运行;新增 20 个 pytest 用例(共 214 个)。`docs/operations.md` 新增 arm64 烟雾测试 runbook;zh-CN 文档同步到 v0.8.0+。工具链共 **233 个自动化测试**。 | **已发布 2026-05-19** |
 | v0.9.0 | `age` 加密备份/恢复、持续健康检查 Prometheus exporter、订阅 TTL、可选自动更新 | 计划中 |
 | v0.10.0 | **多节点**:控制平面通过 SSH 推送 `users.index.json` 到 N 个数据节点,每节点独立的 Reality 密钥,订阅 bundle 包含所有节点的 URIs | 计划中 |
 | v0.11.0 | WireGuard 回退 + Xray 协议扩展(XHTTP、VMess+WS、Trojan-Go、SS-2022) | 计划中 |
