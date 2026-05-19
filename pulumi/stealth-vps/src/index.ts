@@ -17,7 +17,7 @@
 export interface StealthVpsArgs {
   /**
    * Release tag of stealth-vps to pin the cloud-init bootstrap to.
-   * Must match `^v\d+\.\d+\.\d+(-[a-z0-9.]+)?$`. Default: "v0.7.3".
+   * Must match `^v\d+\.\d+\.\d+(-[a-z0-9.]+)?$`. Default: "v0.7.4".
    */
   stealthVersion?: string;
 
@@ -82,7 +82,7 @@ export interface StealthVpsArgs {
 }
 
 const DEFAULTS = {
-  stealthVersion: "v0.7.3",
+  stealthVersion: "v0.7.4",
   sshPort: 22550,
   realityDest: "www.microsoft.com:443",
   realityServernames: ["www.microsoft.com"],
@@ -98,7 +98,7 @@ function validate(args: StealthVpsArgs): void {
   const version = args.stealthVersion ?? DEFAULTS.stealthVersion;
   if (!SEMVER_TAG_RE.test(version)) {
     throw new Error(
-      `stealthVersion must be a SemVer tag like 'v0.7.3' or 'v0.7.3-rc.1', got: ${version}`
+      `stealthVersion must be a SemVer tag like 'v0.7.4' or 'v0.7.4-rc.1', got: ${version}`
     );
   }
 

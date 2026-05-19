@@ -168,10 +168,12 @@ At least one client should reconnect successfully (test on a phone client or `xr
 
 ## Telegram bot users
 
-The bot's `/user add` and `/sub` endpoints are panel-mode-only in v0.7.0. If your operations depend on the bot, **stay on panel mode** until v0.7.1, which ships the bot's HeadlessBackend integration. Headless-mode bot will:
+`/user add` / `/user revoke` / `/sub` work transparently in headless mode starting with **v0.7.4**. The bot dispatches on `panel.state.yml` presence at every command (same `select_backend()` rule as the CLI), so after `s-vps migrate from-3xui` + the headless converge the next `/user add` Telegram message:
 
-1. Detect the absence of `panel.state.yml` at startup (same `select_backend()` rule the CLI uses).
-2. Route `/user add` through `HeadlessBackend.add` instead of `ThreeXUIBackend.add`.
-3. Wire the same reloader the CLI uses.
+1. Detects `panel.state.yml` is gone → constructs `HeadlessBackend` instead of `ThreeXUIBackend`.
+2. Mutates `users.index.json` (atomic write).
+3. Calls `Reloader(use_sudo=True)` to re-render `/etc/xray/config.json` + `/etc/hysteria/config.yaml` and run `sudo -n systemctl restart xray.service hysteria-server.service`. The sudoers rule the role drops at `/etc/sudoers.d/stealth-vps-bot-reloader` grants exactly those two restart commands NOPASSWD — no other privileges leak to the bot user.
 
-The state file format doesn't change between v0.7.0 and v0.7.1, so an early-adopter on v0.7.0 can upgrade to v0.7.1 in place without re-running migration.
+Operators on v0.7.0–v0.7.3 who relied on the bot in panel mode should update straight to v0.7.4 before flipping to headless mode (the migration runbook works on v0.7.3 too, but the bot would have refused `/user add` in headless mode there).
+
+The state file format doesn't change between v0.7.x releases, so an early-adopter on v0.7.0 can `s-vps update v0.7.4` in place without re-running migration.
