@@ -242,8 +242,35 @@ Caveats specific to arm64 hosts:
 
 - **3X-UI panel arm64 tarball** comes from the same `MHSanaei/3x-ui` release pin (`stealth_vps_panel_version`). Verified to publish `x-ui-linux-arm64.tar.gz` for every release the role currently pins to.
 - **Hysteria2 arm64 binary** is published per release at `apernet/hysteria` as `hysteria-linux-arm64`. No source build needed.
+- **Xray-core arm64 archive** is `Xray-linux-arm64-v8a.zip` upstream (vs `Xray-linux-64.zip` for amd64). The role's `tasks/reality_xray_binary.yml` maps the arch automatically — operators don't see the naming quirk.
 - **Kernel BBR** works the same on arm64 as on amd64 — the `tcp_bbr` module is in the standard Debian/Ubuntu arm64 kernel.
 - **Molecule scenario** still runs only on amd64 in CI; arm64 hosts get validated manually until we add an arm64 runner. See `tests/README.md`.
+
+### arm64 smoke runbook
+
+When provisioning a new arm64 host (Hetzner CAX, Oracle Ampere, AWS Graviton, RPi-class), the validation sequence is identical to amd64 — only the host base changes:
+
+```bash
+# On a fresh Debian 12 / Ubuntu 24.04 arm64 host:
+curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.1/scripts/install.sh \
+    | sudo bash
+
+# Confirm the role picked the right binaries:
+sudo file /usr/local/bin/xray | grep -q "aarch64" && echo "✓ xray arm64"
+sudo file /usr/local/bin/hysteria | grep -q "aarch64" && echo "✓ hysteria arm64"
+
+# Standard post-deploy health check:
+sudo s-vps diagnose
+sudo s-vps status
+
+# Test the full mutation cycle (headless mode):
+sudo s-vps user add testuser
+sudo s-vps user rotate testuser
+sudo s-vps user purge testuser
+sudo s-vps user list                     # confirm testuser is gone
+```
+
+All three CLI verbs (add/rotate/purge) hit the same code paths as on amd64 — no arch-specific logic. The Reloader uses `subprocess.run(["systemctl", ...])`, the index is platform-agnostic JSON, and the Reality/Hysteria binaries are upstream's native arm64 builds. If anything fails differently on arm64 vs amd64, please file an issue with `uname -a` + the bootstrap log.
 
 ---
 

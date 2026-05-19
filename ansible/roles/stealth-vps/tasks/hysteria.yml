@@ -152,7 +152,7 @@
   ansible.builtin.stat:
     path: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
   register: stealth_vps_hysteria_cert_stat
-  when: not stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length == 0
   tags: [hysteria, hysteria2]
 
 - name: Generate self-signed TLS cert (CN={{ stealth_vps_hysteria_cert_cn }})
@@ -177,7 +177,7 @@
     # `cert_stat.stat.exists` check AND satisfies ansible-lint's
     # no-changed-when (the module derives changed_when from creates).
     creates: "{{ stealth_vps_hysteria_config_dir }}/cert.crt"
-  when: not stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length == 0
   tags: [hysteria, hysteria2]
 
 - name: Set self-signed cert ownership + permissions
@@ -189,7 +189,7 @@
   loop:
     - { path: "{{ stealth_vps_hysteria_config_dir }}/cert.crt", mode: '0644' }
     - { path: "{{ stealth_vps_hysteria_config_dir }}/cert.key", mode: '0600' }
-  when: not stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length == 0
   tags: [hysteria, hysteria2]
 
 - name: Grant hysteria user access to the TLS dir + private key
@@ -207,7 +207,7 @@
   loop:
     - "{{ stealth_vps_tls_dir }}"
     - "{{ stealth_vps_tls_dir }}/privkey.pem"
-  when: stealth_vps_domain
+  when: stealth_vps_domain | default('', true) | length > 0
   register: stealth_vps_hysteria_tls_perms
   tags: [hysteria, hysteria2]
 
@@ -238,7 +238,7 @@
   when: >-
     stealth_vps_hysteria_installed_version.rc != 0
     or stealth_vps_hysteria_version | regex_replace('^app/', '')
-       not in (stealth_vps_hysteria_installed_version.stdout | default(''))
+       not in (stealth_vps_hysteria_installed_version.stdout | default('', true))
   tags: [hysteria, hysteria2]
   block:
 

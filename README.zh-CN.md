@@ -133,8 +133,19 @@ Hetzner Cloud 的端到端示例位于 [`terraform/examples/hetzner/`](terraform
 | v0.4.3 | iOS + macOS 端到端 pen-test 验证、zh-CN README 重写、GitLab shell-executor runner 修复 | 进行中 |
 | v0.5.0 | Provider-agnostic Terraform 模块(`terraform/modules/stealth-vps/`)+ Hetzner Cloud 端到端示例;cloud-init 版本漂移修复(`v0.1.0 → v0.5.0`);README"三种方式"→"四种方式",新增 Terraform 路径 | 已发布 2026-05-13 |
 | **v0.5.1** | `tls_fingerprint_compare.py` 中通过 stdlib `ssl.MemoryBIO` 实现的字节级 **JA3 + JA3S**(无需 scapy / tlslite-ng 依赖);纯 stdlib TLS record + handshake 解析器;场景 02 文档明确 JA3 vs JA3S 语义和 TLS 1.3 `EncryptedExtensions` 的限制 | **已发布 2026-05-14** |
-| v0.5.x | JA4 + JA4S(FoxIO 2023+ 规范)、HTTP/2 SETTINGS 帧比对、更多 Terraform 示例(AWS / DigitalOcean / Vultr / Proxmox)、Pulumi 参考实现 | 计划中 |
-| v1.0.0 | 完整的 probe-resistance CI 套件、签名发布、安全审计 | 远期 |
+| v0.5.x | JA4 + JA4S(FoxIO 2023+ 规范)、HTTP/2 SETTINGS 帧比对、更多 Terraform 示例(AWS / DigitalOcean / Vultr / Proxmox)、Pulumi 参考实现 | 已发布 2026-05-14 (v0.5.8) |
+| v0.5.9 | **v0.6 前置准备**:版本号一次性同步脚本 `scripts/release.sh`、`xray.yml` 拆分为面板无关 + 面板专用以为 v0.7 无面板模式铺路 | 已发布 2026-05-15 |
+| v0.6.0 | **Caminho C 全 UX**:交互式 whiptail 安装器、Reality URI 终端 QR、LE 前 DNS 预检、部署后 ✓/✗/⚠ 健康检查、`s-vps` 运维 CLI、可选 Telegram 机器人、可选 Caddy 订阅端点、`users.index.json` schema | 已发布 2026-05-15 |
+| v0.6.1 - v0.6.4 | **东京 VPS 烟雾测试驱动的 bug 修复**:面板 scheme 自动探测、`installer.env` ternary 修复、健康检查从 state 文件读端口、Hysteria UDP 端口监听检查的 `ss` 列号 bug | 已发布 2026-05-15 / 18 |
+| v0.7.0 - v0.7.4 | **无面板模式(Headless mode)**:`panel_enabled=false` 时角色安装独立 Xray-core systemd unit + Hysteria2 每用户 `auth.userpass`。`stealth_vps.reloader` Python 模块从 `users.index.json` 重新渲染配置并重启服务。新增 `s-vps user add/revoke/list/show`、`s-vps reload`、`s-vps migrate from-3xui` CLI 动作。Telegram 机器人在 v0.7.4 接入 HeadlessBackend 派发 + sudoers 细粒度规则。v0.7.1/v0.7.2/v0.7.3 修复了东京 VPS 烟雾测试中暴露的回归(xray validate `-format=json`、installer.env 环境变量覆盖、xray + hysteria 都需要 restart 而非 reload)。 | 已发布 2026-05-18 / 19 |
+| **v0.8.0** | **运维 UX + IaC 三件套**:`s-vps user purge`(硬删除,幂等)+ `s-vps user rotate`(重新颁发凭据,保留 label + created_at 审计锚点)。Pulumi 新增 AWS / DigitalOcean / Vultr / Proxmox VE 四个端到端示例。独立的 **Python 和 Go cloud-init builder** 端口(`tools/cloud-init-builder/`)— 纯标准库,与 TypeScript 源代码字节级一致。CI 新增 `go-test` 任务。工具链共有 213 个自动化测试。 | **已发布 2026-05-19** |
+| v0.8.1 | CI 与生产环境对齐(Debian + ansible-core 2.19 第二个 molecule 任务)、机器人模块重构使其可测试(提取 `bot_core` 子模块)、arm64 测试机器准备(Hetzner CAX11)、zh-CN 文档同步 | 计划中 |
+| v0.9.0 | `age` 加密备份/恢复、持续健康检查 Prometheus exporter、订阅 TTL、可选自动更新 | 计划中 |
+| v0.10.0 | **多节点**:控制平面通过 SSH 推送 `users.index.json` 到 N 个数据节点,每节点独立的 Reality 密钥,订阅 bundle 包含所有节点的 URIs | 计划中 |
+| v0.11.0 | WireGuard 回退 + Xray 协议扩展(XHTTP、VMess+WS、Trojan-Go、SS-2022) | 计划中 |
+| v0.12.0 | 订阅 bridge 网页 UI(检测客户端 + 显示 QR + 深链 Hiddify Next / V2Box / NekoBox) | 计划中 |
+| v0.13.0 / v0.14.0 | **原生 Android 客户端**(Kotlin),然后 **iOS**(Swift)。从零构建,不依赖第三方 fork | 远期 |
+| v1.0.0 | 完整的 probe-resistance CI 套件(JA4 + JA4S + 黄金快照)、签名发布(cosign + GPG)、外部安全审计、zh-CN 母语审校 | 远期 |
 
 实际发布进度以 [CHANGELOG](CHANGELOG.md) 为准。
 
