@@ -1,0 +1,113 @@
+---
+# Molecule prepare — runs once after containers come up.
+#
+# What we do:
+#   1. Common prep (openssh-server, /run/sshd) — same as default scenario.
+#   2. Start sshd on the data nodes so the control's `ssh` calls work.
+#   3. Pre-generate the control → data SSH keys so the verify-step
+#      `s-vps fleet add --yes` doesn't need an interactive paste step.
+#   4. Pre-install matching pubkeys on each data node's authorized_keys
+#      in BARE form. `fleet add` will tighten it to the restricted
+#      command= form during the add workflow.
+#
+# Why pre-generate the keys here (vs. having `fleet add` do it):
+# `fleet add` includes an `input("Press Enter when installed... ")`
+# prompt that --yes skips, but the pubkey still has to be on the data
+# node BEFORE the probe step. We pre-stage it from the test runner
+# (which has SSH access to both via Docker's bridge network).
+
+- name: Prepare every container (openssh-server)
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install openssh-server so the role's `sshd -t` validation works
+      ansible.builtin.apt:
+        name: openssh-server
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create sshd privsep dir (/run is tmpfs)
+      ansible.builtin.file:
+        path: /run/sshd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Ensure sshd is running so the control can SSH into data nodes
+      ansible.builtin.service:
+        name: ssh
+        state: started
+        enabled: true
+
+    - name: Ensure /root/.ssh exists
+      ansible.builtin.file:
+        path: /root/.ssh
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+# --- Control-side: pre-generate keys for each data node ---------------------
+
+- name: Pre-generate fleet SSH keys on the control
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Ensure /etc/stealth-vps/keys exists
+      ansible.builtin.file:
+        path: /etc/stealth-vps/keys
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Generate ed25519 keys for data nodes
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N "" -C control_to_{{ item }}
+          -f /etc/stealth-vps/keys/control_to_{{ item }}.ed25519
+        creates: /etc/stealth-vps/keys/control_to_{{ item }}.ed25519
+      loop:
+        - data-1
+        - data-2
+
+    - name: Slurp each pubkey so we can push it to the matching data node
+      ansible.builtin.slurp:
+        src: "/etc/stealth-vps/keys/control_to_{{ item }}.ed25519.pub"
+      register: control_pubkeys
+      loop:
+        - data-1
+        - data-2
+
+    - name: Stash pubkeys as facts so the data-node play can read them
+      ansible.builtin.set_fact:
+        control_pubkey_data_1: "{{ control_pubkeys.results[0].content | b64decode | trim }}"
+        control_pubkey_data_2: "{{ control_pubkeys.results[1].content | b64decode | trim }}"
+
+# --- Data-side: install matching pubkey in bare authorized_keys form -------
+
+- name: Install control's pubkey on each data node's authorized_keys
+  hosts: data
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Determine which control pubkey applies to this data node
+      ansible.builtin.set_fact:
+        my_control_pubkey: >-
+          {{
+            hostvars['stealth-vps-control']['control_pubkey_data_1']
+            if inventory_hostname == 'stealth-vps-data-1'
+            else hostvars['stealth-vps-control']['control_pubkey_data_2']
+          }}
+
+    - name: Append control's pubkey to /root/.ssh/authorized_keys (BARE form)
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ my_control_pubkey }}"
+        # `fleet add` will rewrite this entry into the restricted
+        # `command="s-vps fleet-receive"` form during the verify step.

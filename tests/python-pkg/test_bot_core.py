@@ -43,11 +43,19 @@ def cfg(tmp_path: pathlib.Path, users_index_path: str) -> bot_core.BotConfig:
     fields are EMPTY by default so make_backend takes the headless
     branch; tests that want panel mode write a panel.state.yml + set
     PANEL_* and re-construct the config.
+
+    reality_state_path is seeded with a placeholder file so
+    `is_control_mode` returns False — these legacy tests assume the
+    headless-with-Reloader path. Control-mode tests `unlink()` the
+    file as part of setup.
     """
+    reality_state = tmp_path / "reality.state.yml"
+    reality_state.write_text("port: 51820\n", encoding="utf-8")
     return bot_core.BotConfig(
         users_index_path=users_index_path,
         panel_state_path=str(tmp_path / "panel.state.yml"),
         reloader_args_path=str(tmp_path / "reloader-args.json"),
+        reality_state_path=str(reality_state),
     )
 
 
@@ -343,3 +351,217 @@ def test_collect_seed_hysteria_password_missing_index_returns_empty(
     proceed without). Doesn't raise — defensive against very-fresh
     installs."""
     assert bot_core.collect_seed_hysteria_password(str(tmp_path / "missing.json")) == ""
+
+
+# ---------------------------------------------------------------------------
+# Multi-node URI rendering (v0.10.0+)
+# ---------------------------------------------------------------------------
+
+
+def _make_node(node_id: str, **overrides) -> "stealth_vps.fleet.FleetNode":  # type: ignore[name-defined]
+    """Helper: build a FleetNode with sane defaults; overrides take
+    precedence so each test can be precise about what it's exercising."""
+    from stealth_vps.fleet import FleetNode
+    defaults = dict(
+        node_id=node_id,
+        ssh_host=f"{node_id}.example.com",
+        ssh_port=22,
+        ssh_user="root",
+        ssh_key_path=f"/keys/control_to_{node_id}.ed25519",
+        reality_public_key=f"PUBKEY-{node_id}",
+        reality_short_id=f"sid{node_id[-1]}",
+        reality_port=43338,
+        reality_servernames=["www.microsoft.com"],
+        hysteria_port=49440,
+        hysteria_obfs_password="OBFSPW",
+        public_host=None,
+        domain="example.com",
+        added_at="2026-05-21T10:00:00Z",
+    )
+    defaults.update(overrides)
+    return FleetNode(**defaults)
+
+
+def test_uri_config_from_node_basic_fields() -> None:
+    from stealth_vps import bot_core
+    node = _make_node("tokyo-1")
+    cfg = bot_core.uri_config_from_node(node)
+    # Public endpoint defaults to ssh_host when public_host is None.
+    assert cfg.public_host == "tokyo-1.example.com"
+    assert cfg.reality_port == 43338
+    assert cfg.reality_sni == "www.microsoft.com"     # first servername
+    assert cfg.reality_pubkey == "PUBKEY-tokyo-1"
+    assert cfg.reality_short_id == "sid1"
+    assert cfg.hysteria_enabled is True
+    assert cfg.hysteria_port == 49440
+    # Domain is set → insecure should be False.
+    assert cfg.hysteria_insecure is False
+
+
+def test_uri_config_from_node_uses_public_host_when_set() -> None:
+    from stealth_vps import bot_core
+    node = _make_node("tokyo-1", public_host="tokyo.cdn.example.com")
+    cfg = bot_core.uri_config_from_node(node)
+    assert cfg.public_host == "tokyo.cdn.example.com"
+
+
+def test_uri_config_from_node_no_domain_flips_insecure() -> None:
+    """IP-only data nodes (no LE domain) get insecure=1 in the
+    Hysteria URI so clients accept the self-signed cert."""
+    from stealth_vps import bot_core
+    node = _make_node("ip-only", domain="")
+    cfg = bot_core.uri_config_from_node(node)
+    assert cfg.hysteria_insecure is True
+
+
+def test_uri_config_from_node_no_hysteria_port_disables_hysteria() -> None:
+    """Single-protocol Reality-only nodes (hysteria disabled) don't
+    emit Hysteria URIs."""
+    from stealth_vps import bot_core
+    node = _make_node("reality-only", hysteria_port=0)
+    cfg = bot_core.uri_config_from_node(node)
+    assert cfg.hysteria_enabled is False
+
+
+def test_uri_config_from_node_falls_back_to_endpoint_for_sni() -> None:
+    """When `reality_servernames` is empty (shouldn't happen in
+    practice, but defend against partial files), the SNI falls back
+    to the public endpoint so URIs are at least well-formed."""
+    from stealth_vps import bot_core
+    node = _make_node("partial", reality_servernames=[])
+    cfg = bot_core.uri_config_from_node(node)
+    assert cfg.reality_sni == node.public_endpoint
+
+
+def test_build_uris_for_user_multinode_emits_per_node_uris() -> None:
+    """2 nodes × 2 protocols = 4 URIs, per-node Reality keys baked in."""
+    from stealth_vps import bot_core
+    nodes = [
+        _make_node("amsterdam-1"),
+        _make_node("tokyo-1"),
+    ]
+    rec = {
+        "reality_uuid": "00000000-0000-0000-0000-000000000001",
+        "hysteria_password": "hy2-pw",
+    }
+    uris = bot_core.build_uris_for_user_multinode(rec, nodes, label="alice")
+    assert len(uris) == 4
+    # Order is iteration order — alphabetic since `load_fleet` sorts.
+    # Reality URIs come before Hysteria for each node.
+    assert uris[0].startswith("vless://")
+    assert "amsterdam-1.example.com" in uris[0]
+    assert "PUBKEY-amsterdam-1" in uris[0]
+    assert "stealth-vps-reality-alice-amsterdam-1" in uris[0]
+
+    assert uris[1].startswith("hysteria2://")
+    assert "amsterdam-1.example.com" in uris[1]
+    assert "stealth-vps-hysteria2-alice-amsterdam-1" in uris[1]
+
+    assert uris[2].startswith("vless://")
+    assert "tokyo-1.example.com" in uris[2]
+    assert "PUBKEY-tokyo-1" in uris[2]
+    assert "stealth-vps-reality-alice-tokyo-1" in uris[2]
+
+    assert uris[3].startswith("hysteria2://")
+    assert "tokyo-1.example.com" in uris[3]
+
+
+def test_build_uris_for_user_multinode_without_label() -> None:
+    """When no label is passed, remark uses just `-<node_id>` suffix."""
+    from stealth_vps import bot_core
+    nodes = [_make_node("solo")]
+    rec = {"reality_uuid": "u", "hysteria_password": "p"}
+    uris = bot_core.build_uris_for_user_multinode(rec, nodes)
+    assert "stealth-vps-reality-solo" in uris[0]
+    assert "-alice-solo" not in uris[0]
+
+
+def test_build_uris_for_user_multinode_skips_hysteria_on_reality_only_nodes() -> None:
+    """Mix of full (Reality+Hysteria) and Reality-only nodes — bundle
+    has 3 URIs (full=2, reality-only=1), not 4."""
+    from stealth_vps import bot_core
+    nodes = [
+        _make_node("a", hysteria_port=0),    # Reality-only
+        _make_node("b"),                       # full
+    ]
+    rec = {"reality_uuid": "u", "hysteria_password": "p"}
+    uris = bot_core.build_uris_for_user_multinode(rec, nodes)
+    assert len(uris) == 3
+    # First URI is from `a` (sorted), Reality only.
+    assert uris[0].startswith("vless://")
+    assert "stealth-vps-reality-a" in uris[0]
+    # Next two are from `b` (Reality + Hysteria).
+    assert uris[1].startswith("vless://")
+    assert "stealth-vps-reality-b" in uris[1]
+    assert uris[2].startswith("hysteria2://")
+    assert "stealth-vps-hysteria2-b" in uris[2]
+
+
+def test_build_uris_for_user_multinode_empty_fleet_returns_empty() -> None:
+    from stealth_vps import bot_core
+    assert bot_core.build_uris_for_user_multinode({"reality_uuid": "u"}, []) == []
+
+
+def test_build_uris_for_user_multinode_skips_hysteria_when_user_has_no_pw() -> None:
+    """A user with hysteria_password='' (e.g. created with --hysteria-password
+    explicitly cleared, or a panel-mode mirror) shouldn't get Hysteria URIs
+    even when the node terminates Hysteria. Matches `build_uris_for_user`'s
+    existing single-node behaviour."""
+    from stealth_vps import bot_core
+    nodes = [_make_node("n1")]
+    rec = {"reality_uuid": "u", "hysteria_password": ""}
+    uris = bot_core.build_uris_for_user_multinode(rec, nodes)
+    assert len(uris) == 1
+    assert uris[0].startswith("vless://")
+
+
+# ---------------------------------------------------------------------------
+# is_control_mode + make_backend control branch (v0.10.0+)
+# ---------------------------------------------------------------------------
+
+
+def test_is_control_mode_true_when_reality_state_absent(
+    cfg: bot_core.BotConfig,
+) -> None:
+    """Default cfg has reality.state.yml present → False. Remove it → True."""
+    assert bot_core.is_control_mode(cfg) is False
+    pathlib.Path(cfg.reality_state_path).unlink()
+    assert bot_core.is_control_mode(cfg) is True
+
+
+def test_make_backend_control_mode_returns_headless_without_reloader(
+    cfg: bot_core.BotConfig, tmp_path: pathlib.Path
+) -> None:
+    """Control box: reality.state.yml absent → HeadlessBackend with
+    reloader=None (its `_noop_reloader` fallback). The presence of
+    `reloader_args.json` doesn't matter — control mode skips that path
+    entirely so missing reloader-args.json doesn't crash."""
+    pathlib.Path(cfg.reality_state_path).unlink()
+    backend = bot_core.make_backend(cfg)
+    assert isinstance(backend, HeadlessBackend)
+    # _noop_reloader is what HeadlessBackend falls back to when reloader=None.
+    # We can't compare directly (it's an instance attribute) but we can
+    # verify calling .reloader() does nothing.
+    backend.reloader()   # should not raise
+
+
+def test_build_uris_for_user_multinode_round_trip_through_subscription_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """End-to-end: build URIs → write subscription file → base64-decode
+    → assert each URI appears in the decoded body. Sanity that the
+    existing `subscription.write_subscription_file` doesn't need
+    multi-node-specific changes."""
+    import base64
+    from stealth_vps import bot_core, subscription
+
+    nodes = [_make_node("a"), _make_node("b")]
+    rec = {"reality_uuid": "u", "hysteria_password": "pw"}
+    uris = bot_core.build_uris_for_user_multinode(rec, nodes, label="alice")
+    path = subscription.write_subscription_file(
+        "abc123", uris, dir=str(tmp_path),
+    )
+    body_b64 = pathlib.Path(path).read_text().strip()
+    decoded = base64.b64decode(body_b64).decode("utf-8")
+    for uri in uris:
+        assert uri in decoded

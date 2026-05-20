@@ -44,6 +44,26 @@ from .subscription import (  # noqa: F401
 )
 from .urivider import build_vless_uri, build_hysteria2_uri  # noqa: F401
 
+# v0.10.0+: multi-node fleet management. Re-exported here so callers
+# (bot, CLI) can `from stealth_vps import FleetNode, load_fleet`. Only
+# meaningful on a control box (data nodes never call into fleet.*).
+from .fleet import (  # noqa: F401
+    FleetNode,
+    FleetError,
+    PushResult,
+    load_fleet,
+    load_node,
+    save_node,
+    remove_node,
+    push_to_node,
+    sync_all,
+    update_sync_status,
+    validate_node_id,
+    DEFAULT_FLEET_DIR,
+    DEFAULT_KEYS_DIR,
+    HIDDEN_RECEIVE_SUBCMD,
+)
+
 
 # Default sentinel path the role uses for panel state. Tests and the
 # migration tool override it via the `panel_state_path=` arg.

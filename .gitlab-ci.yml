@@ -177,12 +177,13 @@ go-test:
   # not into the scenario dir itself. Older molecule (v6) accepted
   # being run from inside a scenario; v24+ removed that.
   - cd tests
-  # Run both scenarios — default (panel mode) and headless (v0.7
-  # panel_enabled=false). `molecule test` per scenario cleans up
-  # after itself; running them sequentially in one job keeps total
-  # DinD overhead low.
+  # Run three scenarios — default (panel mode), headless (v0.7
+  # panel_enabled=false), and multinode (v0.10+ control + 2 data
+  # containers). `molecule test` per scenario cleans up after itself;
+  # running them sequentially in one job keeps total DinD overhead low.
   - molecule test --scenario-name default
   - molecule test --scenario-name headless
+  - molecule test --scenario-name multinode
 
 molecule:
   # Pinned at ansible-core 2.14-2.17 — covers the Debian 11 / Ubuntu

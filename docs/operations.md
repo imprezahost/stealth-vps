@@ -435,6 +435,153 @@ All three CLI verbs (add/rotate/purge) hit the same code paths as on amd64 — n
 
 ---
 
+## Multi-node fleet (v0.10.0+)
+
+A **fleet** in stealth-vps is one CONTROL box + N DATA NODES. The control holds `users.index.json` + the bot + the subscription endpoint; data nodes terminate Reality + Hysteria2. The control SSHs into each data node to push the index after every user mutation. Per-node Reality keys ensure that compromising one data node doesn't leak credentials for the rest of the fleet.
+
+See [`docs/internal/roadmap-v0.10-multi-node.md`](internal/roadmap-v0.10-multi-node.md) for the full design rationale (ADRs, blast-radius model, scope decisions).
+
+### Bootstrapping a control plane
+
+The control is a regular stealth-vps host with one inventory flag flipped:
+
+```yaml
+# inventory for the control box
+stealth_vps_control_enabled: true
+stealth_vps_reality_enabled: false
+stealth_vps_hysteria_enabled: false
+stealth_vps_panel_enabled: false
+# Optional but typical on the control:
+stealth_vps_bot_enabled: true
+stealth_vps_subscription_enabled: true
+stealth_vps_subscription_expose: true   # serve sub URLs publicly
+```
+
+The mutex assert in `tasks/main.yml` catches `control_enabled=true` paired with any of the data-plane services — the fix-up message tells you exactly which flags to flip.
+
+On first `s-vps update`, the role creates:
+
+- `/etc/stealth-vps/fleet/` mode 0700 — one YAML file per registered data node
+- `/etc/stealth-vps/keys/` mode 0700 — one ed25519 keypair per data node
+- `/etc/stealth-vps/users.index.json` seeded as empty schema v2
+
+The control box runs no Xray, no Hysteria2, no x-ui. `s-vps status` shows only `caddy.service` + `stealth-vps-bot.service` active.
+
+### Registering data nodes
+
+Each data node is a regular stealth-vps install (headless mode, v0.9 or later). Once installed and reachable over SSH, register it with the control:
+
+```bash
+# On the control:
+sudo s-vps fleet add tokyo-1 --ssh-host 103.106.228.154
+```
+
+The interactive workflow:
+
+1. Control generates `/etc/stealth-vps/keys/control_to_tokyo-1.ed25519` (ed25519 keypair).
+2. Prints the public key + asks you to install it on the data node:
+
+   ```bash
+   # Run ON the data node (Tokyo) as root:
+   echo 'ssh-ed25519 AAAA... control_to_tokyo-1' >> /root/.ssh/authorized_keys
+   chmod 0600 /root/.ssh/authorized_keys
+   ```
+
+3. Press Enter on the control.
+4. Control probes `s-vps version` on the remote — must respond with v0.9+ (schema v2 required).
+5. Control slurps `reality.state.yml` + `hysteria.state.yml` over SSH to capture the data node's per-node keys.
+6. Control rewrites the data node's authorized_keys entry into the restricted form:
+
+   ```text
+   command="/usr/local/bin/s-vps fleet-receive",no-pty,no-port-forwarding,no-X11-forwarding,no-agent-forwarding ssh-ed25519 AAAA... control_to_tokyo-1
+   ```
+
+   After this rewrite, the control's SSH key can ONLY trigger `s-vps fleet-receive` on the data node — no shell, no port-forward, no other commands.
+7. Control writes `/etc/stealth-vps/fleet/tokyo-1.yml` with the discovered fields.
+
+For non-interactive bulk bootstraps, pre-install the pubkey via cloud-init / Terraform user-data and pass `--yes` to skip the prompt.
+
+### Listing, syncing, removing
+
+```bash
+$ s-vps fleet list
+NODE_ID                  SSH_HOST               PORT  STATUS  LAST_SYNC
+------------------------------------------------------------------------------
+amsterdam-1              10.0.0.2               22    ok      2026-05-21T10:00:00Z
+tokyo-1                  103.106.228.154        22    ok      2026-05-21T10:00:05Z
+
+$ s-vps fleet sync                                # push to ALL nodes in parallel
+Syncing users.index.json to 2 node(s)...
+
+NODE_ID                  STATUS    DURATION    DETAIL
+------------------------------------------------------------------------------
+amsterdam-1              ✓ ok      342 ms      {"ok":true,"user_count":4,"reload":"ok"}
+tokyo-1                  ✓ ok      512 ms      {"ok":true,"user_count":4,"reload":"ok"}
+
+$ s-vps fleet sync --node tokyo-1                 # push to one node only
+$ s-vps fleet sync --dry-run                      # print what would happen
+$ s-vps fleet remove amsterdam-1                  # unregister (data node keeps running)
+```
+
+`fleet sync` runs automatically after every `s-vps user add / revoke / purge / rotate` and after the bot's `/user add` / `/sub renew`. Operators batching many mutations can pass `--no-sync` and follow up with one `s-vps fleet sync` at the end.
+
+### Promoting a single-node install into a fleet
+
+Suppose you've been running stealth-vps as a single VPS in Tokyo for months. You want to add Amsterdam without dropping any existing clients. Steps:
+
+1. Provision Amsterdam as a fresh stealth-vps (v0.10.0+, headless mode). It comes up with one default client; ignore it (will be overwritten by the next fleet sync).
+2. Provision a new control box (a small €4/month VPS, or even a laptop with port-forwarded SSH access to the data nodes). Bootstrap it with `stealth_vps_control_enabled: true` per the snippet above.
+3. On the control, `s-vps fleet add tokyo-1 --ssh-host <tokyo-ip>` (the existing single-node box). The control discovers Tokyo's per-node Reality keys.
+4. On the control, `s-vps fleet add amsterdam-1 --ssh-host <amsterdam-ip>`.
+5. SCP the existing `users.index.json` from Tokyo to the control:
+
+   ```bash
+   scp root@<tokyo-ip>:/etc/stealth-vps/users.index.json \
+       root@<control-ip>:/etc/stealth-vps/users.index.json
+   ```
+
+6. `s-vps fleet sync` on the control — Tokyo and Amsterdam both receive the (real) users.index.json.
+7. Existing Tokyo clients **keep working** without any URL refresh. Their old single-node subscription URL still resolves and the URIs in it still match Tokyo's keys.
+8. **For the multi-node fallback feature to take effect**, clients need to refresh their subscription URL. The bot's `/sub <label>` (or a new `s-vps user show <label>`) emits the updated multi-node bundle. Once the user pastes the new URL into Hiddify, they get both Tokyo and Amsterdam endpoints with automatic lowest-latency selection.
+
+Zero downtime in the steady state. The only window where any client sees a service blip is when the new control's `fleet sync` arrives at the data node and `s-vps fleet-receive` triggers a Reloader — same as `s-vps user add` does today. Active QUIC connections survive (Hysteria2 is reload-safe); TCP Reality connections drop and reconnect within a second.
+
+### Rotating an SSH key
+
+If you suspect a control's per-node SSH key is compromised, rotate it in place — zero-downtime, no fleet-wide reissue:
+
+```bash
+sudo s-vps fleet rotate-key tokyo-1
+```
+
+What happens, step by step:
+
+1. Probe the data node via the OLD key. Must work — otherwise we'd have no rollback path.
+2. Generate a new ed25519 keypair at `<keys_dir>/control_to_tokyo-1.ed25519.new`.
+3. SSH in via the OLD key, append the NEW pubkey (restricted form) to authorized_keys. Both keys now valid.
+4. Probe via the NEW key. Must work.
+5. SSH in via the NEW key, remove the OLD entry from authorized_keys. Only the new key remains.
+6. Atomic-replace the local `.new` files over the existing key paths.
+
+If step 4 fails (new key didn't take), the rotation rolls back: remove the new entry from authorized_keys (via the still-working OLD key), delete the local `.new` files. The node ends up exactly as it was.
+
+The data node never sees both keys for more than ~1 second.
+
+### Blast radius
+
+| Asset | Where | If leaked |
+|---|---|---|
+| `users.index.json` (UUIDs + Hy2 passwords) | Control + every data node | All clients impersonable against any node. **Same as single-node v0.9.** |
+| Per-node Reality private key (X25519) | Only that data node | Reality handshakes to that node only. Other nodes unaffected. **Strict improvement vs. shared keys.** |
+| `control_to_<node>` SSH key (private) | Control only | Attacker can rewrite that one node's `users.index.json` — equivalent to compromising the control. Does NOT grant access to other nodes (per-node keys). |
+| Restricted `authorized_keys` entry on the data node | Each data node | Attacker reading it gets the control's pubkey for THAT node — not impersonable against the control or other nodes. |
+| Bot token | Control only | Same exposure as single-node v0.9. |
+| Operator's `age` identity (backup decrypt) | Off-host (operator's workstation) | Same exposure as single-node v0.9. |
+
+The control plane is the central failure point. The v0.9 `age` backup of `/etc/stealth-vps/` captures `fleet/` + `keys/`; a control rebuild from backup onto a fresh VPS takes ~10 minutes and brings the fleet back online without any data node changes. Real HA (Raft / etcd / gossip) is deferred to v0.11+.
+
+---
+
 ## Troubleshooting
 
 ### First step: `s-vps diagnose`

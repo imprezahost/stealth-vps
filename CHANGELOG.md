@@ -29,6 +29,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signed releases (cosign + GPG).
 - External security audit.
 
+## [0.10.0] - 2026-05-20
+
+Thirtieth tagged release. **Multi-node mode lands.** One control box + N data nodes; the control pushes `users.index.json` over SSH after every mutation; per-node Reality keys ensure compromising one data node doesn't leak the rest. Single-node hosts are unaffected — `stealth_vps_control_enabled` defaults to false and the v0.9 surface stays byte-identical.
+
+Design doc: [`docs/internal/roadmap-v0.10-multi-node.md`](docs/internal/roadmap-v0.10-multi-node.md). Operator runbook: [`docs/multi-node.md`](docs/multi-node.md).
+
+### Added
+
+- **`stealth_vps_control_enabled` flag** + role-level mutex assert (control mode mutually-exclusive with Reality / Hysteria2 / panel). New `tasks/control_bootstrap.yml` creates `/etc/stealth-vps/fleet/` + `/etc/stealth-vps/keys/` (mode 0700) and seeds an empty v2 `users.index.json` on a fresh control box.
+- **`stealth_vps.fleet` module** (~370 LOC, pure stdlib). Public surface: `FleetNode` dataclass, `PushResult` dataclass, `FleetError` exception, `load_fleet / load_node / save_node / remove_node / push_to_node / sync_all / update_sync_status / validate_node_id`. Hand-rolled YAML I/O matching `state.py`'s narrow dialect. SSH/scp via subprocess (openssh-client); no paramiko / fabric dependency.
+- **`s-vps fleet add LABEL --ssh-host X`** — interactive registration of a previously-installed data node. Generates a dedicated ed25519 keypair, prompts the operator to install the pubkey on the remote, probes `s-vps version` over SSH, slurps `reality.state.yml` + `hysteria.state.yml`, writes `fleet/<id>.yml`, locks down the data node's `authorized_keys` entry into the restricted `command="s-vps fleet-receive",no-pty,no-port-forwarding,...` form.
+- **`s-vps fleet sync [--node X] [--dry-run] [--parallel N]`** — pushes `users.index.json` to every data node in parallel (4 workers default, locked per Open Question #3). Per-node ✓/✗ status table. Updates `last_sync_at` + `last_sync_status` in each `fleet/<id>.yml`. Exit code 1 on any failure so cron / CI notices.
+- **`s-vps fleet-receive`** — HIDDEN top-level subverb. Reads `users.index.json` from stdin, validates schema v1/v2, atomic-replaces `/etc/stealth-vps/users.index.json`, fires `Reloader`. Output: 1-line JSON status (`{"ok": true, "user_count": N, "reload": "ok"}`). Called by the control over SSH; restricted `authorized_keys` command= forces this command regardless of what SSH caller passes.
+- **`s-vps fleet list [--json]`** — table of registered nodes + last sync timestamp.
+- **`s-vps fleet remove LABEL [--keep-key]`** — unregister a node. Does NOT decommission the data node itself (it keeps running with the last-pushed index until the operator shuts it down).
+- **`s-vps fleet rotate-key LABEL`** — zero-downtime SSH key rotation. Generates a new keypair, installs the new pubkey via the OLD key, probes with the NEW key, removes the OLD entry. Automatic rollback if the new key fails the post-install probe.
+- **Multi-node URI builder** in `stealth_vps.bot_core`: `uri_config_from_node()` + `build_uris_for_user_multinode()`. Subscription bundles on a control box are now N×P entries (per-node Reality keys baked in, remark suffixed with `-<node_id>`). Single-node hosts unaffected.
+- **Auto-sync on mutation** in CLI + bot. `s-vps user add/revoke/purge/rotate` and bot's `/user add` / `/sub renew` all trigger `fleet.sync_all` after the local mutation on a control box. `--no-sync` flag on the CLI verbs for batch workflows. Bot's mutation handlers run the sync in a thread pool so the event loop doesn't stall.
+- **`stealth_vps.bot_core.is_control_mode()` + control-mode dispatch** in both `bot_core.make_backend` and the CLI's `_select_backend_for_cli`. Detection signal: absence of `/etc/stealth-vps/reality.state.yml` (control boxes skip `xray.yml` so it's never created). HeadlessBackend with `reloader=None` on control; existing data-node / single-node flow unchanged.
+- **Molecule `multinode` scenario** — 3 Docker containers (1 control + 2 data). End-to-end verify: `fleet add` both nodes, `s-vps user add alice` on the control, assert alice's UUID + Hysteria password are identical across both data nodes, `fleet sync --dry-run` reports ✓✓. Added to the existing `molecule` + `molecule-newer` CI jobs.
+- **111 new pytest cases** (`test_fleet.py` 68, `test_cli.py` 30 fleet/control-mode coverage, `test_bot_core.py` 13 multinode URI). **424 pytest pass total** (was 313 after v0.9.0).
+- **`docs/multi-node.md`** — full operator runbook. **`docs/operations.md`** gets a "Multi-node fleet" section covering bootstrap, day-2 ops, key rotation, blast-radius model, and the single-node → multi-node migration runbook.
+
+### Changed
+
+- **`_post_mutation_sync` is now part of the CLI** — every user-affecting verb on a control box automatically refreshes the data nodes + the subscription file. Single-node hosts have `fleet/` absent → the helper short-circuits to no-op.
+- **`BotConfig` gains `reality_state_path`** for the control-mode detection.
+- **`s-vps --help`** lists `fleet add/remove/list/sync/rotate-key` plus the hidden `fleet-receive`.
+- **`pyproject.toml`** filterwarnings still ignores `PytestUnraisableExceptionWarning` (Python 3.14 socket finalizer noise, unchanged from v0.9).
+
+### Schema
+
+`users.index.json` stays on **schema v2**. Multi-node is a transport story (where it goes), not a representation story (what it contains). Operators upgrading v0.9.0 → v0.10.0 don't need to migrate anything.
+
+### Backwards compatibility
+
+`s-vps update v0.10.0` is a no-op feature-wise on every single-node host. `stealth_vps_control_enabled` defaults to false; no new files appear; existing CLI verbs behave identically. Operators choosing to go multi-node later provision a separate control box per the runbook in `docs/multi-node.md`.
+
 ## [0.9.0] - 2026-05-20
 
 Twenty-ninth tagged release. Four operator-facing features in one cut: **subscription TTL** (per-user expiry + daily prune timer), **opt-in auto-update** (patch-only by default, fleet-safe GitHub Releases polling), **encrypted backup/restore** via `age` (pubkey-only on the host), and a **Prometheus health exporter** on `:9102` for operators who don't run node_exporter.

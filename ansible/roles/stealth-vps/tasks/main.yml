@@ -31,6 +31,30 @@
       want to try an unvalidated architecture — Xray-core, Hysteria2, and 3X-UI
       all publish more variants than we currently smoke-test.
 
+# v0.10.0 multi-node mode mutex. A host is either a CONTROL (holds the
+# fleet config + propagates users.index.json over SSH) or a DATA NODE
+# (terminates Reality / Hysteria2). Both at once doesn't make sense —
+# the control wouldn't know whose users.index.json wins (its own
+# locally-generated default vs. the one the operator is curating),
+# and the data node would receive its own pushes. Catch it loud, with
+# a fix-up message in the assert text rather than a confused stack
+# trace 10 tasks later.
+- name: Assert control mode and data-plane services are not both enabled
+  ansible.builtin.assert:
+    that:
+      - not (stealth_vps_control_enabled | bool and
+             ((stealth_vps_reality_enabled | bool) or
+              (stealth_vps_hysteria_enabled | bool) or
+              (stealth_vps_panel_enabled | bool)))
+    fail_msg: >-
+      stealth_vps_control_enabled=true conflicts with reality/hysteria/panel.
+      A control box doesn't terminate proxy traffic — it pushes
+      users.index.json to data nodes over SSH. Set
+      `stealth_vps_reality_enabled: false`, `stealth_vps_hysteria_enabled: false`,
+      and `stealth_vps_panel_enabled: false` on the control inventory,
+      or flip `stealth_vps_control_enabled: false` if you meant single-node.
+      See docs/internal/roadmap-v0.10-multi-node.md for the design.
+
 - name: Apply kernel tuning (BBR, fq, TCP buffers)
   ansible.builtin.include_tasks: kernel.yml
   tags: [kernel, sysctl]
@@ -64,6 +88,15 @@
 # disk (created by xray.yml + hysteria.yml above). Python pkg seeds the
 # bot and the metrics updater, so it goes before bot.yml. Subscription
 # and bot are opt-in via defaults; CLI is on by default.
+
+# v0.10.0 control mode: provision the fleet/ + keys/ directories before
+# python_pkg.yml runs (the shared package's fleet module imports paths
+# from /etc/stealth-vps/fleet/). Idempotent + only acts when
+# stealth_vps_control_enabled=true. Single-node hosts are unaffected.
+- name: Bootstrap control-plane directories (multi-node mode)
+  ansible.builtin.include_tasks: control_bootstrap.yml
+  when: stealth_vps_control_enabled | bool
+  tags: [control, fleet]
 
 - name: Install shared Python package (used by metrics updater + bot + CLI)
   ansible.builtin.include_tasks: python_pkg.yml

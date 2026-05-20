@@ -1,0 +1,67 @@
+---
+# v0.10.0 — Control plane bootstrap.
+#
+# Creates the two directories the fleet management lives in:
+#   /etc/stealth-vps/fleet/  — one YAML file per data node (metadata
+#                              + discovered reality/hysteria state).
+#   /etc/stealth-vps/keys/   — dedicated ed25519 SSH keys, one per
+#                              data node. Generated lazily by
+#                              `s-vps fleet add`, NOT by this task.
+#
+# Both mode 0700 root:root because keys/ holds private keys + fleet/
+# holds SSH host/user/port (operationally sensitive). Even a non-root
+# read of fleet/ would map the whole topology.
+#
+# This task is only included when stealth_vps_control_enabled=true
+# (gate in main.yml). It's idempotent — re-runs are no-ops.
+
+- name: Create /etc/stealth-vps (operator state dir)
+  # Same dir cli_wrapper.yml + bot.yml create. Listed here too so
+  # control mode works even when neither of those is enabled (a
+  # minimal control: no bot, just CLI on a laptop).
+  ansible.builtin.file:
+    path: /etc/stealth-vps
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: [control, fleet]
+
+- name: Create control-plane fleet directory
+  ansible.builtin.file:
+    path: "{{ stealth_vps_control_fleet_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [control, fleet]
+
+- name: Create control-plane keys directory
+  ansible.builtin.file:
+    path: "{{ stealth_vps_control_keys_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [control, fleet]
+
+- name: Seed empty users.index.json on the control (first run only)
+  # On a control box the v0.9 seed in users_index.yml skips (it gates
+  # on reality_enabled, which is false here). Without an initial file,
+  # the bot + CLI's first call to state.load_users_index would
+  # StateError. Seed schema v2 directly — no migration round-trip
+  # needed since we're writing fresh.
+  ansible.builtin.copy:
+    content: |
+      {
+        "version": 2,
+        "users": {}
+      }
+    dest: "{{ stealth_vps_users_index_path }}"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false   # don't clobber an existing index — operator may have
+                   # already populated it via `s-vps user add` between
+                   # bootstrap and the next converge.
+  tags: [control, fleet, users, index]

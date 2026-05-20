@@ -36,6 +36,7 @@ any host the role has touched without an extra venv.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import pathlib
@@ -193,6 +194,16 @@ def _build_panel_client_from_state(panel_state_path: str | None = None) -> Three
     )
 
 
+def _is_control_box() -> bool:
+    """Best-effort detection of "this host is a stealth-vps control".
+    The role asserts mutex at converge time so reality.state.yml is
+    never present on a control. Falling back on the state file rather
+    than re-parsing the role's flag means the detection works without
+    pulling in PyYAML.
+    """
+    return not os.path.exists(REALITY_STATE_PATH)
+
+
 def _select_backend_for_cli(*, dry_run: bool = False) -> UserBackend:
     """The CLI's backend factory.
 
@@ -200,10 +211,17 @@ def _select_backend_for_cli(*, dry_run: bool = False) -> UserBackend:
       ThreeXUIBackend wrapping a freshly constructed ThreeXUIClient.
       Mutations go to the panel API + double-write the index.
 
-    Headless mode (panel.state.yml absent):
+    Headless mode (panel.state.yml absent, reality.state.yml present):
       HeadlessBackend wrapping a Reloader built from reloader-args.json.
       Mutations write the index + SIGHUP xray (+ hysteria-server if
       enabled in the args file).
+
+    Control mode (reality.state.yml absent — v0.10.0+):
+      HeadlessBackend with NO reloader. Mutations write the index;
+      propagation to data nodes is done by the caller via
+      `_post_mutation_sync` (Step 6), which invokes `fleet.sync_all`.
+      Control boxes don't terminate proxy traffic so there's nothing
+      local to reload.
     """
     from .backends import ThreeXUIBackend
     from .backends_headless import HeadlessBackend
@@ -223,11 +241,98 @@ def _select_backend_for_cli(*, dry_run: bool = False) -> UserBackend:
             reality_flow="xtls-rprx-vision",
             users_index_path=state.USERS_INDEX_PATH,
         )
+    if _is_control_box():
+        # Control box: no local Xray/Hysteria → no Reloader. Sync to
+        # data nodes is fired by `_post_mutation_sync` after the
+        # backend method returns. HeadlessBackend with reloader=None
+        # falls back to its internal _noop_reloader.
+        return HeadlessBackend(
+            reloader=None,
+            users_index_path=state.USERS_INDEX_PATH,
+        )
     reloader = _build_reloader(dry_run=dry_run)
     return HeadlessBackend(
         reloader=reloader,
         users_index_path=state.USERS_INDEX_PATH,
     )
+
+
+# ---------------------------------------------------------------------------
+# Post-mutation sync (v0.10.0+ control mode)
+# ---------------------------------------------------------------------------
+#
+# After every `s-vps user *` mutation on a control box, propagate the
+# new users.index.json to every registered data node and refresh the
+# affected user's subscription file with multi-node URIs.
+#
+# Single-node hosts and data nodes have `fleet/` empty (or absent), so
+# `load_fleet` returns [] and this becomes a no-op. The bot uses the
+# same helper via `bot_core` so the two surfaces stay aligned.
+
+
+def _post_mutation_sync(
+    args: argparse.Namespace,
+    *,
+    affected_user: dict[str, Any] | None = None,
+    affected_label: str | None = None,
+) -> None:
+    """If we're on a control box with registered nodes, sync the
+    index + refresh the affected user's subscription bundle. Prints
+    per-node ✓/✗ on stdout; failures are reported to stderr but don't
+    propagate (the mutation already succeeded locally — partial sync
+    is operationally a retry-on-next-mutation, matching Open Question
+    #5).
+
+    `args.no_sync` (default False) skips both the SSH push and the
+    subscription file refresh. Operators batching mutations should
+    follow up with a manual `s-vps fleet sync` + `s-vps fleet
+    refresh-subscriptions` (the latter lands as a CLI verb later).
+    """
+    if getattr(args, "no_sync", False):
+        return
+    from . import fleet as _fleet
+    nodes = _fleet.load_fleet()
+    if not nodes:
+        return
+    print()
+    print(f"Propagating to {len(nodes)} data node(s)...")
+    results = _fleet.sync_all(nodes, state.USERS_INDEX_PATH)
+    all_ok = True
+    for r in results:
+        status = "✓" if r.ok else "✗"
+        if not r.ok:
+            all_ok = False
+            detail = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+            print(f"  {status} {r.node_id} ({r.duration_ms}ms): {detail}")
+        else:
+            print(f"  {status} {r.node_id} ({r.duration_ms}ms)")
+        # Persist per-node sync status.
+        try:
+            _fleet.update_sync_status(
+                r.node_id, status="ok" if r.ok else "failed",
+            )
+        except _fleet.FleetError:
+            pass
+    if not all_ok:
+        print("  (partial sync — re-run `s-vps fleet sync` to retry failed nodes)",
+              file=sys.stderr)
+
+    # Refresh the affected user's subscription file with multi-node URIs.
+    # Skipped when the affected user has no sub_token (legacy rows from
+    # pre-v0.6 panel installs that double-write didn't yet touch).
+    if affected_user and affected_user.get("sub_token"):
+        try:
+            from . import bot_core
+            from .subscription import write_subscription_file
+            uris = bot_core.build_uris_for_user_multinode(
+                affected_user, nodes, label=affected_label or "",
+            )
+            if uris:
+                write_subscription_file(
+                    affected_user["sub_token"], uris,
+                )
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            print(f"  (subscription file refresh skipped: {exc})", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +462,8 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             print(f"  hysteria2 URI   : {uris['hysteria2']}")
         if "sub" in uris:
             print(f"  subscription URL: {uris['sub']}")
+
+    _post_mutation_sync(args, affected_user=rec, affected_label=args.label)
     return 0
 
 
@@ -437,6 +544,13 @@ def cmd_user_revoke(args: argparse.Namespace) -> int:
         print(f"s-vps: {exc}", file=sys.stderr)
         return 1
     print(f"✓ revoked user {args.label!r}")
+    # Refresh sub file too — revoke flips enabled=false but doesn't
+    # delete the sub_token, so the file would still serve URIs for a
+    # disabled user. Operators wanting the URL to 404 should `purge`
+    # (which deletes the row + the sub file). Revoke just stops the
+    # data nodes from honouring the credentials.
+    rec = backend.get(args.label) or {}
+    _post_mutation_sync(args, affected_user=rec, affected_label=args.label)
     return 0
 
 
@@ -471,6 +585,10 @@ def cmd_user_purge(args: argparse.Namespace) -> int:
         print(f"✓ user {args.label!r} was not in the index (no-op)")
     else:
         print(f"✓ purged user {args.label!r}")
+    # On a control box, push the now-shrunk index to data nodes so they
+    # forget the user too. `affected_user=None` skips the sub file
+    # refresh — purge deleted the sub file already.
+    _post_mutation_sync(args, affected_user=None, affected_label=args.label)
     return 0
 
 
@@ -506,6 +624,7 @@ def cmd_user_rotate(args: argparse.Namespace) -> int:
     print()
     print("⚠ The OLD credentials are now invalid — share the new URIs / sub URL")
     print("  with the user. Existing client connections will be dropped on next reload.")
+    _post_mutation_sync(args, affected_user=rec, affected_label=args.label)
     return 0
 
 
@@ -755,6 +874,766 @@ def cmd_migrate_from_3xui(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# fleet subcommands (v0.10.0+)
+# ---------------------------------------------------------------------------
+#
+# Fleet management runs on a CONTROL box (`stealth_vps_control_enabled=true`
+# in the role). Data nodes only see the `fleet-receive` HIDDEN top-level
+# verb — invoked via a restricted-key authorized_keys command= clause,
+# never by an operator directly.
+#
+# All fleet verbs delegate to `stealth_vps.fleet`; this file is a thin
+# presenter that does argv parsing + table rendering + operator prompts.
+
+
+SSH_OPTIONS_BASE = (
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=10",
+    "-o", "StrictHostKeyChecking=accept-new",
+)
+
+
+def _generate_ed25519_keypair(path: str) -> None:
+    """Shell out to `ssh-keygen -t ed25519 -N "" -f <path>`. Open Question
+    #1 (locked): we prefer subprocess to avoid pulling cryptography in.
+    Idempotent at the OS level — refuses to overwrite an existing file
+    so an accidental `fleet add` twice doesn't clobber a live keypair.
+    """
+    if os.path.exists(path):
+        raise SystemExit(
+            f"s-vps fleet: key already exists at {path}. "
+            f"Use `s-vps fleet rotate-key` to refresh or delete manually first."
+        )
+    # ssh-keygen writes <path> (private) + <path>.pub. Comment names the
+    # key so it's identifiable in ssh-agent listings + authorized_keys.
+    comment = f"control_to_{os.path.basename(path).replace('control_to_', '').replace('.ed25519', '')}"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cmd = [
+        "ssh-keygen", "-t", "ed25519", "-N", "",
+        "-f", path, "-C", comment, "-q",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"s-vps fleet: `ssh-keygen` not found on PATH ({exc}). "
+            f"Install openssh-client (`apt install openssh-client`)."
+        )
+    if result.returncode != 0:
+        raise SystemExit(
+            f"s-vps fleet: ssh-keygen failed (exit {result.returncode}): "
+            f"{result.stderr.strip() or '(no stderr)'}"
+        )
+    # ssh-keygen writes 0600 on the private file by default; pubkey is 0644.
+    # No extra chmod needed.
+
+
+def _ssh_run(
+    node: "state.FleetNode",      # type: ignore[name-defined]  # forward ref via stealth_vps.fleet
+    *remote_argv: str,
+    stdin: bytes | None = None,
+    timeout: float = 30.0,
+    extra_ssh_opts: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess:
+    """Run `remote_argv` on `node` via SSH. Returns the CompletedProcess
+    so callers can inspect stdout/stderr/returncode.
+
+    Note: when the data node's authorized_keys has a restricted command=
+    clause (after lockdown), `remote_argv` is IGNORED on the remote side
+    — the forced command runs instead. We pass it anyway for the
+    pre-lockdown bootstrap (where the key is unrestricted) and to be
+    a useful diagnostic when SSH is bypassed manually."""
+    from . import fleet as _fleet
+    cmd = [
+        "ssh",
+        "-i", node.ssh_key_path,
+        "-p", str(node.ssh_port),
+        *SSH_OPTIONS_BASE,
+        *extra_ssh_opts,
+        f"{node.ssh_user}@{node.ssh_host}",
+        *remote_argv,
+    ]
+    return subprocess.run(
+        cmd,
+        input=stdin,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _probe_remote_version(node) -> str | None:
+    """SSH into `node` and run `s-vps version`. Parses the first line
+    (`stealth-vps:      v0.9.0`) and returns the tag string. None if
+    something went wrong — caller decides whether to fail or proceed."""
+    try:
+        result = _ssh_run(node, "/usr/local/bin/s-vps", "version", timeout=15)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    for raw in result.stdout.decode("utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if line.startswith("stealth-vps:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _slurp_remote_yaml(node, remote_path: str) -> dict:
+    """Read `remote_path` from the data node via `cat` over SSH and
+    parse it as the project's narrow YAML dialect. Used by `fleet add`
+    to discover reality.state.yml + hysteria.state.yml on the remote
+    without needing a separate tooling install."""
+    from .fleet import _parse_node_yaml  # YAML grammar matches state files
+    result = _ssh_run(node, "cat", remote_path, timeout=10)
+    if result.returncode != 0:
+        raise SystemExit(
+            f"s-vps fleet: could not read {remote_path} on {node.node_id} "
+            f"(exit {result.returncode}): {result.stderr.decode('utf-8', errors='replace').strip()}"
+        )
+    return _parse_node_yaml(result.stdout.decode("utf-8", errors="replace"))
+
+
+def _install_restricted_authorized_keys(node, pubkey_text: str) -> None:
+    """SSH into `node` and replace any line containing our pubkey body
+    with a restricted entry that forces `s-vps fleet-receive` as the
+    only thing this key can do. Other authorized_keys lines are
+    preserved (operator's other keys keep working).
+
+    The restricted form:
+
+        command="/usr/local/bin/s-vps fleet-receive",no-pty,no-port-forwarding,no-X11-forwarding,no-agent-forwarding ssh-ed25519 AAAA... control_to_X
+
+    The match is on the pubkey body (the AAAA... blob), not the comment
+    or the algorithm prefix — that way the operator's "I pasted it as
+    `ssh-ed25519 AAAA... control_to_X`" works whether or not they kept
+    the comment.
+    """
+    from . import fleet as _fleet
+    pubkey_body = _extract_pubkey_body(pubkey_text)
+    restricted_line = (
+        f'command="/usr/local/bin/s-vps {_fleet.HIDDEN_RECEIVE_SUBCMD}",'
+        f'no-pty,no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
+        f'{pubkey_text.strip()}'
+    )
+    # The rewrite is done in a single shell command on the remote so
+    # there's no window where the file is empty (and root locks itself
+    # out). awk: pass through every line that DOESN'T contain our
+    # pubkey body, then append our restricted line.
+    rewrite = (
+        f"set -e; "
+        f"AK=/root/.ssh/authorized_keys; touch \"$AK\"; chmod 0600 \"$AK\"; "
+        f"awk -v PUB={shlex_quote(pubkey_body)} -v NEW={shlex_quote(restricted_line)} "
+        f"'BEGIN {{ added=0 }} index($0, PUB) > 0 {{ if (!added) {{ print NEW; added=1 }}; next }} "
+        f"{{ print }} END {{ if (!added) print NEW }}' \"$AK\" > \"$AK.new\" && "
+        f"mv \"$AK.new\" \"$AK\""
+    )
+    result = _ssh_run(node, "sh", "-c", rewrite, timeout=15)
+    if result.returncode != 0:
+        raise SystemExit(
+            f"s-vps fleet: could not install restricted authorized_keys "
+            f"on {node.node_id}: {result.stderr.decode('utf-8', errors='replace').strip()}"
+        )
+
+
+def _extract_pubkey_body(pubkey_text: str) -> str:
+    """Pull the base64 body out of `ssh-ed25519 AAAA... comment`. We
+    match on the body alone (not the comment) so the operator pasting
+    with or without our suggested comment still works."""
+    parts = pubkey_text.strip().split()
+    if len(parts) < 2 or not parts[0].startswith("ssh-"):
+        raise SystemExit(
+            f"s-vps fleet: pubkey doesn't look like an OpenSSH public key "
+            f"(`ssh-ed25519 AAAA... comment`): {pubkey_text!r}"
+        )
+    return parts[1]
+
+
+def shlex_quote(s: str) -> str:
+    """POSIX-shell-safe single-quoting. Stdlib has shlex.quote but
+    importing here keeps the function used in `_install_restricted_*`
+    obvious in code review."""
+    import shlex as _shlex
+    return _shlex.quote(s)
+
+
+# ---------------------------------------------------------------------------
+# Public fleet verbs
+# ---------------------------------------------------------------------------
+
+
+def cmd_fleet_add(args: argparse.Namespace) -> int:
+    """Register a previously-installed data node with this control box.
+
+    Workflow:
+      1. Validate node_id + check this node isn't already registered.
+      2. Generate a dedicated ed25519 keypair (`/etc/stealth-vps/keys/
+         control_to_<node_id>.ed25519`).
+      3. Print the pubkey + ask the operator to install it on the
+         data node's `/root/.ssh/authorized_keys` (any form — restricted
+         or bare — we tighten it later).
+      4. Probe the data node: `s-vps version` over SSH should respond
+         with v0.9.0+ (multi-node requires v0.9 schema v2).
+      5. Slurp `reality.state.yml` + `hysteria.state.yml` over SSH to
+         discover the per-node Reality pubkey / short_id / ports.
+      6. Atomic-write `/etc/stealth-vps/fleet/<node_id>.yml`.
+      7. Install the restricted authorized_keys entry on the remote
+         (locks the key to running `s-vps fleet-receive` only).
+      8. Done. Operator can now `s-vps fleet sync` to push the index.
+    """
+    from . import fleet as _fleet
+
+    try:
+        _fleet.validate_node_id(args.label)
+    except _fleet.FleetError as exc:
+        print(f"s-vps fleet add: {exc}", file=sys.stderr)
+        return 1
+
+    # Refuse if already registered — prevents accidental key clobber.
+    try:
+        existing = _fleet.load_node(args.label, fleet_dir=args.fleet_dir)
+    except _fleet.FleetError:
+        existing = None
+    if existing is not None:
+        print(
+            f"s-vps fleet add: {args.label!r} already registered at "
+            f"{existing.ssh_user}@{existing.ssh_host}:{existing.ssh_port}. "
+            f"Use `s-vps fleet remove {args.label}` first if you mean to re-register.",
+            file=sys.stderr,
+        )
+        return 1
+
+    key_path = os.path.join(args.keys_dir, f"control_to_{args.label}.ed25519")
+    pubkey_path = f"{key_path}.pub"
+
+    print(f"Generating ed25519 keypair → {key_path}")
+    _generate_ed25519_keypair(key_path)
+
+    pubkey_text = pathlib.Path(pubkey_path).read_text(encoding="utf-8").strip()
+
+    print()
+    print("=" * 72)
+    print(f"Step 1/2 — Install this pubkey on {args.ssh_user}@{args.ssh_host}:")
+    print()
+    print(f"    {pubkey_text}")
+    print()
+    print(f"Suggested command (run ON {args.ssh_host} as root):")
+    print()
+    print(f"    echo '{pubkey_text}' >> /root/.ssh/authorized_keys")
+    print(f"    chmod 0600 /root/.ssh/authorized_keys")
+    print()
+    print("(Add any form — bare or restricted — we tighten it after the probe.)")
+    print("=" * 72)
+    print()
+    if not args.yes:
+        # `input()` is the right primitive here. The CLI is interactive
+        # by design — there's a `--yes` flag for non-interactive runs.
+        try:
+            input("Press Enter when the pubkey is installed (or Ctrl-C to abort)... ")
+        except (EOFError, KeyboardInterrupt):
+            print("\ns-vps fleet add: aborted", file=sys.stderr)
+            # Roll back the keypair so the operator can retry cleanly.
+            for p in (key_path, pubkey_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            return 1
+
+    # Build a transient FleetNode so we can reuse _ssh_run.
+    probe_node = _fleet.FleetNode(
+        node_id=args.label,
+        ssh_host=args.ssh_host,
+        ssh_port=args.ssh_port,
+        ssh_user=args.ssh_user,
+        ssh_key_path=key_path,
+    )
+
+    print(f"Step 2/2 — Probing {args.ssh_user}@{args.ssh_host}:{args.ssh_port}...")
+    version = _probe_remote_version(probe_node)
+    if version is None:
+        print(
+            f"s-vps fleet add: probe failed — could not run `s-vps version` "
+            f"over SSH. Common causes:\n"
+            f"  - pubkey not installed on the remote\n"
+            f"  - SSH port/host wrong\n"
+            f"  - `s-vps` not on PATH on the remote (re-run install.sh there)\n"
+            f"Key kept at {key_path} so you can retry — re-run `s-vps fleet add`.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  remote reports: stealth-vps {version}")
+
+    # v0.9+ is the minimum because schema v2 (sub_expires_at) was
+    # introduced there. Older boxes need to `s-vps update v0.9.0` first.
+    if not version.startswith(("v0.9.", "v0.10.", "v0.11.", "v0.12.")):
+        print(
+            f"s-vps fleet add: remote runs {version}, which predates v0.9.0. "
+            f"Multi-node requires schema v2 on the data node — run "
+            f"`s-vps update v0.9.0` (or newer) on {args.ssh_host} first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("  slurping reality.state.yml + hysteria.state.yml...")
+    try:
+        reality = _slurp_remote_yaml(probe_node, "/etc/stealth-vps/reality.state.yml")
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    try:
+        hysteria = _slurp_remote_yaml(probe_node, "/etc/stealth-vps/hysteria.state.yml")
+    except SystemExit:
+        # Hysteria might be disabled on this node — soft-fail.
+        hysteria = {}
+
+    # Compose the FleetNode with discovered fields.
+    node = _fleet.FleetNode(
+        node_id=args.label,
+        ssh_host=args.ssh_host,
+        ssh_port=args.ssh_port,
+        ssh_user=args.ssh_user,
+        ssh_key_path=key_path,
+        reality_public_key=str(reality.get("public_key", "")),
+        reality_short_id=str(reality.get("short_id", "")),
+        reality_port=int(reality.get("port", 0) or 0),
+        reality_servernames=_servernames_from_state(reality),
+        hysteria_port=int(hysteria.get("port", 0) or 0),
+        hysteria_obfs_password=str(hysteria.get("obfs_password", "")),
+        public_host=args.public_host or None,
+        domain=args.domain or "",
+        added_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        last_sync_at=None,
+        last_sync_status="never",
+    )
+
+    print(f"  installing restricted authorized_keys on {args.ssh_host}...")
+    try:
+        _install_restricted_authorized_keys(probe_node, pubkey_text)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        print(
+            f"  (the bare-form pubkey is still installed — `fleet sync` will "
+            f"still work, but the key isn't yet restricted to fleet-receive)",
+            file=sys.stderr,
+        )
+
+    _fleet.save_node(node, fleet_dir=args.fleet_dir)
+    print()
+    print(f"✓ registered {args.label!r}")
+    print(f"  fleet file: {os.path.join(args.fleet_dir, args.label + '.yml')}")
+    print(f"  ssh key   : {key_path}")
+    print(f"  next      : `s-vps fleet sync` to push the current users.index.json")
+    return 0
+
+
+def _servernames_from_state(reality_state: dict) -> list[str]:
+    """reality.state.yml stores `servernames:` as a list. Defensive
+    accessor — returns [] when the field is missing or a non-list."""
+    val = reality_state.get("servernames")
+    if isinstance(val, list):
+        return [str(x) for x in val if x]
+    # The role's older versions wrote `servernames: ["a", "b"]` inline
+    # vs current `servernames:\n  - a\n  - b`. We only handle the list form.
+    if isinstance(val, str) and val:
+        return [s.strip() for s in val.split(",") if s.strip()]
+    return []
+
+
+def cmd_fleet_rotate_key(args: argparse.Namespace) -> int:
+    """Roll the SSH key for `<node>` without disconnecting it.
+
+    Workflow:
+      1. Load the existing FleetNode + verify its key still works
+         (probe `s-vps version` over the OLD key).
+      2. Generate a new ed25519 keypair at `<keys_dir>/control_to_<node>
+         .ed25519.new`.
+      3. Append the new pubkey (restricted form) to the data node's
+         authorized_keys via the OLD key — file now holds BOTH entries.
+      4. Probe `s-vps version` over the NEW key — must succeed.
+      5. Remove the OLD entry from authorized_keys (over the new key).
+      6. Locally: replace the old key files with the new ones
+         (`mv .new → real`). The node's fleet/<id>.yml `ssh_key_path`
+         is unchanged.
+      7. Done. The next `fleet sync` uses the new key.
+
+    Failure modes:
+      - Step 1 fails → operator's old key already lost. Refuse to
+        proceed (run `s-vps fleet add <node>` to re-bootstrap instead).
+      - Step 4 fails → new key didn't take. Roll back by removing the
+        new entry from authorized_keys (via the OLD key, which still
+        works because we haven't removed it yet) + delete the local
+        `.new` files. The node ends up exactly as it was.
+      - Step 5 fails → new key works but old removal failed. Operator
+        has two valid keys for one node. Print a warning + leave the
+        files in place; operator can clean up manually.
+    """
+    from . import fleet as _fleet
+
+    try:
+        _fleet.validate_node_id(args.label)
+    except _fleet.FleetError as exc:
+        print(f"s-vps fleet rotate-key: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        node = _fleet.load_node(args.label, fleet_dir=args.fleet_dir)
+    except _fleet.FleetError as exc:
+        print(f"s-vps fleet rotate-key: {exc}", file=sys.stderr)
+        return 1
+
+    # Step 1: verify the OLD key still works. Without this we have no
+    # safe rollback path.
+    print(f"Probing {args.label!r} via current key...")
+    version = _probe_remote_version(node)
+    if version is None:
+        print(
+            f"s-vps fleet rotate-key: current key for {args.label!r} doesn't "
+            f"work — can't safely rotate. Re-bootstrap with "
+            f"`s-vps fleet remove {args.label} && s-vps fleet add {args.label} "
+            f"--ssh-host {node.ssh_host}` instead.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  ✓ {version}")
+
+    # Step 2: generate the new key in a `.new` sibling so the old key
+    # stays usable until we're confident the new one works.
+    new_key_path = f"{node.ssh_key_path}.new"
+    new_pubkey_path = f"{new_key_path}.pub"
+    # If a previous rotation crashed, the .new files may linger. Wipe them
+    # so ssh-keygen doesn't refuse to overwrite.
+    for p in (new_key_path, new_pubkey_path):
+        try:
+            os.unlink(p)
+        except FileNotFoundError:
+            pass
+    print(f"Generating new ed25519 keypair → {new_key_path}")
+    _generate_ed25519_keypair(new_key_path)
+    new_pubkey_text = pathlib.Path(new_pubkey_path).read_text(encoding="utf-8").strip()
+
+    # Step 3: append the new pubkey to authorized_keys via the OLD key.
+    # `_install_restricted_authorized_keys` finds-and-replaces by pubkey
+    # body, so appending a NEW pubkey (different body from the old)
+    # leaves the OLD entry untouched. Result: both keys valid.
+    print(f"Installing new pubkey on {node.ssh_host} (via old key)...")
+    try:
+        _install_restricted_authorized_keys(node, new_pubkey_text)
+    except SystemExit as exc:
+        # Rollback: nothing to undo on the remote (the install failed
+        # before adding anything). Just clean up local files.
+        print(str(exc), file=sys.stderr)
+        for p in (new_key_path, new_pubkey_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        return 1
+
+    # Step 4: probe with the NEW key. Build a transient FleetNode that
+    # points at the .new key so _probe_remote_version uses it.
+    probe_with_new = dataclasses.replace(node, ssh_key_path=new_key_path)
+    print("Probing with new key...")
+    version = _probe_remote_version(probe_with_new)
+    if version is None:
+        # Rollback: remove the new pubkey from authorized_keys via the
+        # OLD key, then delete the .new files locally. State is back to
+        # exactly where we started.
+        print(
+            f"s-vps fleet rotate-key: new key probe failed. Rolling back...",
+            file=sys.stderr,
+        )
+        try:
+            _remove_pubkey_from_authorized_keys(node, new_pubkey_text)
+            print("  rollback done — old key still valid, .new files deleted.")
+        except SystemExit as exc:
+            print(
+                f"  ⚠ rollback FAILED ({exc}). The data node may have "
+                f"both pubkeys in authorized_keys. Investigate manually.",
+                file=sys.stderr,
+            )
+        for p in (new_key_path, new_pubkey_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        return 1
+    print(f"  ✓ {version}")
+
+    # Step 5: remove the OLD entry from authorized_keys via the NEW key.
+    # If this fails we end up with both keys present — annoying but
+    # safe; operator sees a warning and can clean up.
+    old_pubkey_path = f"{node.ssh_key_path}.pub"
+    try:
+        old_pubkey_text = pathlib.Path(old_pubkey_path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        print(
+            f"  ⚠ could not read old pubkey at {old_pubkey_path} ({exc}). "
+            f"Old key will remain in authorized_keys.",
+            file=sys.stderr,
+        )
+        old_pubkey_text = ""
+
+    if old_pubkey_text:
+        print("Removing old pubkey from authorized_keys (via new key)...")
+        try:
+            _remove_pubkey_from_authorized_keys(probe_with_new, old_pubkey_text)
+        except SystemExit as exc:
+            print(
+                f"  ⚠ old-key removal failed ({exc}). Both keys remain on "
+                f"the data node — fix manually with `ssh root@{node.ssh_host} "
+                f"vi /root/.ssh/authorized_keys`.",
+                file=sys.stderr,
+            )
+
+    # Step 6: atomic-replace local files. From this point onward the
+    # node's recorded ssh_key_path resolves to the new key material.
+    os.replace(new_key_path, node.ssh_key_path)
+    os.replace(new_pubkey_path, old_pubkey_path)
+    print(f"✓ rotated key for {args.label!r}")
+    print(f"  next `s-vps fleet sync` will use the new key automatically.")
+    return 0
+
+
+def _remove_pubkey_from_authorized_keys(node, pubkey_text: str) -> None:
+    """SSH into `node` and delete any line containing `pubkey_text`'s
+    body from /root/.ssh/authorized_keys. Single-pass awk filter.
+
+    Used both for rotate's "remove the old key" step + as the rollback
+    path when a rotation's probe fails (remove the failed new key)."""
+    pubkey_body = _extract_pubkey_body(pubkey_text)
+    rewrite = (
+        f"set -e; "
+        f"AK=/root/.ssh/authorized_keys; touch \"$AK\"; chmod 0600 \"$AK\"; "
+        f"awk -v PUB={shlex_quote(pubkey_body)} "
+        f"'index($0, PUB) > 0 {{ next }} {{ print }}' \"$AK\" > \"$AK.new\" && "
+        f"mv \"$AK.new\" \"$AK\""
+    )
+    result = _ssh_run(node, "sh", "-c", rewrite, timeout=15)
+    if result.returncode != 0:
+        raise SystemExit(
+            f"s-vps fleet: could not remove pubkey from authorized_keys "
+            f"on {node.node_id}: "
+            f"{result.stderr.decode('utf-8', errors='replace').strip()}"
+        )
+
+
+def cmd_fleet_remove(args: argparse.Namespace) -> int:
+    """Drop a node from the fleet. Does NOT decommission the box.
+    Removes the local YAML + (by default) the SSH key. The data node
+    keeps running; the operator can `s-vps user list` on it to confirm
+    the last-pushed index is still there.
+
+    Pass `--keep-key` to retain the SSH key — useful when you're going
+    to immediately re-register the same node with new metadata."""
+    from . import fleet as _fleet
+
+    try:
+        _fleet.validate_node_id(args.label)
+    except _fleet.FleetError as exc:
+        print(f"s-vps fleet remove: {exc}", file=sys.stderr)
+        return 1
+
+    deleted = _fleet.remove_node(args.label, fleet_dir=args.fleet_dir)
+    if not deleted:
+        print(f"s-vps fleet remove: {args.label!r} not registered (no-op)")
+        return 0
+
+    key_path = os.path.join(args.keys_dir, f"control_to_{args.label}.ed25519")
+    pubkey_path = f"{key_path}.pub"
+    if not args.keep_key:
+        for p in (key_path, pubkey_path):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+        print(f"✓ unregistered {args.label!r} (yaml + ssh key removed)")
+    else:
+        print(f"✓ unregistered {args.label!r} (yaml removed, ssh key kept at {key_path})")
+    return 0
+
+
+def cmd_fleet_list(args: argparse.Namespace) -> int:
+    """Print the fleet as a table (or NDJSON with --json)."""
+    from . import fleet as _fleet
+
+    nodes = _fleet.load_fleet(fleet_dir=args.fleet_dir)
+
+    if args.json:
+        for node in nodes:
+            print(json.dumps(node.to_dict(), sort_keys=True))
+        return 0
+
+    if not nodes:
+        print("(no nodes registered — `s-vps fleet add <label> --ssh-host X` to start)")
+        return 0
+
+    print(f"{'NODE_ID':<24} {'SSH_HOST':<22} {'PORT':<5} {'STATUS':<7} LAST_SYNC")
+    print("-" * 90)
+    for node in nodes:
+        print(
+            f"{node.node_id:<24} "
+            f"{node.ssh_host:<22} "
+            f"{node.ssh_port:<5} "
+            f"{node.last_sync_status:<7} "
+            f"{node.last_sync_at or '(never)'}"
+        )
+    return 0
+
+
+def cmd_fleet_sync(args: argparse.Namespace) -> int:
+    """Push users.index.json to every node (or one node with --node).
+    Tabular output: per-node ✓/✗ + duration. Exit code is 0 only when
+    every push succeeds; partial failures exit 1 so CI / cron noticesy.
+    """
+    from . import fleet as _fleet
+
+    nodes = _fleet.load_fleet(fleet_dir=args.fleet_dir)
+    if args.node:
+        nodes = [n for n in nodes if n.node_id == args.node]
+        if not nodes:
+            print(
+                f"s-vps fleet sync: no node {args.node!r} in the fleet. "
+                f"`s-vps fleet list` to see what's registered.",
+                file=sys.stderr,
+            )
+            return 1
+
+    if not nodes:
+        print("(no nodes to sync)")
+        return 0
+
+    print(f"Syncing users.index.json to {len(nodes)} node(s)...")
+    results = _fleet.sync_all(
+        nodes,
+        state.USERS_INDEX_PATH,
+        parallel=args.parallel,
+        dry_run=args.dry_run,
+        timeout=args.timeout,
+    )
+
+    print()
+    print(f"{'NODE_ID':<24} {'STATUS':<8} {'DURATION':<10} DETAIL")
+    print("-" * 90)
+    all_ok = True
+    for r in results:
+        status = "✓ ok" if r.ok else "✗ FAIL"
+        if not r.ok:
+            all_ok = False
+        detail = (r.stderr.strip().splitlines() or [""])[-1] if not r.ok else ""
+        if not r.ok and not detail:
+            detail = "(no stderr)"
+        if r.ok and r.stdout.strip():
+            # fleet-receive emits a JSON line on success — show that.
+            detail = r.stdout.strip().splitlines()[-1]
+        print(
+            f"{r.node_id:<24} "
+            f"{status:<8} "
+            f"{r.duration_ms} ms".ljust(35) + detail
+        )
+
+        # Update sync status on the local fleet file (only if not dry-run).
+        if not args.dry_run:
+            try:
+                _fleet.update_sync_status(
+                    r.node_id,
+                    status="ok" if r.ok else "failed",
+                    fleet_dir=args.fleet_dir,
+                )
+            except _fleet.FleetError as exc:
+                # Defensive: a sync that succeeded but couldn't update the
+                # status file (e.g. disk full) shouldn't fail the whole
+                # command, but should print a warning.
+                print(f"  (warning: couldn't update {r.node_id}.yml: {exc})",
+                      file=sys.stderr)
+
+    return 0 if all_ok else 1
+
+
+# ---------------------------------------------------------------------------
+# fleet-receive — HIDDEN top-level subcommand
+# ---------------------------------------------------------------------------
+#
+# Invoked by the data node's restricted-key authorized_keys command=.
+# Reads stdin (users.index.json), validates schema v2, atomic-replaces
+# /etc/stealth-vps/users.index.json, fires Reloader. Prints a 1-line
+# JSON status on stdout for the control to consume.
+#
+# Not exposed in `s-vps --help` (operators shouldn't invoke it directly)
+# but reachable via the bash wrapper's dispatcher for safety / testing.
+
+
+def cmd_fleet_receive(args: argparse.Namespace) -> int:
+    """Data-node-side: receive a users.index.json over stdin, validate,
+    install, reload. Designed to be called via SSH from the control,
+    never interactively.
+
+    Output: 1 JSON line on stdout. Exit 0 on success, non-zero on
+    failure. Stderr carries human-readable error text for the control's
+    `PushResult.stderr`.
+    """
+    raw = sys.stdin.buffer.read()
+    if not raw:
+        print("fleet-receive: empty stdin (no index payload)", file=sys.stderr)
+        return 1
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"fleet-receive: stdin is not JSON ({exc})", file=sys.stderr)
+        return 1
+
+    # Schema validation: v2 with `version` + `users` keys.
+    if not isinstance(data, dict):
+        print("fleet-receive: payload root must be an object", file=sys.stderr)
+        return 1
+    if data.get("version") not in (1, 2):
+        print(
+            f"fleet-receive: unsupported schema version {data.get('version')!r}",
+            file=sys.stderr,
+        )
+        return 1
+    if not isinstance(data.get("users"), dict):
+        print("fleet-receive: `users` must be a mapping", file=sys.stderr)
+        return 1
+
+    # Atomic-replace via state.save_users_index, which uses the same
+    # tempfile + os.replace pattern as the rest of the project.
+    try:
+        state.save_users_index(data, path=state.USERS_INDEX_PATH)
+    except state.StateError as exc:
+        print(f"fleet-receive: save_users_index failed: {exc}", file=sys.stderr)
+        return 1
+
+    # Fire the reloader so Xray + Hysteria2 pick up the new index. If
+    # we're on a control box (no reloader-args.json), skip the reload
+    # and just acknowledge the index update — fleet-receive on a
+    # control is operationally undefined but shouldn't blow up.
+    reload_status = "skipped"
+    if os.path.exists(RELOADER_ARGS_PATH):
+        try:
+            reloader = _build_reloader()
+            reloader()
+            reload_status = "ok"
+        except ReloadError as exc:
+            print(f"fleet-receive: reload failed: {exc}", file=sys.stderr)
+            print(json.dumps({
+                "ok": False,
+                "user_count": len(data["users"]),
+                "reload": "failed",
+                "error": str(exc),
+            }))
+            return 2   # partial: index installed, reload failed
+
+    print(json.dumps({
+        "ok": True,
+        "user_count": len(data["users"]),
+        "reload": reload_status,
+    }))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # argparse wiring
 # ---------------------------------------------------------------------------
 
@@ -787,10 +1666,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
              "stays in the index; the operator can `sub renew` to re-issue. Omit to "
              "create a never-expires user (current default).",
     )
+    p.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="(control mode only) skip the post-mutation `fleet sync`. "
+             "Use when batching many adds, then run `s-vps fleet sync` once at the end.",
+    )
     p.set_defaults(func=cmd_user_add)
 
     p = user_sub.add_parser("revoke", help="disable a user (keeps the row with enabled=false)")
     p.add_argument("label")
+    p.add_argument("--no-sync", action="store_true",
+                   help="(control mode only) skip the post-mutation fleet sync.")
     p.set_defaults(func=cmd_user_revoke)
 
     p = user_sub.add_parser(
@@ -798,6 +1685,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="hard-delete a user (removes the row outright; idempotent)",
     )
     p.add_argument("label")
+    p.add_argument("--no-sync", action="store_true",
+                   help="(control mode only) skip the post-mutation fleet sync.")
     p.set_defaults(func=cmd_user_purge)
 
     p = user_sub.add_parser(
@@ -811,6 +1700,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="override the auto-generated Hysteria2 password (rare; usually "
              "you want a fresh random one — the default).",
     )
+    p.add_argument("--no-sync", action="store_true",
+                   help="(control mode only) skip the post-mutation fleet sync.")
     p.set_defaults(func=cmd_user_rotate)
 
     p = user_sub.add_parser("list", help="list users in the index")
@@ -902,6 +1793,102 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="log each removed sub_token (default: print summary only when >0 removed).",
     )
     p.set_defaults(func=cmd_sub_prune)
+
+    # --- fleet (v0.10.0+) --------------------------------------------
+    # Multi-node control plane verbs. Surfaced on every install, but
+    # `fleet add` requires `stealth_vps_control_enabled=true` in the
+    # role (which provisions /etc/stealth-vps/fleet/ + keys/).
+    fleet_grp = sub.add_parser(
+        "fleet",
+        help="multi-node fleet management (v0.10+; requires control_enabled in role)",
+    )
+    fleet_sub = fleet_grp.add_subparsers(dest="fleet_cmd", required=True)
+
+    p = fleet_sub.add_parser(
+        "add",
+        help="register a previously-installed data node",
+        description=cmd_fleet_add.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label", help="node label ([a-z0-9-]{1,32}, e.g. tokyo-1)")
+    p.add_argument("--ssh-host", required=True,
+                   help="data node's SSH host (IP or DNS).")
+    p.add_argument("--ssh-port", type=int, default=22, help="default %(default)s")
+    p.add_argument("--ssh-user", default="root", help="default %(default)s")
+    p.add_argument("--public-host", default="",
+                   help="hostname clients connect to (defaults to --ssh-host).")
+    p.add_argument("--domain", default="",
+                   help="LE cert CN on this node (for client URI rendering).")
+    p.add_argument("--yes", "-y", action="store_true",
+                   help="skip the interactive 'press Enter when pubkey is installed' prompt.")
+    p.add_argument("--fleet-dir", default="/etc/stealth-vps/fleet")
+    p.add_argument("--keys-dir", default="/etc/stealth-vps/keys")
+    p.set_defaults(func=cmd_fleet_add)
+
+    p = fleet_sub.add_parser(
+        "remove",
+        help="unregister a node (does NOT decommission the data node itself)",
+        description=cmd_fleet_remove.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label")
+    p.add_argument("--keep-key", action="store_true",
+                   help="keep the per-node SSH key instead of deleting it.")
+    p.add_argument("--fleet-dir", default="/etc/stealth-vps/fleet")
+    p.add_argument("--keys-dir", default="/etc/stealth-vps/keys")
+    p.set_defaults(func=cmd_fleet_remove)
+
+    p = fleet_sub.add_parser("list", help="list registered nodes")
+    p.add_argument("--json", action="store_true",
+                   help="emit one JSON record per line (NDJSON).")
+    p.add_argument("--fleet-dir", default="/etc/stealth-vps/fleet")
+    p.set_defaults(func=cmd_fleet_list)
+
+    p = fleet_sub.add_parser(
+        "rotate-key",
+        help="roll the SSH key for one node (zero-downtime)",
+        description=cmd_fleet_rotate_key.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label")
+    p.add_argument("--fleet-dir", default="/etc/stealth-vps/fleet")
+    p.add_argument("--keys-dir", default="/etc/stealth-vps/keys")
+    p.set_defaults(func=cmd_fleet_rotate_key)
+
+    p = fleet_sub.add_parser(
+        "sync",
+        help="push users.index.json to all nodes in parallel",
+        description=cmd_fleet_sync.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--node", default=None,
+                   help="sync only this node (default: every registered node).")
+    p.add_argument("--parallel", type=int, default=4,
+                   help="concurrent pushes (default %(default)s; locked per Open Question #3).")
+    p.add_argument("--timeout", type=float, default=30.0,
+                   help="per-node SSH timeout in seconds (default %(default)s).")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print what would be pushed without actually pushing.")
+    p.add_argument("--fleet-dir", default="/etc/stealth-vps/fleet")
+    p.set_defaults(func=cmd_fleet_sync)
+
+    # --- fleet-receive (data-node-side, called via SSH) ---------------
+    # argparse's `help=SUPPRESS` doesn't fully hide subparsers — it
+    # displays the literal `==SUPPRESS==` token. Compromise: a short
+    # "(internal)" help string so operators reading `--help` know
+    # they're not meant to invoke it directly. The data node's
+    # restricted authorized_keys forces this command regardless of
+    # what the SSH caller passes.
+    p = sub.add_parser(
+        "fleet-receive",
+        help="(internal) receive users.index.json over stdin (data-node side, via SSH)",
+        description="Data-node side: read users.index.json from stdin, "
+                    "validate schema, atomic-replace, fire Reloader. "
+                    "Called by the control over SSH; operators shouldn't "
+                    "run this directly.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.set_defaults(func=cmd_fleet_receive)
 
     # --- migrate ------------------------------------------------------
     migrate = sub.add_parser("migrate", help="migration helpers")
