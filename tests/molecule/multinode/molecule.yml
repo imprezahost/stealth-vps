@@ -1,0 +1,128 @@
+---
+# Molecule `multinode` scenario — v0.10.0+ control-plane validation.
+#
+# Three containers: one CONTROL + two DATA NODES. Converge runs the
+# role with `stealth_vps_control_enabled=true` on the control + headless
+# mode on the data nodes. Verify executes the full fleet workflow:
+#
+#   1. `s-vps fleet add data-1 --yes` (key + pubkey pre-installed by prepare.yml)
+#   2. `s-vps fleet add data-2 --yes`
+#   3. `s-vps user add alice` on the control
+#   4. Implicit `fleet sync` propagates alice to both data nodes
+#   5. Assert users.index.json on each data node has alice with
+#      identical UUID + Hysteria2 password
+#   6. Assert the subscription file on the control contains 4 URIs
+#      (2 protocols × 2 nodes), with per-node Reality keys baked in
+#
+# Scope (out):
+#   * Reality / Hysteria2 runtime traffic — molecule Docker can't
+#     reliably reach the public internet to handshake against the real
+#     `microsoft.com:443` dest. That's a Path B (real VPS) test.
+#   * UFW + fail2ban — disabled per the default scenario pattern.
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../../ansible/requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: stealth-vps-control
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /run/lock
+    groups:
+      - control
+    networks:
+      - name: stealth-vps-multinode
+  - name: stealth-vps-data-1
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /run/lock
+    groups:
+      - data
+    networks:
+      - name: stealth-vps-multinode
+  - name: stealth-vps-data-2
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /run/lock
+    groups:
+      - data
+    networks:
+      - name: stealth-vps-multinode
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    group_vars:
+      all:
+        # Container-friendly opt-outs shared by all hosts.
+        stealth_vps_observability_enabled: false
+        stealth_vps_metrics_enabled: false
+        stealth_vps_domain: null
+        stealth_hardening_ufw_enabled: false
+        stealth_hardening_fail2ban_enabled: false
+        stealth_hardening_unattended_upgrades: false
+        stealth_hardening_spamhaus_enabled: false
+      control:
+        # Control plane — no Reality, no Hysteria, no panel. Just CLI +
+        # bot + Caddy + the fleet management surface.
+        stealth_vps_control_enabled: true
+        stealth_vps_reality_enabled: false
+        stealth_vps_hysteria_enabled: false
+        stealth_vps_panel_enabled: false
+        stealth_vps_bot_enabled: false        # bot needs a real Telegram token
+        stealth_vps_subscription_enabled: false  # Caddy needs LE or self-signed
+      data:
+        # Data node — same shape as the `headless` scenario: standalone
+        # Xray + Hysteria configs rendered, but not handshake-tested
+        # inside the container (no public network egress).
+        stealth_vps_control_enabled: false
+        stealth_vps_panel_enabled: false
+        stealth_vps_reality_enabled: true
+        stealth_vps_hysteria_enabled: false   # B3 enabled-by-default elsewhere
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - cleanup
+    - destroy

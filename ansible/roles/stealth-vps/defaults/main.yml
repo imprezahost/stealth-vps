@@ -15,6 +15,27 @@ stealth_vps_arch_map:
   x86_64: amd64
   aarch64: arm64
 
+# ---- v0.10.0: Multi-node control plane ----
+# When `true`, this host runs as the CONTROL of a multi-node fleet — it
+# holds users.index.json + bot + subscription endpoint + fleet management
+# (s-vps fleet add/sync/list) but does NOT terminate Reality / Hysteria2
+# traffic. Data nodes are separate VPSes installed in headless mode
+# (v0.9-style); the control SSHs into them to propagate users.index.json.
+#
+# Mutually exclusive with reality / hysteria / panel. Setting
+# stealth_vps_control_enabled=true alongside any of those three triggers
+# a role-level assertion failure with a fix-up message. A node is
+# either a control box OR a data node, never both.
+#
+# Default false — every single-node v0.9 install upgrading to v0.10 is
+# a no-op feature-wise. See docs/internal/roadmap-v0.10-multi-node.md
+# for the full design.
+stealth_vps_control_enabled: false
+# Per-node fleet metadata + dedicated SSH keys live here (mode 0700 root).
+# Only created when stealth_vps_control_enabled is true.
+stealth_vps_control_fleet_dir: /etc/stealth-vps/fleet
+stealth_vps_control_keys_dir: /etc/stealth-vps/keys
+
 # ---- Reality (Xray-core) ----
 stealth_vps_reality_enabled: true
 # Real-internet site whose TLS handshake Reality "steals". Must be

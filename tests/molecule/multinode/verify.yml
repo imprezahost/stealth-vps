@@ -1,0 +1,196 @@
+---
+# Molecule verify — exercise the full multi-node operator flow on the
+# converged 3-container fleet.
+#
+# Asserts:
+#   1. Control's /etc/stealth-vps/fleet/ exists, /etc/stealth-vps/keys/ exists,
+#      users.index.json is a v2 empty schema.
+#   2. Data nodes have reality.state.yml + users.index.json (single-default
+#      seeded by the role).
+#   3. `s-vps fleet add data-1 --yes` + `s-vps fleet add data-2 --yes`
+#      register both nodes on the control.
+#   4. `s-vps user add alice` propagates alice to BOTH data nodes via the
+#      auto-sync wired in Step 6.
+#   5. Both data nodes' users.index.json contain alice with identical
+#      UUID + Hysteria2 password.
+#   6. `s-vps fleet sync --dry-run` reports both nodes as ✓ ok.
+#
+# Skipped here (Path B / real-VPS scope):
+#   - Subscription file content (Caddy isn't enabled in this scenario).
+#   - Real Reality / Hysteria2 handshake.
+
+- name: Discover data-node IPs (for the control to SSH into)
+  hosts: data
+  gather_facts: true
+  tasks:
+    - name: Stash this data node's primary IP as a fact
+      ansible.builtin.set_fact:
+        my_primary_ip: "{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}"
+
+# --- Pre-flight on the control ----------------------------------------------
+
+- name: Pre-flight checks on control
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: /etc/stealth-vps/fleet exists with mode 0700
+      ansible.builtin.stat:
+        path: /etc/stealth-vps/fleet
+      register: fleet_dir_stat
+    - ansible.builtin.assert:
+        that:
+          - fleet_dir_stat.stat.exists
+          - fleet_dir_stat.stat.isdir
+          - fleet_dir_stat.stat.mode == '0700'
+
+    - name: /etc/stealth-vps/keys exists with mode 0700
+      ansible.builtin.stat:
+        path: /etc/stealth-vps/keys
+      register: keys_dir_stat
+    - ansible.builtin.assert:
+        that:
+          - keys_dir_stat.stat.exists
+          - keys_dir_stat.stat.mode == '0700'
+
+    - name: users.index.json on control is empty v2 schema
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/users.index.json
+      register: control_idx_raw
+    - ansible.builtin.set_fact:
+        control_idx: "{{ control_idx_raw.content | b64decode | from_json }}"
+    - ansible.builtin.assert:
+        that:
+          - control_idx.version == 2
+          - control_idx.users == {}
+
+# --- Pre-flight on data nodes -----------------------------------------------
+
+- name: Pre-flight checks on data nodes
+  hosts: data
+  become: true
+  gather_facts: false
+  tasks:
+    - name: reality.state.yml is present
+      ansible.builtin.stat:
+        path: /etc/stealth-vps/reality.state.yml
+      register: reality_stat
+    - ansible.builtin.assert:
+        that:
+          - reality_stat.stat.exists
+
+    - name: users.index.json has the seeded default client
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/users.index.json
+      register: data_idx_raw
+    - ansible.builtin.set_fact:
+        data_idx: "{{ data_idx_raw.content | b64decode | from_json }}"
+    - ansible.builtin.assert:
+        that:
+          - data_idx.users | length >= 1
+
+# --- Register both data nodes with the control ------------------------------
+
+- name: Register data nodes on the control
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: fleet add data-1
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/bin/s-vps fleet add data-1 --yes
+          --ssh-host {{ hostvars['stealth-vps-data-1']['my_primary_ip'] }}
+          --ssh-port 22 --ssh-user root
+      register: fleet_add_1
+      changed_when: "'registered' in fleet_add_1.stdout"
+
+    - name: fleet add data-2
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/bin/s-vps fleet add data-2 --yes
+          --ssh-host {{ hostvars['stealth-vps-data-2']['my_primary_ip'] }}
+          --ssh-port 22 --ssh-user root
+      register: fleet_add_2
+      changed_when: "'registered' in fleet_add_2.stdout"
+
+    - name: fleet list shows both
+      ansible.builtin.command:
+        cmd: /usr/local/bin/s-vps fleet list
+      register: fleet_list
+      changed_when: false
+    - ansible.builtin.assert:
+        that:
+          - "'data-1' in fleet_list.stdout"
+          - "'data-2' in fleet_list.stdout"
+
+# --- Add alice on the control + verify propagation --------------------------
+
+- name: Add alice on the control + verify propagation
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: s-vps user add alice (triggers auto-sync)
+      ansible.builtin.command:
+        cmd: /usr/local/bin/s-vps user add alice
+      register: user_add
+      changed_when: true
+
+    - ansible.builtin.assert:
+        that:
+          - "'added user' in user_add.stdout"
+          - "'Propagating to 2 data node' in user_add.stdout"
+          - "'✓ data-1' in user_add.stdout"
+          - "'✓ data-2' in user_add.stdout"
+
+    - name: Read alice's record on the control
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/users.index.json
+      register: control_idx_after
+    - ansible.builtin.set_fact:
+        control_alice: >-
+          {{ (control_idx_after.content | b64decode | from_json).users.alice }}
+
+- name: Confirm alice landed on data-1 with the same UUID + Hysteria pw
+  hosts: data
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read users.index.json on each data node
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/users.index.json
+      register: data_idx_after
+    - ansible.builtin.set_fact:
+        data_idx_alice: >-
+          {{ (data_idx_after.content | b64decode | from_json).users.alice
+             | default({}) }}
+
+    - ansible.builtin.assert:
+        that:
+          - data_idx_alice != {}
+          - data_idx_alice.reality_uuid ==
+              hostvars['stealth-vps-control']['control_alice'].reality_uuid
+          - data_idx_alice.hysteria_password ==
+              hostvars['stealth-vps-control']['control_alice'].hysteria_password
+        fail_msg: >-
+          alice on {{ inventory_hostname }} doesn't match control's record:
+          {{ data_idx_alice }} vs control
+          {{ hostvars['stealth-vps-control']['control_alice'] }}
+
+# --- Explicit fleet sync (dry-run) should report both ok --------------------
+
+- name: fleet sync --dry-run reports both nodes ✓
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: s-vps fleet sync --dry-run
+      ansible.builtin.command:
+        cmd: /usr/local/bin/s-vps fleet sync --dry-run
+      register: dry_sync
+      changed_when: false
+    - ansible.builtin.assert:
+        that:
+          - "'✓ ok' in dry_sync.stdout"
+          - dry_sync.stdout.count('✓ ok') == 2

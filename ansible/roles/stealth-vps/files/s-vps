@@ -81,6 +81,15 @@ Backup/restore (v0.9+):
   s-vps restore ARCHIVE --identity FILE
                                  Decrypt + untar over the live filesystem.
 
+Multi-node fleet (v0.10+; requires control_enabled in role):
+  s-vps fleet add LABEL --ssh-host X
+                                 Register a data node (interactive bootstrap).
+  s-vps fleet remove LABEL [--keep-key]
+                                 Unregister a node (does NOT decommission it).
+  s-vps fleet list [--json]      Table of registered nodes + last sync.
+  s-vps fleet sync [--node X] [--dry-run]
+                                 Push users.index.json to every node in parallel.
+
 Headless-mode helpers (v0.7+):
   s-vps reload [--dry-run]       Re-render configs + SIGHUP (headless mode only).
   s-vps migrate from-3xui        Cutover from 3X-UI panel to headless.
@@ -239,8 +248,10 @@ main() {
     # v0.7+ Python-side verbs. exec hands the `$@` straight through so
     # argparse's `--help` etc. land on the Python parser, not on this
     # bash wrapper. Same exit code, no extra shell layer in the trace.
-    # v0.9+ adds `sub`, `backup`, `restore` — all dispatched the same way.
-    user|reload|migrate|sub|backup|restore)
+    # v0.9+ adds `sub`, `backup`, `restore`. v0.10+ adds `fleet` plus
+    # the HIDDEN `fleet-receive` (data-node-side, called over SSH from
+    # a restricted-key authorized_keys command= clause).
+    user|reload|migrate|sub|backup|restore|fleet|fleet-receive)
       exec python3 -m stealth_vps.cli "${cmd}" "$@"
       ;;
     *)

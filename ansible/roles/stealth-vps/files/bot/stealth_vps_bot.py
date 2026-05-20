@@ -271,14 +271,73 @@ def _systemctl_unit_exists(unit: str) -> bool:
     return unit in out.stdout
 
 
-def _build_uris_for_user(rec: dict[str, Any]) -> list[str]:
-    """Thin wrapper around `bot_core.build_uris_for_user` — kept for the
-    legacy call sites in the async handlers below."""
+def _build_uris_for_user(rec: dict[str, Any], *, label: str = "") -> list[str]:
+    """URIs for one user. On a control box with registered data nodes,
+    emit N × P URIs (one per node, per protocol) using the per-node
+    Reality keys. On single-node / data-node hosts, the existing
+    single-node URI render (using this host's env-fed config).
+    """
+    from stealth_vps import fleet as _fleet, bot_core as _bc
+    if _bc.is_control_mode(_bot_config()):
+        nodes = _fleet.load_fleet()
+        if nodes:
+            return _bc.build_uris_for_user_multinode(rec, nodes, label=label)
     return build_uris_for_user(rec, _uri_render_config())
 
 
 def _sub_url_for(token: str) -> str:
     return sub_url_for(token, SUBSCRIPTION_PUBLIC_URL)
+
+
+async def _post_mutation_sync(label: str) -> tuple[bool, str]:
+    """If this host is a control box with registered nodes, push the
+    new users.index.json to each. Runs the (blocking) sync_all in a
+    thread so the bot's event loop doesn't stall.
+
+    Returns (all_ok, human_summary). The bot's `_user_add` /
+    `_user_revoke` / `_sub_renew` calls this AFTER the local mutation
+    has succeeded; the operator sees a brief "syncing…" then the
+    summary inline in the same Telegram message.
+
+    No-op (returns (True, "")) on single-node / data-node hosts.
+    """
+    from stealth_vps import bot_core as _bc, fleet as _fleet
+    if not _bc.is_control_mode(_bot_config()):
+        return True, ""
+    nodes = _fleet.load_fleet()
+    if not nodes:
+        return True, ""
+
+    loop = asyncio.get_running_loop()
+    results = await loop.run_in_executor(
+        None,
+        lambda: _fleet.sync_all(nodes, USERS_INDEX),
+    )
+    lines: list[str] = []
+    all_ok = True
+    for r in results:
+        if r.ok:
+            lines.append(f"  ✓ `{r.node_id}` ({r.duration_ms}ms)")
+        else:
+            all_ok = False
+            tail = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+            lines.append(f"  ✗ `{r.node_id}` ({r.duration_ms}ms): {tail}")
+        try:
+            _fleet.update_sync_status(
+                r.node_id, status="ok" if r.ok else "failed",
+            )
+        except _fleet.FleetError:
+            pass
+    summary = (
+        f"\n\n*Fleet sync ({len(nodes)} node{'s' if len(nodes) > 1 else ''}):*\n"
+        + "\n".join(lines)
+    )
+    if not all_ok:
+        summary += (
+            "\n\n⚠ partial sync. Re-run `s-vps fleet sync` from a shell "
+            "to retry failed nodes."
+        )
+    return all_ok, summary
 
 
 # ---------------------------------------------------------------------------
@@ -444,8 +503,9 @@ async def _user_add(update: Update, label: str):
         await update.message.reply_text(f"⛔ could not add `{label}`: `{exc}`",
                                          parse_mode=ParseMode.MARKDOWN)
         return
-    uris = _build_uris_for_user(rec)
-    # Write the sub file too.
+    # Multi-node aware: on a control box with registered data nodes,
+    # the URI list is N × P entries (per-node Reality keys baked in).
+    uris = _build_uris_for_user(rec, label=label)
     sub_url = ""
     if SUBSCRIPTION_ENABLED:
         try:
@@ -458,6 +518,11 @@ async def _user_add(update: Update, label: str):
         body.append(f"```\n{u}\n```")
     if sub_url:
         body.append(f"\nSubscription URL:\n`{sub_url}`")
+    # v0.10.0+: if this is a control box, propagate to data nodes.
+    # On single-node hosts this is a no-op (returns (True, "")).
+    _ok, sync_summary = await _post_mutation_sync(label)
+    if sync_summary:
+        body.append(sync_summary)
     await update.message.reply_text("\n".join(body), parse_mode=ParseMode.MARKDOWN)
 
 
@@ -493,7 +558,11 @@ async def _user_revoke(update: Update, label: str):
         await update.message.reply_text(f"⛔ revoke failed: `{exc}`",
                                          parse_mode=ParseMode.MARKDOWN)
         return
-    await update.message.reply_text(f"✅ Revoked `{label}`.", parse_mode=ParseMode.MARKDOWN)
+    body = [f"✅ Revoked `{label}`."]
+    _ok, sync_summary = await _post_mutation_sync(label)
+    if sync_summary:
+        body.append(sync_summary)
+    await update.message.reply_text("\n".join(body), parse_mode=ParseMode.MARKDOWN)
 
 
 @admin_only
@@ -537,9 +606,10 @@ async def _sub_show(update: Update, label: str):
         await update.message.reply_text(f"⛔ user `{label}` not found.",
                                          parse_mode=ParseMode.MARKDOWN)
         return
-    uris = _build_uris_for_user(rec)
+    uris = _build_uris_for_user(rec, label=label)
     # Re-render the sub file so it reflects the current Reality / Hysteria
-    # parameters (operator may have rotated keys since /user add).
+    # parameters (operator may have rotated keys since /user add). Multi-
+    # node aware via _build_uris_for_user.
     try:
         write_subscription_file(rec["sub_token"], uris, dir=SUBSCRIPTIONS_DIR)
     except Exception as exc:
@@ -566,17 +636,21 @@ async def _sub_revoke(update: Update, label: str):
     state.save_users_index(idx, USERS_INDEX)
     if old_token:
         remove_subscription_file(old_token, dir=SUBSCRIPTIONS_DIR)
-    uris = _build_uris_for_user(idx["users"][label])
+    uris = _build_uris_for_user(idx["users"][label], label=label)
     try:
         write_subscription_file(new_token, uris, dir=SUBSCRIPTIONS_DIR)
     except Exception as exc:
         await update.message.reply_text(f"⛔ rotated token but write failed: `{exc}`",
                                          parse_mode=ParseMode.MARKDOWN)
         return
-    await update.message.reply_text(
-        f"✅ Rotated sub token for `{label}`.\nNew URL: `{_sub_url_for(new_token)}`",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    body = [
+        f"✅ Rotated sub token for `{label}`.",
+        f"New URL: `{_sub_url_for(new_token)}`",
+    ]
+    _ok, sync_summary = await _post_mutation_sync(label)
+    if sync_summary:
+        body.append(sync_summary)
+    await update.message.reply_text("\n".join(body), parse_mode=ParseMode.MARKDOWN)
 
 
 async def _sub_renew(update: Update, label: str, ttl_or_clear: str):
@@ -614,11 +688,14 @@ async def _sub_renew(update: Update, label: str, ttl_or_clear: str):
         )
         return
     state.update_user(label, sub_expires_at=expires_at, path=USERS_INDEX)
-    await update.message.reply_text(
-        f"✅ Renewed `{label}`.\n"
+    body = [
+        f"✅ Renewed `{label}`.",
         f"`sub_expires_at` = `{expires_at}` (+{ttl_or_clear})",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    ]
+    _ok, sync_summary = await _post_mutation_sync(label)
+    if sync_summary:
+        body.append(sync_summary)
+    await update.message.reply_text("\n".join(body), parse_mode=ParseMode.MARKDOWN)
 
 
 # ---------------------------------------------------------------------------

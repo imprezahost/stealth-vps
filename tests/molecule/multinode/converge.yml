@@ -1,0 +1,20 @@
+---
+# Molecule converge — apply the role to all three containers. Group
+# vars in `molecule.yml` route control_enabled=true to the control
+# container and leave the data nodes in headless mode.
+#
+# We can't reuse `ansible/playbooks/site.yml` directly because that
+# playbook targets only `localhost` (ansible-pull's single-host
+# pattern). For molecule we want all three hosts converged in one
+# pass. Inline role invocation does the job.
+
+- name: Apply stealth-hardening + stealth-vps to every container
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    # CI-friendly: the actual SSH hardening fragment is opt-in elsewhere.
+    stealth_hardening_pin_sshd: false
+  roles:
+    - role: stealth-hardening
+    - role: stealth-vps

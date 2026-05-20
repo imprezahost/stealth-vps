@@ -31,7 +31,16 @@ import dataclasses
 import json
 import logging
 import os
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # `fleet.FleetNode` is only needed for the v0.10.0+ multi-node URI
+    # helpers (`uri_config_from_node`, `build_uris_for_user_multinode`).
+    # Pulled in under TYPE_CHECKING so importing `bot_core` on a v0.9
+    # box (where the operator might not have updated yet, or where the
+    # fleet module is missing from a partial install) doesn't fail at
+    # import time. Annotations on the helpers stay as string forms.
+    from .fleet import FleetNode
 
 from . import state
 from .backends import ThreeXUIBackend, ThreeXUIClient, UserBackend
@@ -49,6 +58,7 @@ log = logging.getLogger("stealth_vps.bot_core")
 
 DEFAULT_PANEL_STATE_PATH = "/etc/stealth-vps/panel.state.yml"
 DEFAULT_RELOADER_ARGS_PATH = "/etc/stealth-vps/reloader-args.json"
+DEFAULT_REALITY_STATE_PATH = "/etc/stealth-vps/reality.state.yml"
 
 
 @dataclasses.dataclass
@@ -61,6 +71,8 @@ class BotConfig:
     users_index_path: str
     panel_state_path: str = DEFAULT_PANEL_STATE_PATH
     reloader_args_path: str = DEFAULT_RELOADER_ARGS_PATH
+    # v0.10.0+: absence signals control mode (no local Xray to reload).
+    reality_state_path: str = DEFAULT_REALITY_STATE_PATH
 
     # Panel-mode credentials. None when panel mode is unavailable.
     panel_url: str = ""
@@ -125,14 +137,25 @@ def build_headless_reloader(config: BotConfig) -> Reloader:
     return Reloader(**args)
 
 
+def is_control_mode(config: BotConfig) -> bool:
+    """True when this host runs as a stealth-vps CONTROL plane (v0.10.0+).
+    On a control box the role explicitly skips xray.yml + hysteria.yml,
+    so `reality.state.yml` never gets created. Single-node + data-node
+    hosts always have it (the role generates it inside reality_state.yml).
+    """
+    return not os.path.exists(config.reality_state_path)
+
+
 def make_backend(config: BotConfig) -> UserBackend:
     """Return the right `UserBackend` for the bot to talk through.
 
     Selection rule (same as `stealth_vps.select_backend` + the CLI's
     `_select_backend_for_cli`):
       * panel.state.yml on disk → panel mode → ThreeXUIBackend.
-      * panel.state.yml absent  → headless mode → HeadlessBackend +
-        Reloader.
+      * reality.state.yml absent → control mode (v0.10.0+) →
+        HeadlessBackend with NO reloader. Propagation to data nodes is
+        done by the bot's caller via `fleet.sync_all`, not here.
+      * else → headless mode → HeadlessBackend + Reloader.
 
     The `STEALTH_VPS_BOT_PANEL_ENABLED` env var is the OPERATOR'S
     INTENT (set by installer.env); `panel.state.yml`'s presence is
@@ -162,6 +185,15 @@ def make_backend(config: BotConfig) -> UserBackend:
             reality_remark=config.reality_remark,
             reality_flow=config.reality_flow,
             users_index_path=config.users_index_path,
+        )
+    if is_control_mode(config):
+        # Control box: no local Xray/Hysteria → no Reloader. The bot's
+        # caller fires `fleet.sync_all` after the backend method
+        # returns. HeadlessBackend's `reloader=None` falls back to its
+        # internal _noop_reloader.
+        return HeadlessBackend(
+            users_index_path=config.users_index_path,
+            reloader=None,
         )
     # Headless mode: every add/revoke goes through HeadlessBackend +
     # Reloader. add() generates a fresh per-user Hysteria2 password
@@ -258,6 +290,93 @@ def build_uris_for_user(
                 remark=uri_config.hysteria_remark,
             )
         )
+    return uris
+
+
+# ---------------------------------------------------------------------------
+# Multi-node URI rendering (v0.10.0+)
+# ---------------------------------------------------------------------------
+#
+# When the control box has registered data nodes via `s-vps fleet add`,
+# each user's subscription bundle becomes N × P entries (N nodes × P
+# protocols). The cleanest API:
+#
+#   nodes = stealth_vps.load_fleet()   # empty on single-node hosts
+#   if nodes:
+#       uris = build_uris_for_user_multinode(rec, nodes, label="alice")
+#   else:
+#       uris = build_uris_for_user(rec, single_node_config)
+#   write_subscription_file(rec["sub_token"], uris)
+#
+# Single-node hosts hit the `else` branch and behave identically to
+# v0.9. Multi-node hosts hit the multinode branch and emit per-node
+# remarks so the client can label/sort by region.
+
+
+def uri_config_from_node(node: "FleetNode") -> UriRenderConfig:  # noqa: F821
+    """Materialise a `UriRenderConfig` from a `FleetNode`. The node's
+    own Reality keys + ports go into the config; the operator's host
+    naming (`public_host` if set, else `ssh_host`) drives the URI host.
+
+    SNI defaults to the first `reality_servernames` entry (whatever
+    real-internet site Reality is masquerading as on THIS node). If
+    the node hasn't been discovered yet (empty list — shouldn't happen
+    after `fleet add` completes), we fall back to the public endpoint
+    so the URI is still well-formed.
+
+    `hysteria_enabled` is set to True only when the node has a hysteria
+    port — single-protocol data nodes (Reality-only) emit one URI per
+    user, not two.
+    """
+    sni = (
+        node.reality_servernames[0]
+        if node.reality_servernames
+        else node.public_endpoint
+    )
+    return UriRenderConfig(
+        public_host=node.public_endpoint,
+        reality_port=node.reality_port,
+        reality_sni=sni,
+        reality_pubkey=node.reality_public_key,
+        reality_short_id=node.reality_short_id,
+        hysteria_enabled=node.hysteria_port > 0,
+        hysteria_port=node.hysteria_port,
+        hysteria_sni=node.public_endpoint,
+        hysteria_obfs_password=node.hysteria_obfs_password,
+        hysteria_insecure=(not node.domain),
+    )
+
+
+def build_uris_for_user_multinode(
+    rec: Mapping[str, Any],
+    nodes: "Iterable[FleetNode]",  # noqa: F821
+    *,
+    label: str = "",
+) -> list[str]:
+    """N × P URIs across the fleet, in load_fleet() order (alphabetic
+    by node_id). Each URI's remark is suffixed:
+
+        stealth-vps-reality-<label>-<node_id>
+        stealth-vps-hysteria2-<label>-<node_id>
+
+    The label is optional — when empty, the remark is just
+    `stealth-vps-reality-<node_id>` (matches v0.9's "single-user
+    install" feel for fleet-of-one cases).
+
+    Hysteria URIs are skipped on nodes that don't terminate Hysteria
+    (hysteria_port == 0). Single-protocol nodes are first-class — a
+    Reality-only fleet is fine.
+    """
+    uris: list[str] = []
+    for node in nodes:
+        cfg = uri_config_from_node(node)
+        if label:
+            cfg.reality_remark = f"stealth-vps-reality-{label}-{node.node_id}"
+            cfg.hysteria_remark = f"stealth-vps-hysteria2-{label}-{node.node_id}"
+        else:
+            cfg.reality_remark = f"stealth-vps-reality-{node.node_id}"
+            cfg.hysteria_remark = f"stealth-vps-hysteria2-{node.node_id}"
+        uris.extend(build_uris_for_user(rec, cfg))
     return uris
 
 
