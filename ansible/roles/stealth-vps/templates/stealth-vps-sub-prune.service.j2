@@ -1,0 +1,37 @@
+# {{ ansible_managed }}
+# stealth-vps subscription TTL prune — deletes the .txt file under
+# /var/lib/stealth-vps/subscriptions/ for every user whose
+# `sub_expires_at` is now in the past. Caddy then returns 404 on the
+# subscription URL. The index row is preserved (operator-visible +
+# auditable; `s-vps sub renew LABEL --ttl 30d` re-issues).
+
+[Unit]
+Description=stealth-vps subscription TTL prune (delete expired sub files)
+Documentation=https://github.com/imprezahost/stealth-vps
+# Prune is purely an index read + file unlink — no need to wait for
+# Xray / Hysteria / 3X-UI. We only need /var/lib mounted, which
+# `local-fs.target` guarantees.
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/s-vps sub prune
+# Journal capture for debugging — output is one line per run unless
+# --verbose, so the journal stays small.
+StandardOutput=journal
+StandardError=journal
+# A failed prune is self-healing on the next timer fire (file still
+# exists → next attempt will retry the unlink). No retry needed here.
+Restart=no
+# Hardening — prune touches one directory and reads one file. The
+# bare minimum read/write surface keeps the blast radius small.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/stealth-vps/subscriptions
+# The index is read-only for prune (we never mutate rows here, only
+# delete files), but s-vps loads it via state.load_users_index which
+# uses /var/lib/stealth-vps as the default dir, so allow the parent
+# read-only via ProtectSystem=strict (which permits reads everywhere).
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

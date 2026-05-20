@@ -1,0 +1,134 @@
+---
+# v0.9.0 — Encrypted backup via `age`.
+#
+# Installs the `age` binary (Debian 12+ has it in main) and creates the
+# backup output directory. Optionally drops a systemd timer that runs
+# `s-vps backup` on a daily schedule.
+#
+# The CLI verbs themselves (`s-vps backup`, `s-vps restore`) work
+# without the timer — operators who prefer to drive backups from a
+# control box via SSH can leave stealth_vps_backup_timer_enabled=false
+# and just invoke `s-vps backup` over SSH.
+#
+# Public key only on the host: the role NEVER persists the operator's
+# `age` identity (secret key). Restore-time, the operator supplies
+# --identity <path> and that file is read by `age -d`. The role's
+# templates render the recipient ('age1...' or 'ssh-ed25519 ...') into
+# /etc/stealth-vps/backup.env when the timer is enabled — the recipient
+# isn't a secret (giving someone your pubkey doesn't let them decrypt).
+
+- name: Refuse to enable backup without a recipient
+  ansible.builtin.assert:
+    that:
+      - not (stealth_vps_backup_enabled | bool) or
+        (stealth_vps_backup_recipient | default('', true) | length > 0)
+    fail_msg: >-
+      stealth_vps_backup_enabled=true requires stealth_vps_backup_recipient
+      to be set to an age public key (`age1...` or `ssh-ed25519 ...`).
+      Generate one with `age-keygen -o ~/.config/stealth-vps-backup.key`
+      on your operator workstation; the second line of that file
+      (`# public key: age1...`) is the recipient.
+  tags: [backup, age]
+
+- name: Install age
+  ansible.builtin.apt:
+    name: age
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: stealth_vps_backup_enabled | bool
+  tags: [backup, age]
+
+- name: Ensure backup output directory exists
+  ansible.builtin.file:
+    path: "{{ stealth_vps_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: stealth_vps_backup_enabled | bool
+  tags: [backup, age]
+
+- name: Render /etc/stealth-vps/backup.env (recipient + output dir)
+  ansible.builtin.copy:
+    # The recipient ISN'T a secret but we keep this file at 0600 to
+    # match operator convention. The systemd unit reads it via
+    # EnvironmentFile= so the values never appear in `ps`.
+    content: |
+      # {{ ansible_managed }}
+      STEALTH_VPS_BACKUP_RECIPIENT={{ stealth_vps_backup_recipient }}
+      STEALTH_VPS_BACKUP_DIR={{ stealth_vps_backup_dir }}
+    dest: /etc/stealth-vps/backup.env
+    owner: root
+    group: root
+    mode: '0600'
+  when: stealth_vps_backup_enabled | bool
+  tags: [backup, age]
+
+# --- Timer (optional, gated separately) ----------------------------------
+
+- name: Render stealth-vps-backup.service (one-shot)
+  ansible.builtin.template:
+    src: stealth-vps-backup.service.j2
+    dest: /etc/systemd/system/stealth-vps-backup.service
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - stealth_vps_backup_enabled | bool
+    - stealth_vps_backup_timer_enabled | bool
+  notify: Reload systemd
+  tags: [backup, systemd]
+
+- name: Render stealth-vps-backup.timer
+  ansible.builtin.template:
+    src: stealth-vps-backup.timer.j2
+    dest: /etc/systemd/system/stealth-vps-backup.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - stealth_vps_backup_enabled | bool
+    - stealth_vps_backup_timer_enabled | bool
+  notify: Reload systemd
+  tags: [backup, systemd]
+
+- name: Enable + start stealth-vps-backup.timer
+  ansible.builtin.systemd:
+    name: stealth-vps-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - stealth_vps_backup_enabled | bool
+    - stealth_vps_backup_timer_enabled | bool
+  tags: [backup, systemd]
+
+# --- Disable paths ------------------------------------------------------
+
+- name: Stop + disable backup timer when disabled
+  ansible.builtin.systemd:
+    name: stealth-vps-backup.timer
+    enabled: false
+    state: stopped
+  when: not (stealth_vps_backup_enabled | bool and stealth_vps_backup_timer_enabled | bool)
+  failed_when: false
+  tags: [backup, systemd]
+
+- name: Remove backup units + env when disabled
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/stealth-vps-backup.service
+    - /etc/systemd/system/stealth-vps-backup.timer
+  when: not (stealth_vps_backup_enabled | bool and stealth_vps_backup_timer_enabled | bool)
+  notify: Reload systemd
+  tags: [backup, systemd]
+
+- name: Remove backup env file when feature fully disabled
+  ansible.builtin.file:
+    path: /etc/stealth-vps/backup.env
+    state: absent
+  when: not (stealth_vps_backup_enabled | bool)
+  tags: [backup, age]

@@ -486,6 +486,206 @@ def test_migrate_rollback_with_no_backups_errors(capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
+# user add --ttl  (subscription TTL, schema v2)
+# ---------------------------------------------------------------------------
+
+
+def test_user_add_with_ttl_sets_expiry(
+    users_index_path: str,
+    reloader_args_json: str,
+    capsys,
+) -> None:
+    """`s-vps user add bob --ttl 30d` should write sub_expires_at to the
+    index. We don't assert the exact ISO string (it's relative to now);
+    we verify the field is non-empty, parseable, and lands ~30d ahead.
+    """
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob", "--ttl", "30d"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["sub_expires_at"]
+    # Round-trip through the same parser to confirm the value is well-formed
+    # and lands in the future (compute_expiry produces "now + ttl" so a 30d
+    # TTL must NOT be expired right after creation).
+    assert state.is_expired(rec) is False
+
+    out = capsys.readouterr().out
+    assert "sub_expires_at" in out
+    assert "TTL 30d" in out
+
+
+def test_user_add_without_ttl_leaves_expiry_none(
+    users_index_path: str,
+    reloader_args_json: str,
+) -> None:
+    """The TTL flag is opt-in. Existing operator workflows (no --ttl) must
+    keep producing never-expires users — backwards compatibility.
+    """
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec.get("sub_expires_at") is None
+
+
+def test_user_add_rejects_garbled_ttl(
+    users_index_path: str,
+    reloader_args_json: str,
+    capsys,
+) -> None:
+    """`--ttl 30days` is invalid — only the canonical units (s/m/h/d/w/mo/y)
+    are accepted. The user record was still created by backend.add (we
+    don't unwind that), but a clear stderr message + non-zero exit
+    tells the operator the TTL didn't take effect."""
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob", "--ttl", "30days"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "ttl `30days` invalid" in err
+    # Record exists but with no expiry set — operator can sub renew it.
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec.get("sub_expires_at") is None
+
+
+# ---------------------------------------------------------------------------
+# sub renew
+# ---------------------------------------------------------------------------
+
+
+def test_sub_renew_sets_expiry(users_index_path: str, capsys) -> None:
+    rc = cli.main(["sub", "renew", "alice", "--ttl", "7d"])
+    assert rc == 0
+    rec = state.get_user("alice", users_index_path)
+    assert rec["sub_expires_at"]
+    assert state.is_expired(rec) is False
+    out = capsys.readouterr().out
+    assert "renewed 'alice'" in out
+    assert "+7d" in out
+
+
+def test_sub_renew_clear_removes_expiry(users_index_path: str, capsys) -> None:
+    # Seed an expiry first, then clear it.
+    state.update_user("alice", sub_expires_at="2099-01-01T00:00:00Z", path=users_index_path)
+    rc = cli.main(["sub", "renew", "alice", "--clear"])
+    assert rc == 0
+    rec = state.get_user("alice", users_index_path)
+    assert rec.get("sub_expires_at") is None
+    assert "cleared expiry on 'alice'" in capsys.readouterr().out
+
+
+def test_sub_renew_inspection_mode(users_index_path: str, capsys) -> None:
+    """No --ttl + no --clear → read-only. Prints the current value and
+    a hint about how to mutate it. Exit 0 (queries succeed)."""
+    state.update_user("alice", sub_expires_at="2099-01-01T00:00:00Z", path=users_index_path)
+    rc = cli.main(["sub", "renew", "alice"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2099-01-01T00:00:00Z" in out
+    assert "Pass --ttl" in out
+
+
+def test_sub_renew_inspection_says_never_expires_when_unset(
+    users_index_path: str,
+    capsys,
+) -> None:
+    rc = cli.main(["sub", "renew", "alice"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no expiry" in out
+    assert "Pass --ttl" in out
+
+
+def test_sub_renew_unknown_label_errors(users_index_path: str, capsys) -> None:
+    rc = cli.main(["sub", "renew", "ghost", "--ttl", "30d"])
+    assert rc == 1
+    assert "no user labelled 'ghost'" in capsys.readouterr().err
+
+
+def test_sub_renew_rejects_garbled_ttl(users_index_path: str, capsys) -> None:
+    rc = cli.main(["sub", "renew", "alice", "--ttl", "lots"])
+    assert rc == 1
+    assert "ttl `lots` invalid" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# sub prune
+# ---------------------------------------------------------------------------
+
+
+def test_sub_prune_deletes_expired_subscription_files(
+    users_index_path: str,
+    subscriptions_dir: str,
+    tmp_path: pathlib.Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """Set up: alice's expiry is in the past + her sub file exists on disk.
+    Prune should unlink the file (operationally a 404 from Caddy) and
+    leave the index row alone (operator can sub renew later).
+    """
+    # Force the SUBSCRIPTION_DIR import in cmd_sub_prune to point at our
+    # tmp dir. We patch at the module the CLI re-imports from.
+    from stealth_vps import subscription
+    monkeypatch.setattr(subscription, "SUBSCRIPTION_DIR", subscriptions_dir)
+
+    # Set alice's expiry to the past and place a sub file on disk.
+    state.update_user("alice", sub_expires_at="2020-01-01T00:00:00Z", path=users_index_path)
+    alice = state.get_user("alice", users_index_path)
+    sub_file = pathlib.Path(subscriptions_dir) / f"{alice['sub_token']}.txt"
+    sub_file.write_text("vless://placeholder", encoding="utf-8")
+    assert sub_file.exists()
+
+    rc = cli.main(["sub", "prune", "--verbose"])
+    assert rc == 0
+    assert not sub_file.exists()
+    # Index row preserved — auditable. Only the file is gone.
+    assert state.get_user("alice", users_index_path) is not None
+    out = capsys.readouterr().out
+    assert "pruned 1 expired subscription file" in out
+
+
+def test_sub_prune_skips_non_expired(
+    users_index_path: str,
+    subscriptions_dir: str,
+    monkeypatch,
+    capsys,
+) -> None:
+    from stealth_vps import subscription
+    monkeypatch.setattr(subscription, "SUBSCRIPTION_DIR", subscriptions_dir)
+
+    # alice has no expiry, so prune should leave her sub file alone.
+    alice = state.get_user("alice", users_index_path)
+    sub_file = pathlib.Path(subscriptions_dir) / f"{alice['sub_token']}.txt"
+    sub_file.write_text("vless://placeholder", encoding="utf-8")
+
+    rc = cli.main(["sub", "prune"])
+    assert rc == 0
+    assert sub_file.exists()
+
+
+def test_sub_prune_idempotent_when_file_already_missing(
+    users_index_path: str,
+    subscriptions_dir: str,
+    monkeypatch,
+    capsys,
+) -> None:
+    """Re-running prune over an already-pruned token reports zero
+    removals. The index row still claims expired, but no file = nothing
+    to do."""
+    from stealth_vps import subscription
+    monkeypatch.setattr(subscription, "SUBSCRIPTION_DIR", subscriptions_dir)
+    state.update_user("alice", sub_expires_at="2020-01-01T00:00:00Z", path=users_index_path)
+
+    rc = cli.main(["sub", "prune", "--verbose"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pruned 0 expired" in out
+
+
+# ---------------------------------------------------------------------------
 # argparse plumbing — fail-fast on unknown verbs
 # ---------------------------------------------------------------------------
 
@@ -500,4 +700,10 @@ def test_main_unknown_verb_exits_two() -> None:
 def test_main_user_no_subcommand_errors() -> None:
     with pytest.raises(SystemExit) as excinfo:
         cli.main(["user"])
+    assert excinfo.value.code == 2
+
+
+def test_main_sub_no_subcommand_errors() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["sub"])
     assert excinfo.value.code == 2

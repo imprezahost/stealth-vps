@@ -1,0 +1,69 @@
+---
+# v0.9.0 — Health-check Prometheus exporter on :9102.
+#
+# Installs a tiny HTTP server unit that exposes:
+#   /metrics  — Prometheus text body (unit health, port reachability,
+#               users.index health + counts, sub TTL counts)
+#   /healthz  — `ok` 200, useful for k8s liveness / curl smoke
+#
+# Off by default. Operators who already run node_exporter + the
+# textfile collector (the v0.6.0 stealth-vps-metrics path) can keep
+# using that — the two are complementary, not mutually exclusive.
+#
+# Default bind: 127.0.0.1:9102. Operators wanting external scraping
+# either:
+#   - Set stealth_vps_health_exporter_bind_addr: "0.0.0.0" + open UFW
+#     (raw, no auth — only safe inside a VPN), or
+#   - Front it behind Caddy with basic auth (recommended).
+# The role doesn't pick either path for you.
+
+- name: Render stealth-vps-health-exporter.service
+  ansible.builtin.template:
+    src: stealth-vps-health-exporter.service.j2
+    dest: /etc/systemd/system/stealth-vps-health-exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_health_exporter_enabled | bool
+  notify: Reload systemd
+  tags: [health, prometheus, systemd]
+
+- name: Enable + start stealth-vps-health-exporter
+  ansible.builtin.systemd:
+    name: stealth-vps-health-exporter.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: stealth_vps_health_exporter_enabled | bool
+  tags: [health, prometheus, systemd]
+
+- name: Open UFW for the exporter when expose=true
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_vps_health_exporter_bind_port }}"
+    proto: tcp
+    comment: "stealth-vps health exporter"
+  when:
+    - stealth_vps_health_exporter_enabled | bool
+    - stealth_vps_health_exporter_bind_addr != "127.0.0.1"
+  failed_when: false   # UFW may not be installed
+  tags: [health, prometheus, ufw]
+
+# --- Disable path -----------------------------------------------------
+
+- name: Stop + disable health exporter when disabled
+  ansible.builtin.systemd:
+    name: stealth-vps-health-exporter.service
+    enabled: false
+    state: stopped
+  when: not (stealth_vps_health_exporter_enabled | bool)
+  failed_when: false
+  tags: [health, prometheus, systemd]
+
+- name: Remove health-exporter unit when disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/stealth-vps-health-exporter.service
+    state: absent
+  when: not (stealth_vps_health_exporter_enabled | bool)
+  notify: Reload systemd
+  tags: [health, prometheus, systemd]

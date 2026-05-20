@@ -104,3 +104,38 @@
   ansible.builtin.include_tasks: cli_wrapper.yml
   when: stealth_vps_cli_install | bool
   tags: [cli, s-vps]
+
+# Subscription TTL daily prune (v0.9.0). Stays included unconditionally
+# because the file itself decides between install + uninstall depending
+# on stealth_vps_sub_prune_enabled. That way an operator who flips the
+# flag from true to false gets the units removed on the next converge
+# without needing extra steps.
+- name: Install (or remove) daily subscription-TTL prune timer
+  ansible.builtin.include_tasks: sub_prune.yml
+  tags: [sub, prune, systemd]
+
+# Auto-update opt-in (v0.9.0). Same install-or-remove pattern as
+# sub_prune.yml — the task file decides based on the flag, so flipping
+# false → true → false is handled by re-running ansible-pull. The
+# auto-update timer needs the s-vps wrapper + python pkg, both of
+# which were already installed by the blocks above.
+- name: Install (or remove) auto-update timer
+  ansible.builtin.include_tasks: auto_update.yml
+  tags: [auto-update, systemd]
+
+# Encrypted backup via age (v0.9.0). Install-or-remove based on
+# stealth_vps_backup_enabled; the optional daily timer is gated
+# separately by stealth_vps_backup_timer_enabled. Operators who want
+# CLI access only (drive backups from a control box via SSH) leave the
+# timer off and just run `s-vps backup` when they need it.
+- name: Install (or remove) age + backup tooling
+  ansible.builtin.include_tasks: backup.yml
+  tags: [backup, age]
+
+# Health-check Prometheus exporter (v0.9.0). Off by default — operators
+# on the v0.6.0 node-exporter textfile-collector flow already have this
+# data. Same install-or-remove pattern, gated by
+# stealth_vps_health_exporter_enabled.
+- name: Install (or remove) health-check Prometheus exporter
+  ansible.builtin.include_tasks: health_exporter.yml
+  tags: [health, prometheus]

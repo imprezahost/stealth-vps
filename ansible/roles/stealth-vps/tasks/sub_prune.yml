@@ -1,0 +1,79 @@
+---
+# v0.9.0 — Subscription TTL daily prune.
+#
+# Installs (or removes, idempotently) a systemd service + timer pair:
+#   stealth-vps-sub-prune.service  →  ExecStart=/usr/local/bin/s-vps sub prune
+#   stealth-vps-sub-prune.timer    →  OnCalendar=stealth_vps_sub_prune_oncalendar
+#
+# Behaviour matrix:
+#   stealth_vps_sub_prune_enabled = false (default)
+#     → ensure both units are absent (stop+disable+rm). Operators who
+#       never set --ttl have nothing to prune; we keep the host clean.
+#   stealth_vps_sub_prune_enabled = true
+#     → render both units, daemon-reload, enable + start the timer.
+#
+# Why a separate timer instead of `s-vps update`'s cron-like sweep:
+# operators may run `s-vps update` infrequently (intentional — minimises
+# churn). Prune is purely a clock-watcher; coupling it to converges
+# would let expired sub URLs keep serving for weeks at a time.
+#
+# Idempotency notes:
+#   - The unit/timer files have stable content under a given config; we
+#     use `template:` rather than `copy:` so molecule's `--check` mode
+#     reports drift instead of "would have rewritten".
+#   - The systemd block `state: stopped/disabled` only acts on units it
+#     finds; absent-from-disk is fine. We follow with the file removal
+#     to fully revert.
+
+- name: Render stealth-vps-sub-prune.service (the prune one-shot)
+  ansible.builtin.template:
+    src: stealth-vps-sub-prune.service.j2
+    dest: /etc/systemd/system/stealth-vps-sub-prune.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_sub_prune_enabled | bool
+  notify: Reload systemd
+  tags: [sub, prune, systemd]
+
+- name: Render stealth-vps-sub-prune.timer (the daily clock)
+  ansible.builtin.template:
+    src: stealth-vps-sub-prune.timer.j2
+    dest: /etc/systemd/system/stealth-vps-sub-prune.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_sub_prune_enabled | bool
+  notify: Reload systemd
+  tags: [sub, prune, systemd]
+
+- name: Enable + start stealth-vps-sub-prune.timer
+  ansible.builtin.systemd:
+    name: stealth-vps-sub-prune.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: stealth_vps_sub_prune_enabled | bool
+  tags: [sub, prune, systemd]
+
+# --- Disable path (when the operator flips the flag back off) -----------
+
+- name: Stop + disable stealth-vps-sub-prune.timer when disabled
+  ansible.builtin.systemd:
+    name: stealth-vps-sub-prune.timer
+    enabled: false
+    state: stopped
+  when: not (stealth_vps_sub_prune_enabled | bool)
+  failed_when: false   # tolerate "unit not found" on first-run-with-flag-off
+  tags: [sub, prune, systemd]
+
+- name: Remove stealth-vps-sub-prune unit files when disabled
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop:
+    - stealth-vps-sub-prune.service
+    - stealth-vps-sub-prune.timer
+  when: not (stealth_vps_sub_prune_enabled | bool)
+  notify: Reload systemd
+  tags: [sub, prune, systemd]

@@ -327,10 +327,25 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         print(f"s-vps: {exc}", file=sys.stderr)
         return 1
 
+    # `--ttl` is a second-step patch: backend.add already wrote the
+    # row, now we set sub_expires_at on it. Two writes total per add-
+    # with-ttl, but state.update_user re-uses the atomic-replace pattern
+    # so concurrent readers never see a half-applied row.
+    if args.ttl:
+        try:
+            expires_at = state.compute_expiry(args.ttl)
+            state.update_user(args.label, sub_expires_at=expires_at, path=state.USERS_INDEX_PATH)
+            rec["sub_expires_at"] = expires_at
+        except state.StateError as exc:
+            print(f"s-vps: ttl `{args.ttl}` invalid: {exc}", file=sys.stderr)
+            return 1
+
     print(f"✓ added user {args.label!r}")
     print(f"  reality_uuid     : {rec['reality_uuid']}")
     print(f"  hysteria_password: {rec['hysteria_password']}")
     print(f"  sub_token        : {rec['sub_token']}")
+    if rec.get("sub_expires_at"):
+        print(f"  sub_expires_at   : {rec['sub_expires_at']} (TTL {args.ttl})")
 
     reality, hysteria = _load_states_for_render()
     uris = _render_user_uris(args.label, rec, reality_state=reality, hysteria_state=hysteria)
@@ -342,6 +357,75 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             print(f"  hysteria2 URI   : {uris['hysteria2']}")
         if "sub" in uris:
             print(f"  subscription URL: {uris['sub']}")
+    return 0
+
+
+def cmd_sub_renew(args: argparse.Namespace) -> int:
+    """Bump (or set) a user's subscription expiry. Operator workflow:
+    user comes back from vacation and reports their sub URL is 404'ing →
+    `s-vps sub renew alice --ttl 30d` extends them by another 30 days.
+
+    Pass --clear instead of --ttl to remove the expiry entirely
+    (never-expires). Pass neither to inspect the current expiry.
+    """
+    rec = state.get_user(args.label, state.USERS_INDEX_PATH)
+    if rec is None:
+        print(f"s-vps: no user labelled {args.label!r} in the index", file=sys.stderr)
+        return 1
+
+    if args.clear:
+        state.update_user(args.label, sub_expires_at=None, path=state.USERS_INDEX_PATH)
+        print(f"✓ cleared expiry on {args.label!r} (never expires)")
+        return 0
+
+    if not args.ttl:
+        cur = rec.get("sub_expires_at")
+        if cur:
+            print(f"  current sub_expires_at: {cur}")
+        else:
+            print(f"  {args.label!r} has no expiry (never expires)")
+        print("Pass --ttl <duration> to (re)set the expiry, or --clear to remove it.")
+        return 0
+
+    try:
+        expires_at = state.compute_expiry(args.ttl)
+    except state.StateError as exc:
+        print(f"s-vps: ttl `{args.ttl}` invalid: {exc}", file=sys.stderr)
+        return 1
+    state.update_user(args.label, sub_expires_at=expires_at, path=state.USERS_INDEX_PATH)
+    print(f"✓ renewed {args.label!r}: sub_expires_at = {expires_at} (+{args.ttl})")
+    return 0
+
+
+def cmd_sub_prune(args: argparse.Namespace) -> int:
+    """Delete the subscription file for every user whose `sub_expires_at`
+    is in the past. Caddy then returns 404 on the URL — operationally
+    equivalent to "the sub link is dead". The user record itself stays
+    in the index (auditable), the operator can `sub renew` later to
+    re-issue the sub file via the next `s-vps reload`.
+
+    Idempotent: re-running over an already-pruned token deletes nothing
+    and reports zero removals.
+
+    Designed for a daily systemd timer — see tasks/sub_prune.yml.
+    """
+    from .subscription import SUBSCRIPTION_DIR, remove_subscription_file
+
+    try:
+        expired = state.expired_sub_tokens(state.USERS_INDEX_PATH)
+    except state.StateError as exc:
+        print(f"s-vps: could not read users.index.json: {exc}", file=sys.stderr)
+        return 1
+
+    removed = 0
+    for label, token in expired:
+        if remove_subscription_file(token, dir=SUBSCRIPTION_DIR):
+            removed += 1
+            if args.verbose:
+                print(f"  removed sub file for {label!r} (token {token})")
+    if args.verbose or removed > 0:
+        print(f"✓ pruned {removed} expired subscription file(s) "
+              f"({len(expired)} expired user(s) in the index)")
     return 0
 
 
@@ -694,6 +778,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="override the auto-generated Hysteria2 password (useful during migration "
              "when the operator wants to reuse a known token).",
     )
+    p.add_argument(
+        "--ttl",
+        default="",
+        help="set a subscription expiry, e.g. `30d`, `12h`, `1y`. Accepted units: "
+             "s/m/h/d/w/mo/y. When the TTL elapses, `s-vps sub prune` will delete the "
+             "user's subscription file (operationally a 404). The user record itself "
+             "stays in the index; the operator can `sub renew` to re-issue. Omit to "
+             "create a never-expires user (current default).",
+    )
     p.set_defaults(func=cmd_user_add)
 
     p = user_sub.add_parser("revoke", help="disable a user (keeps the row with enabled=false)")
@@ -738,6 +831,77 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true",
                    help="render configs but skip `systemctl reload`. For debugging.")
     p.set_defaults(func=cmd_reload)
+
+    # --- backup / restore --------------------------------------------
+    # `backup` + `restore` delegate to stealth_vps.backup.main(). Wiring
+    # them as proper sub.add_parser entries (rather than passthrough to
+    # `python3 -m stealth_vps.backup`) lets `s-vps --help` advertise
+    # them in the same place operators look for everything else.
+    from . import backup as _backup_mod
+    p = sub.add_parser(
+        "backup",
+        help="snapshot operator state to an age-encrypted .tar.age",
+    )
+    p.add_argument("--recipient", default="",
+                   help="operator's age recipient (defaults to env "
+                        "STEALTH_VPS_BACKUP_RECIPIENT).")
+    p.add_argument("--output-dir", default=_backup_mod.DEFAULT_BACKUP_DIR,
+                   help="directory for the .tar.age (default %(default)s).")
+    p.add_argument("--source", dest="sources", action="append", default=None,
+                   help="extra path to include (repeat for multiple).")
+    p.set_defaults(func=_backup_mod.cmd_backup)
+
+    p = sub.add_parser(
+        "restore",
+        help="decrypt + untar a .tar.age back over the live filesystem",
+    )
+    p.add_argument("archive", help="path to the .tar.age to restore")
+    p.add_argument("--identity", required=True,
+                   help="path to the operator's age identity file.")
+    p.add_argument("--target-root", default="/",
+                   help="prefix to extract under (tests pass tmp; default %(default)s).")
+    p.set_defaults(func=_backup_mod.cmd_restore)
+
+    # --- sub ----------------------------------------------------------
+    # `sub` (subscription) verbs operate on the per-user expiry that ships
+    # with schema v2. They don't talk to a backend — they mutate the index
+    # directly + (for prune) delete files under /var/lib/stealth-vps/
+    # subscriptions/. Headless reload doesn't need to fire because Caddy
+    # serves whatever's in that dir; deleting the file is the 404.
+    sub_grp = sub.add_parser("sub", help="subscription TTL / renew / prune helpers")
+    sub_sub = sub_grp.add_subparsers(dest="sub_cmd", required=True)
+
+    p = sub_sub.add_parser(
+        "renew",
+        help="set/bump/clear a user's subscription expiry",
+        description=cmd_sub_renew.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label")
+    p.add_argument(
+        "--ttl",
+        default="",
+        help="new TTL relative to now (e.g. `30d`). Same grammar as `user add --ttl`.",
+    )
+    p.add_argument(
+        "--clear",
+        action="store_true",
+        help="remove the expiry entirely — the user never expires again.",
+    )
+    p.set_defaults(func=cmd_sub_renew)
+
+    p = sub_sub.add_parser(
+        "prune",
+        help="delete subscription files for users whose TTL has elapsed",
+        description=cmd_sub_prune.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="log each removed sub_token (default: print summary only when >0 removed).",
+    )
+    p.set_defaults(func=cmd_sub_prune)
 
     # --- migrate ------------------------------------------------------
     migrate = sub.add_parser("migrate", help="migration helpers")

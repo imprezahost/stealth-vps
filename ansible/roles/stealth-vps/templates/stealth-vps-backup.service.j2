@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# stealth-vps daily backup — tar /etc/stealth-vps + /var/lib/stealth-vps
+# and encrypt the bundle to the operator's age public key.
+
+[Unit]
+Description=stealth-vps encrypted backup (writes .tar.age under {{ stealth_vps_backup_dir }})
+Documentation=https://github.com/imprezahost/stealth-vps
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/stealth-vps/backup.env
+# /usr/local/bin/s-vps dispatches `backup` to stealth_vps.backup.cmd_backup
+# which reads STEALTH_VPS_BACKUP_RECIPIENT from the env file above.
+ExecStart=/usr/local/bin/s-vps backup --output-dir ${STEALTH_VPS_BACKUP_DIR}
+StandardOutput=journal
+StandardError=journal
+Restart=no
+# Hardening — backup needs read of /etc/stealth-vps + /var/lib/stealth-vps
+# and write of /var/backups/stealth-vps. Everything else is read-only.
+ProtectSystem=strict
+ReadWritePaths={{ stealth_vps_backup_dir }}
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

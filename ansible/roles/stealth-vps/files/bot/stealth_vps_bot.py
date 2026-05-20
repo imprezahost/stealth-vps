@@ -319,7 +319,8 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/user list — list enabled clients\n"
         "/user revoke <label> — disable a client\n"
         "/sub <label> — get a client's sub URL\n"
-        "/sub revoke <label> — rotate sub token\n\n"
+        "/sub revoke <label> — rotate sub token\n"
+        "/sub renew <label> <ttl|clear> — set/clear expiry (e.g. 30d)\n\n"
         "Labels must match `[a-zA-Z0-9_-]{1,32}`. "
         "Names starting with `stealth-vps-` are reserved.",
         parse_mode=ParseMode.MARKDOWN,
@@ -500,7 +501,11 @@ async def cmd_sub(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args or []
     if not args:
         await update.message.reply_text(
-            "Usage: /sub <label> · /sub revoke <label>"
+            "Usage:\n"
+            "  /sub <label>                  — show URL (refreshes the file)\n"
+            "  /sub revoke <label>           — rotate the sub token\n"
+            "  /sub renew <label> <ttl>      — set/bump expiry (e.g. 30d, 12h)\n"
+            "  /sub renew <label> clear      — remove expiry (never expires)\n"
         )
         return
     if not SUBSCRIPTION_ENABLED:
@@ -512,11 +517,17 @@ async def cmd_sub(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     if args[0].lower() == "revoke" and len(args) == 2:
         await _sub_revoke(update, args[1])
+    elif args[0].lower() == "renew" and len(args) == 3:
+        # /sub renew <label> <ttl-or-`clear`> — delegates to state via
+        # the same compute_expiry / update_user the CLI uses. Parsing
+        # lives in state.py; the bot is a thin presenter.
+        await _sub_renew(update, args[1], args[2])
     elif len(args) == 1:
         await _sub_show(update, args[0])
     else:
         await update.message.reply_text(
-            "Unknown form. Try: /sub <label> · /sub revoke <label>"
+            "Unknown form. Try: /sub <label> · /sub revoke <label> · "
+            "/sub renew <label> <ttl|clear>"
         )
 
 
@@ -564,6 +575,48 @@ async def _sub_revoke(update: Update, label: str):
         return
     await update.message.reply_text(
         f"✅ Rotated sub token for `{label}`.\nNew URL: `{_sub_url_for(new_token)}`",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def _sub_renew(update: Update, label: str, ttl_or_clear: str):
+    """Set or clear a user's `sub_expires_at`. `ttl_or_clear` is either
+    the literal string `clear` (remove expiry) or a duration spec the
+    state module's `parse_duration` understands (e.g. `30d`, `12h`).
+
+    Bot-side mirror of the CLI's `s-vps sub renew`. We deliberately
+    don't refresh the subscription file here — clearing/setting the TTL
+    is a metadata change on the index row, not on the served bytes.
+    The next `/sub <label>` (or the next ansible converge) will refresh.
+    """
+    rec = state.get_user(label, USERS_INDEX)
+    if rec is None:
+        await update.message.reply_text(
+            f"⛔ user `{label}` not found.", parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if ttl_or_clear.lower() == "clear":
+        state.update_user(label, sub_expires_at=None, path=USERS_INDEX)
+        await update.message.reply_text(
+            f"✅ Cleared expiry on `{label}` (never expires).",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    try:
+        expires_at = state.compute_expiry(ttl_or_clear)
+    except state.StateError as exc:
+        await update.message.reply_text(
+            f"⛔ ttl `{ttl_or_clear}` invalid: {exc}\n"
+            f"Accepted units: s/m/h/d/w/mo/y (e.g. `30d`, `12h`, `1y`).",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    state.update_user(label, sub_expires_at=expires_at, path=USERS_INDEX)
+    await update.message.reply_text(
+        f"✅ Renewed `{label}`.\n"
+        f"`sub_expires_at` = `{expires_at}` (+{ttl_or_clear})",
         parse_mode=ParseMode.MARKDOWN,
     )
 

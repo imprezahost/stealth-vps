@@ -1,0 +1,94 @@
+---
+# v0.9.0 — Auto-update opt-in.
+#
+# Installs (or removes, idempotently) the auto-update systemd unit pair
+# plus an env file that holds the GitHub token + policy:
+#   stealth-vps-auto-update.service  → ExecStart=python3 -m stealth_vps.auto_update
+#   stealth-vps-auto-update.timer    → OnCalendar=stealth_vps_auto_update_oncalendar
+#   /etc/stealth-vps/auto-update.env → env vars read by EnvironmentFile=
+#
+# Why a separate env file instead of templating env-vars into the .service:
+#   - The GitHub token is the only sensitive thing here, and an
+#     EnvironmentFile= with `0600 root:root` lets us keep it off the
+#     systemd unit (which is `0644 root:root` for readability).
+#   - Operators can grep `/etc/stealth-vps/auto-update.env` to confirm
+#     the policy without parsing the systemd unit.
+#
+# Behaviour matrix:
+#   stealth_vps_auto_update_enabled = false (default)
+#     → ensure all 3 files are absent (stop+disable+rm). Operators who
+#       update on their own cadence don't see any new units.
+#   stealth_vps_auto_update_enabled = true
+#     → render all 3, daemon-reload, enable + start the timer.
+#
+# Policy ladder (set via stealth_vps_auto_update_policy):
+#   patch-only (default) → v0.9.0 will accept v0.9.x only.
+#   minor-patch          → v0.9.0 will accept v0.X.Y (no major bumps).
+#   disabled             → timer fires + writes a log line but never updates.
+
+- name: Render /etc/stealth-vps/auto-update.env (policy + token)
+  ansible.builtin.template:
+    src: auto-update.env.j2
+    dest: /etc/stealth-vps/auto-update.env
+    owner: root
+    group: root
+    # 0600 because STEALTH_VPS_GITHUB_TOKEN may be set. Even when unset
+    # we keep the tighter mode — the file is read by root via the
+    # systemd EnvironmentFile= directive, never by an unprivileged user.
+    mode: '0600'
+  when: stealth_vps_auto_update_enabled | bool
+  tags: [auto-update, systemd]
+
+- name: Render stealth-vps-auto-update.service
+  ansible.builtin.template:
+    src: stealth-vps-auto-update.service.j2
+    dest: /etc/systemd/system/stealth-vps-auto-update.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_auto_update_enabled | bool
+  notify: Reload systemd
+  tags: [auto-update, systemd]
+
+- name: Render stealth-vps-auto-update.timer
+  ansible.builtin.template:
+    src: stealth-vps-auto-update.timer.j2
+    dest: /etc/systemd/system/stealth-vps-auto-update.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when: stealth_vps_auto_update_enabled | bool
+  notify: Reload systemd
+  tags: [auto-update, systemd]
+
+- name: Enable + start stealth-vps-auto-update.timer
+  ansible.builtin.systemd:
+    name: stealth-vps-auto-update.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: stealth_vps_auto_update_enabled | bool
+  tags: [auto-update, systemd]
+
+# --- Disable path -----------------------------------------------------
+
+- name: Stop + disable stealth-vps-auto-update.timer when disabled
+  ansible.builtin.systemd:
+    name: stealth-vps-auto-update.timer
+    enabled: false
+    state: stopped
+  when: not (stealth_vps_auto_update_enabled | bool)
+  failed_when: false
+  tags: [auto-update, systemd]
+
+- name: Remove stealth-vps-auto-update files when disabled
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/stealth-vps-auto-update.service
+    - /etc/systemd/system/stealth-vps-auto-update.timer
+    - /etc/stealth-vps/auto-update.env
+  when: not (stealth_vps_auto_update_enabled | bool)
+  notify: Reload systemd
+  tags: [auto-update, systemd]

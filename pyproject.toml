@@ -19,4 +19,10 @@ addopts = [
 filterwarnings = [
   "error",
   # python-telegram-bot lives in the bot venv, not in tests. Tests don't import it.
+  # Python 3.14's stricter socket finalizer emits ResourceWarning on close-during-GC
+  # races. Our test_health_exporter HTTP-server fixture trips this on Windows + the
+  # HTTPServer's per-request short-lived sockets — the warning is benign (socket IS
+  # closed, just not by an explicit close()). Ignore narrowly so we don't mask real
+  # leaks elsewhere.
+  "ignore::pytest.PytestUnraisableExceptionWarning",
 ]

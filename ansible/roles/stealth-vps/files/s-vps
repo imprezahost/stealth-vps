@@ -63,10 +63,23 @@ Usage:
   s-vps help                     Show this help.
 
 User management (v0.7+):
-  s-vps user add LABEL           Add a user to users.index.json, SIGHUP services.
+  s-vps user add LABEL [--ttl D] Add a user to users.index.json, SIGHUP services.
+                                 --ttl sets a subscription expiry (e.g. 30d).
   s-vps user revoke LABEL        Disable a user (does not delete the record).
+  s-vps user purge LABEL         Hard-delete a user (idempotent). v0.8+.
+  s-vps user rotate LABEL        Re-issue creds preserving created_at. v0.8+.
   s-vps user list [--json]       List users in the index.
   s-vps user show LABEL [--qr]   Show one user's URIs + sub URL.
+
+Subscription TTL (v0.9+):
+  s-vps sub renew LABEL --ttl D  Set/bump a user's subscription expiry.
+  s-vps sub renew LABEL --clear  Remove the expiry (never expires).
+  s-vps sub prune [-v]           Delete sub files for expired tokens (404s the URL).
+
+Backup/restore (v0.9+):
+  s-vps backup [--recipient KEY] Snapshot operator state to a .tar.age.
+  s-vps restore ARCHIVE --identity FILE
+                                 Decrypt + untar over the live filesystem.
 
 Headless-mode helpers (v0.7+):
   s-vps reload [--dry-run]       Re-render configs + SIGHUP (headless mode only).
@@ -226,7 +239,8 @@ main() {
     # v0.7+ Python-side verbs. exec hands the `$@` straight through so
     # argparse's `--help` etc. land on the Python parser, not on this
     # bash wrapper. Same exit code, no extra shell layer in the trace.
-    user|reload|migrate)
+    # v0.9+ adds `sub`, `backup`, `restore` — all dispatched the same way.
+    user|reload|migrate|sub|backup|restore)
       exec python3 -m stealth_vps.cli "${cmd}" "$@"
       ;;
     *)

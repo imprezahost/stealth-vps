@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# Daily firing of stealth-vps-sub-prune.service. Calendar-driven (not
+# OnUnitInactiveSec) so the prune happens at predictable times — useful
+# when operators check journals to confirm a stale token was cleaned up
+# overnight rather than at a moving point relative to last boot.
+
+[Unit]
+Description=stealth-vps subscription TTL prune — daily fire
+
+[Timer]
+# Default `*-*-* 03:17:00` = every day at 03:17 UTC. The off-the-hour
+# minute keeps multiple stealth-vps hosts on the same network from
+# synchronising on `:00`. Override `stealth_vps_sub_prune_oncalendar`
+# in inventory to relocate.
+OnCalendar={{ stealth_vps_sub_prune_oncalendar }}
+# Spread runs across a ~10 minute window even further. Cheap insurance
+# against thundering-herd against a shared Caddy upstream when an
+# operator fleets multiple stealth-vps boxes.
+RandomizedDelaySec={{ stealth_vps_sub_prune_randomized_delay }}
+# Persistent=true → if the host was off when the calendar fired, run
+# on next boot so we don't skip a day.
+Persistent=true
+Unit=stealth-vps-sub-prune.service
+
+[Install]
+WantedBy=timers.target

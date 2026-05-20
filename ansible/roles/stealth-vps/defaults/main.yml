@@ -198,6 +198,77 @@ stealth_vps_subscription_enabled: false
 stealth_vps_subscription_expose: false
 stealth_vps_subscription_path: /.well-known/stealth-vps-sub
 
+# ---- v0.9.0: Health-check Prometheus exporter ----
+# Tiny HTTP server on :9102 exposing /metrics + /healthz. Off by default
+# because operators on the v0.6.0 textfile-collector flow already have
+# this data via node_exporter. Enable when you don't run node_exporter
+# (e.g. you push to Grafana Cloud / Healthchecks.io / Uptime Kuma
+# directly). Default bind is loopback — flip the addr to 0.0.0.0 to
+# expose externally (the role opens UFW for you in that case).
+stealth_vps_health_exporter_enabled: false
+stealth_vps_health_exporter_bind_addr: "127.0.0.1"
+stealth_vps_health_exporter_bind_port: 9102
+
+# ---- v0.9.0: Encrypted backup via age ----
+# Off by default. When enabled the role:
+#   - apt-installs `age`
+#   - creates /var/backups/stealth-vps with mode 0700
+#   - optionally drops a systemd timer that runs `s-vps backup` daily
+# stealth_vps_backup_recipient is the operator's `age1...` public key —
+# REQUIRED when enabled. The host never holds the corresponding secret.
+# Restores require the operator to bring their identity file manually
+# (`s-vps restore <archive> --identity /path/to/id.txt`).
+stealth_vps_backup_enabled: false
+stealth_vps_backup_recipient: ""
+stealth_vps_backup_dir: /var/backups/stealth-vps
+# Optional daily timer. Off by default because operators with their own
+# snapshotting (Hetzner/AWS volume snapshots, Restic on a control box)
+# don't want a redundant local copy.
+stealth_vps_backup_timer_enabled: false
+stealth_vps_backup_oncalendar: "*-*-* 02:47:00"
+stealth_vps_backup_randomized_delay: "1800"
+
+# ---- v0.9.0: Auto-update opt-in ----
+# Daily systemd timer that polls GitHub Releases and (per policy) rolls
+# the host forward to a newer release. Off by default — operators who
+# care about timing their own rollouts skip this entirely.
+#
+# Policy ladder (most → least conservative):
+#   patch-only  → only v0.9.0 → v0.9.x bumps (security/bug fixes only).
+#   minor-patch → also accepts v0.9.x → v0.10.y (no major bumps).
+#   disabled    → timer fires + logs but never updates. Use this for a
+#                 short maintenance freeze without re-running ansible.
+stealth_vps_auto_update_enabled: false
+stealth_vps_auto_update_policy: patch-only
+# Optional GitHub PAT (classic or fine-grained). Raises the API rate
+# limit from 60/hr (per IP) to 5000/hr (per token) — only matters for
+# fleets behind a shared egress NAT. The token only needs `public_repo`
+# read access (or no scopes for a fine-grained read-only token).
+stealth_vps_auto_update_github_token: ""
+# OnCalendar expression for the timer. Default 04:23 UTC (off-the-hour
+# minute, different from the sub-prune timer's 03:17 to avoid CPU/disk
+# overlap on the same wakeup).
+stealth_vps_auto_update_oncalendar: "*-*-* 04:23:00"
+# RandomizedDelaySec — spreads N hosts across a 1 hour window so they
+# don't all hit GitHub at the same second.
+stealth_vps_auto_update_randomized_delay: "3600"
+
+# ---- v0.9.0: Subscription TTL daily prune ----
+# Daily systemd timer that runs `s-vps sub prune`. Removes subscription
+# files for users whose `sub_expires_at` has elapsed — Caddy then 404s
+# the URL, operationally killing the link without touching the index
+# row (operator can `s-vps sub renew` to re-issue). Off by default;
+# operators who don't use --ttl when adding users have nothing to prune
+# and don't need the timer.
+stealth_vps_sub_prune_enabled: false
+# Systemd OnCalendar expression. Default = every day at 03:17 UTC, an
+# arbitrary off-the-hour minute so multiple stealth-vps hosts don't
+# synchronise on the same second when several share a network.
+stealth_vps_sub_prune_oncalendar: "*-*-* 03:17:00"
+# RandomizedDelaySec on the timer. Spreads the run across a 10-minute
+# window even further; mostly cosmetic, but cheap insurance.
+stealth_vps_sub_prune_randomized_delay: "600"
+
 # ---- v0.6.0: Operator CLI ----
 # Drops a shell wrapper at /usr/local/bin/s-vps exposing `update`
 # (fetch latest tag + ansible-pull with smart --tags) and `diagnose`
