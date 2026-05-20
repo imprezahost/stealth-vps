@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.9.0)
-- **Encrypted backup/restore** via `age`: `s-vps backup` produces `stealth-vps-backup-<host>-<ts>.tar.gz.age`, `s-vps restore <file>` validates + extracts. Operator-supplied public key in installer.env; optional daily systemd timer.
-- **Continuous health-check Prometheus exporter** on `:9102` — turns `s-vps diagnose`'s checks into always-on gauges (`stealth_vps_panel_up`, `stealth_vps_cert_days_remaining`, etc.) so operators can alert *before* something breaks.
-- **Subscription TTL** — `sub_token` gets optional `expires_at`; Caddy returns 410 Gone past it; bot/CLI verbs to `renew`/extend.
-- **Auto-update opt-in** — systemd timer that applies patch releases of the same minor automatically (`v0.9.1 → v0.9.2` OK, `v0.9.x → v0.10.0` not).
-
 ### Planned (v0.10.0)
 - **Multi-node** — control plane pushes `users.index.json` over SSH to N data nodes, per-node Reality keys, subscription bundles include all-node URIs. ADR locked: push from control + per-node keys (operator decision recorded).
 
@@ -34,6 +28,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Signed releases (cosign + GPG).
 - External security audit.
+
+## [0.9.0] - 2026-05-20
+
+Twenty-ninth tagged release. Four operator-facing features in one cut: **subscription TTL** (per-user expiry + daily prune timer), **opt-in auto-update** (patch-only by default, fleet-safe GitHub Releases polling), **encrypted backup/restore** via `age` (pubkey-only on the host), and a **Prometheus health exporter** on `:9102` for operators who don't run node_exporter.
+
+`users.index.json` migrates from schema v1 → v2. The bump is auto-applied on load (every row gains `sub_expires_at: null`) and persisted on the next mutation — no operator action required on upgrade.
+
+### Added
+
+- **Subscription TTL.** New schema-v2 field `sub_expires_at` on every user record (ISO 8601 UTC, nullable). `s-vps user add LABEL --ttl 30d` sets it at creation; `s-vps sub renew LABEL --ttl 60d` extends; `s-vps sub renew LABEL --clear` removes (never-expires). `s-vps sub prune` walks the index and deletes subscription files for expired tokens — Caddy then 404s the URL (operationally a dead link); the index row stays for audit + later `sub renew`. Bot mirrors: `/sub renew <label> <ttl|clear>`. Accepted units: `s/m/h/d/w/mo/y` (e.g. `30d`, `12h`, `1y`). Daily systemd timer at `*-*-* 03:17:00` (gated by `stealth_vps_sub_prune_enabled`, off by default).
+- **Opt-in auto-update** (`stealth_vps_auto_update_enabled`, off by default). New module `stealth_vps.auto_update` polls `api.github.com/repos/imprezahost/stealth-vps/releases/latest`, parses the tag against the host's pinned version, and applies the update via the existing `s-vps update <tag>` flow. Three policies: `patch-only` (default — only `v0.9.0 → v0.9.x`), `minor-patch` (also accepts `v0.9.0 → v0.10.y`), `disabled` (never). Optional `stealth_vps_auto_update_github_token` raises the API rate limit from 60/hr (per IP) to 5000/hr (per token) — only matters for fleets behind a shared egress NAT. Daily timer at `*-*-* 04:23:00` with a 1-hour `RandomizedDelaySec` to spread fleet load.
+- **Encrypted backup/restore via `age`** (`stealth_vps_backup_enabled`, off by default). New module `stealth_vps.backup` + CLI verbs `s-vps backup` / `s-vps restore`. Bundles `/etc/stealth-vps` + `/var/lib/stealth-vps` into a tar, encrypts to the operator's `age1...` public key (held in inventory, not a secret), drops the `.tar.age` under `/var/backups/stealth-vps/`. Restore takes `--identity <path>` to the operator's secret key — the host never persists the private key. Path-traversal defense on extract (refuses members with `..` or absolute paths). Optional daily timer (`stealth_vps_backup_timer_enabled`) at `*-*-* 02:47:00`. The role apt-installs `age` (Debian 12+ has it in main).
+- **Health-check Prometheus exporter** (`stealth_vps_health_exporter_enabled`, off by default). New module `stealth_vps.health_exporter` runs a tiny `http.server` on `127.0.0.1:9102` exposing `/metrics` (unit health, Reality port reachability, users.index health + counts, expired-user gauge) and `/healthz` (`ok` 200 for liveness probes). Complementary to the v0.6.0 node-exporter textfile flow — operators who already run node_exporter don't need this, those who push to a SaaS scraper finally have a self-contained endpoint. Default bind loopback; flip `stealth_vps_health_exporter_bind_addr` to `0.0.0.0` to expose externally (the role opens UFW). Recommended path for external scraping: keep on loopback and front via Caddy + basic auth.
+- **59 new pytest cases** (`test_state.py` schema-v2 + duration parsing, `test_cli.py` `--ttl` / `sub renew` / `sub prune`, `test_auto_update.py` semver + policy + mocked GitHub, `test_backup.py` tar round-trip + path-traversal refusal + age subprocess plumbing, `test_health_exporter.py` probes + render + HTTP server smoke). **313 pytest pass total** (was 254 after v0.8.1).
+
+### Changed
+
+- **`users.index.json` schema v1 → v2.** `state.load_users_index` accepts both versions; v1 files are auto-upgraded in memory (every row gains `sub_expires_at: null`) and persisted to v2 on the next mutation. Operators don't need to do anything — first `s-vps user add` (or any other mutation) writes v2.
+- **`state.update_user` uses an `_UNSET` sentinel** for the new `sub_expires_at` kwarg so `None` is a valid explicit value (clears the expiry) vs. "didn't pass it" (leaves the field untouched).
+- **`/help` in the bot** lists the new `/sub renew` verb; `s-vps --help` lists `backup`, `restore`, `sub renew`, `sub prune`.
+
+### Fixed
+
+- **Test isolation under Python 3.14.** The new `test_health_exporter.py` HTTP-server fixture trips Python 3.14's stricter socket finalizer, which emits `PytestUnraisableExceptionWarning` during GC on Windows. We ignore that specific warning class in `pyproject.toml`'s `filterwarnings` so the noise doesn't crash unrelated tests in the suite. The underlying sockets ARE closed — the warning fires because finalization happens during GC instead of an explicit `close()`, which is benign for short-lived HTTP request sockets.
 
 ## [0.8.1] - 2026-05-19
 

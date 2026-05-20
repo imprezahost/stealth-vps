@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+# stealth-vps auto-update — once-a-day check against GitHub Releases.
+# Patch-only by default (see /etc/stealth-vps/auto-update.env).
+
+[Unit]
+Description=stealth-vps auto-update (poll GitHub Releases, apply patch updates)
+Documentation=https://github.com/imprezahost/stealth-vps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Read STEALTH_VPS_AUTO_UPDATE_POLICY + STEALTH_VPS_GITHUB_TOKEN.
+EnvironmentFile=/etc/stealth-vps/auto-update.env
+# Run via the system python3 — the stealth_vps package lives under
+# /usr/local/lib/stealth_vps and is on sys.path because the role drops
+# a .pth file when python_pkg.yml runs.
+ExecStart=/usr/bin/python3 -m stealth_vps.auto_update
+StandardOutput=journal
+StandardError=journal
+# A failed poll is self-healing on the next timer fire. No restart;
+# operators read `journalctl -u stealth-vps-auto-update.service` to
+# triage repeated failures.
+Restart=no
+# Hardening — auto-update needs:
+#   - network (egress to api.github.com),
+#   - read of /etc/stealth-vps/version,
+#   - exec of /usr/local/bin/s-vps which itself runs ansible-pull.
+# We can't lock the FS down further than ProtectSystem=strict because
+# ansible-pull writes everywhere; the wrapping bash script handles its
+# own auditing.
+ProtectHome=true
+NoNewPrivileges=true

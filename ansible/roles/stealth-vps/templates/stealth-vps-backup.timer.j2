@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+# Daily firing of stealth-vps-backup.service.
+
+[Unit]
+Description=stealth-vps encrypted backup — daily fire
+
+[Timer]
+# Default `*-*-* 02:47:00` = every day at 02:47 UTC. Off-the-hour
+# minute, different from auto-update (04:23) and sub-prune (03:17).
+OnCalendar={{ stealth_vps_backup_oncalendar }}
+RandomizedDelaySec={{ stealth_vps_backup_randomized_delay }}
+Persistent=true
+Unit=stealth-vps-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -169,6 +169,167 @@ Trivial:
 s-vps update v0.7.0
 ```
 
+### Health-check Prometheus exporter (v0.9.0+)
+
+A tiny HTTP server at `:9102` that exposes:
+
+- `GET /metrics` — Prometheus text body
+- `GET /healthz` — `ok` 200 (for k8s liveness / curl smoke)
+
+Off by default. Enable in inventory:
+
+```yaml
+stealth_vps_health_exporter_enabled: true
+# Default bind = 127.0.0.1 (loopback). Flip to 0.0.0.0 to expose
+# externally — the role opens UFW for you in that case. Recommended:
+# leave it on loopback and front via Caddy reverse-proxy + basic auth.
+stealth_vps_health_exporter_bind_addr: "127.0.0.1"
+stealth_vps_health_exporter_bind_port: 9102
+```
+
+After `s-vps update`:
+
+```bash
+$ curl -s http://127.0.0.1:9102/metrics | head -20
+# HELP stealth_vps_unit_active 1 when `systemctl is-active <unit>` returns `active`.
+# TYPE stealth_vps_unit_active gauge
+stealth_vps_unit_active{unit="xray.service"} 1
+stealth_vps_unit_active{unit="hysteria-server.service"} 1
+stealth_vps_unit_active{unit="x-ui.service"} 0
+stealth_vps_unit_active{unit="caddy.service"} 1
+stealth_vps_unit_active{unit="stealth-vps-bot.service"} 0
+# HELP stealth_vps_reality_port_listening 1 when TCP connect to Reality port succeeds.
+# TYPE stealth_vps_reality_port_listening gauge
+stealth_vps_reality_port_listening{port="51820"} 1
+# HELP stealth_vps_index_readable 1 when users.index.json parses cleanly.
+# TYPE stealth_vps_index_readable gauge
+stealth_vps_index_readable 1
+# HELP stealth_vps_users_total Total user rows in the index (including revoked).
+# TYPE stealth_vps_users_total gauge
+stealth_vps_users_total 4
+```
+
+**vs. the existing node_exporter textfile flow:**
+
+| Endpoint                                            | When to use                                       |
+|-----------------------------------------------------|---------------------------------------------------|
+| `/metrics` on `:9102` (this feature)                | You don't run node_exporter. Push to a SaaS scraper. |
+| Node-exporter's textfile collector (`v0.6.0`)       | You already run node_exporter. Same data, no extra port. |
+
+The two are complementary. Operators who run both get the same metrics from both surfaces.
+
+### Encrypted backup + restore (v0.9.0+)
+
+stealth-vps ships a CLI for snapshotting operator state into an `age`-encrypted tarball. The encryption is **public-key only on the host** — the box holds your `age1...` recipient, never the secret key.
+
+**Setup on the operator workstation:**
+
+```bash
+age-keygen -o ~/.config/stealth-vps-backup.key
+# Output:
+#   Public key: age1abcdef...                  ← copy this into inventory
+# Contents of the file are the SECRET KEY. Stash it like an SSH key.
+```
+
+**Inventory:**
+
+```yaml
+stealth_vps_backup_enabled: true
+stealth_vps_backup_recipient: "age1abcdef..."   # from age-keygen above
+stealth_vps_backup_timer_enabled: true          # optional daily timer
+```
+
+After the next `s-vps update`, the role:
+
+- apt-installs `age`
+- creates `/var/backups/stealth-vps/` mode 0700
+- drops `/etc/stealth-vps/backup.env` with the recipient
+- (optional) installs the daily systemd timer
+
+**Manual backup:**
+
+```bash
+$ sudo s-vps backup
+✓ backup complete: /var/backups/stealth-vps/stealth-vps-backup-20260520T1530Z-vps-1.tar.age
+  size              : 8421 bytes
+  included paths    : /etc/stealth-vps, /var/lib/stealth-vps
+
+Copy the file off-host:
+  scp root@<host>:/var/backups/stealth-vps/stealth-vps-backup-...tar.age ./
+```
+
+Drop the file in S3, B2, Restic — wherever. The `.tar.age` is opaque ciphertext; cloud-storage providers can't see anything inside.
+
+**Restore on a freshly converged host:**
+
+```bash
+# Copy the archive + your identity file (from your workstation) into place,
+# then:
+sudo s-vps restore /tmp/stealth-vps-backup-...tar.age \
+  --identity /tmp/identity.txt
+✓ restored 42 files from /tmp/stealth-vps-backup-...tar.age
+
+Next step: run `s-vps reload` to re-apply the restored state to
+Xray + Hysteria2.
+```
+
+The identity file is required at restore time and **only at restore time** — wipe it from the host after you're done if you don't want a long-lived copy lying around.
+
+**What's in the backup:**
+
+- `/etc/stealth-vps/` — `installer.env`, `version`, `*.state.yml`, `reloader-args.json`, `bot.env` (if bot enabled), `panel.state.yml` (if panel mode)
+- `/var/lib/stealth-vps/` — `users.index.json`, `subscriptions/*.txt`
+
+**Not in the backup** (recreated by ansible converge / package install):
+
+- `/usr/local/bin/*`, `/usr/local/lib/stealth_vps/` — idempotent reinstall
+- `/etc/systemd/system/stealth-vps-*` — rendered by the role
+- Xray / Hysteria2 / Caddy binaries — apt / upstream
+
+### Opt-in auto-update (v0.9.0+)
+
+A daily systemd timer that polls GitHub Releases and applies updates within a policy boundary. Off by default; enable per-host in inventory:
+
+```yaml
+stealth_vps_auto_update_enabled: true
+stealth_vps_auto_update_policy: patch-only   # safe default
+```
+
+Policy ladder:
+
+| Policy        | Accepts                          | Refuses                                  |
+|---------------|----------------------------------|------------------------------------------|
+| `patch-only`  | `v0.9.0 → v0.9.x` (bug fixes)    | Minor or major bumps                     |
+| `minor-patch` | `v0.9.0 → v0.10.y` (new features)| Major bumps (`v0.x → v1.0` requires hand)|
+| `disabled`    | Nothing                          | All updates                              |
+
+After enabling + running `s-vps update`, the role drops:
+
+- `/etc/systemd/system/stealth-vps-auto-update.{service,timer}`
+- `/etc/stealth-vps/auto-update.env` (mode 0600, holds the optional GitHub token)
+
+Inspect what would happen without applying:
+
+```bash
+sudo /usr/bin/python3 -m stealth_vps.auto_update --dry-run
+```
+
+Watch the journal for what the timer actually did:
+
+```bash
+journalctl -u stealth-vps-auto-update.service -n 50
+```
+
+**Fleet behind a NAT?** GitHub's unauthenticated API rate-limits to 60 requests/hour per egress IP. Past ~50 hosts on the same daily timer this becomes a real problem. Supply a PAT in inventory:
+
+```yaml
+stealth_vps_auto_update_github_token: ghp_xxxxxxxxxxxxxxxxxx
+```
+
+The token only needs read access to public repos (`public_repo` scope, or no scopes for a fine-grained read-only token). Stored at `/etc/stealth-vps/auto-update.env` with mode 0600.
+
+
+
 What this does, in order:
 
 1. Reads `/etc/stealth-vps/installer.env` for your original choices (domain, optional services).
@@ -252,7 +413,7 @@ When provisioning a new arm64 host (Hetzner CAX, Oracle Ampere, AWS Graviton, RP
 
 ```bash
 # On a fresh Debian 12 / Ubuntu 24.04 arm64 host:
-curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.8.1/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.9.0/scripts/install.sh \
     | sudo bash
 
 # Confirm the role picked the right binaries:

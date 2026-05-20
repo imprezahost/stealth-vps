@@ -1,0 +1,30 @@
+# {{ ansible_managed }}
+# stealth-vps health exporter — Prometheus textfile-format metrics on
+# http://{{ stealth_vps_health_exporter_bind_addr }}:{{ stealth_vps_health_exporter_bind_port }}/metrics
+
+[Unit]
+Description=stealth-vps Prometheus health exporter
+Documentation=https://github.com/imprezahost/stealth-vps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Long-lived process. systemd restarts on crash so a transient
+# socket-bind failure during boot doesn't leave the exporter down
+# until the next manual converge.
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/bin/python3 -m stealth_vps.health_exporter \
+    --bind-addr {{ stealth_vps_health_exporter_bind_addr }} \
+    --bind-port {{ stealth_vps_health_exporter_bind_port }}
+StandardOutput=journal
+StandardError=journal
+# Hardening — exporter only reads state files + runs systemctl is-active
+# + does TCP connects. Lock the FS down hard.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+# We need /run for systemctl to talk to systemd's API socket; ProtectSystem=strict
+# leaves /run writable by default. No ReadWritePaths needed.

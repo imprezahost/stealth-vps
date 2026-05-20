@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -61,9 +62,13 @@ def test_label_valid_allow_reserved_lets_reserved_through() -> None:
 
 def test_load_users_index_returns_dict(users_index_path: str) -> None:
     data = state.load_users_index(users_index_path)
-    assert data["version"] == 1
+    # v0.9.0+: the load step auto-upgrades v1 fixtures to v2 in memory
+    # by adding sub_expires_at=None. The on-disk file stays v1 until
+    # the next mutation triggers save_users_index.
+    assert data["version"] == 2
     assert "alice" in data["users"]
     assert data["users"]["alice"]["enabled"] is True
+    assert data["users"]["alice"]["sub_expires_at"] is None
 
 
 def test_load_users_index_missing_file_raises_stateerror(tmp_path: pathlib.Path) -> None:
@@ -120,8 +125,15 @@ def test_save_users_index_sets_mode_0600(tmp_path: pathlib.Path) -> None:
 
 
 def test_save_users_index_round_trip(tmp_path: pathlib.Path) -> None:
+    """A v2 payload writes and reads back unchanged. Pre-v0.9.0 this
+    test used a v1 payload — now load auto-migrates v1 to v2 in memory,
+    so a round-trip of a v1 payload comes back as v2 with the new
+    sub_expires_at field. Stick with v2 here to keep the equality check
+    direct; the migration is exercised separately by
+    test_load_users_index_upgrades_v1_to_v2.
+    """
     payload = {
-        "version": 1,
+        "version": 2,
         "users": {
             "bob": {
                 "reality_uuid": "uuid-bob",
@@ -129,6 +141,7 @@ def test_save_users_index_round_trip(tmp_path: pathlib.Path) -> None:
                 "sub_token": "tok-bob",
                 "created_at": "2026-02-02T02:02:02Z",
                 "enabled": False,
+                "sub_expires_at": None,
             },
         },
     }
@@ -309,6 +322,216 @@ def test_update_user_can_re_enable_revoked(users_index_path: str) -> None:
 def test_update_user_missing_label_raises(users_index_path: str) -> None:
     with pytest.raises(state.StateError, match="not found"):
         state.update_user("nobody", reality_uuid="x", path=users_index_path)
+
+
+# ---------------------------------------------------------------------------
+# parse_duration + compute_expiry (v0.9.0)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,seconds",
+    [
+        ("30s", 30),
+        ("5m", 5 * 60),
+        ("2h", 2 * 60 * 60),
+        ("1d", 24 * 60 * 60),
+        ("2w", 14 * 24 * 60 * 60),
+        ("3mo", 3 * 30 * 24 * 60 * 60),
+        ("1y", 365 * 24 * 60 * 60),
+        # Tolerant of leading / trailing whitespace and uppercase.
+        ("  30D  ", 30 * 24 * 60 * 60),
+    ],
+)
+def test_parse_duration_accepts(text: str, seconds: int) -> None:
+    assert state.parse_duration(text) == seconds
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",                  # empty
+        "30",                # no unit
+        "d30",               # unit first
+        "30 d",              # space inside
+        "30days",            # multi-char unit
+        "thirty days",       # not digits
+        "-30d",              # negative not supported (nor needed)
+        "30dx",              # trailing junk
+    ],
+)
+def test_parse_duration_rejects(text: str) -> None:
+    with pytest.raises(state.StateError, match="duration"):
+        state.parse_duration(text)
+
+
+def test_compute_expiry_adds_duration_to_now() -> None:
+    fixed = datetime.datetime(2026, 5, 20, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    expiry = state.compute_expiry("30d", now=fixed)
+    # 30 days later → 2026-06-19T12:00:00Z.
+    assert expiry == "2026-06-19T12:00:00Z"
+
+
+def test_compute_expiry_default_now_is_utc() -> None:
+    """Default `now` is utcnow — the returned string is a valid
+    ISO 8601 UTC timestamp parseable round-trip."""
+    expiry = state.compute_expiry("1d")
+    parsed = state._parse_iso_utc(expiry)
+    delta = parsed - datetime.datetime.now(datetime.timezone.utc)
+    # ~24h ± a few seconds for test runtime.
+    assert datetime.timedelta(hours=23, minutes=59) < delta < datetime.timedelta(hours=24, minutes=1)
+
+
+# ---------------------------------------------------------------------------
+# is_expired + expired_sub_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_is_expired_none_returns_false() -> None:
+    """Missing or null sub_expires_at means never-expires (the v0.8.x
+    default for the whole user table)."""
+    assert state.is_expired({}) is False
+    assert state.is_expired({"sub_expires_at": None}) is False
+
+
+def test_is_expired_past_returns_true() -> None:
+    rec = {"sub_expires_at": "2020-01-01T00:00:00Z"}
+    assert state.is_expired(rec) is True
+
+
+def test_is_expired_future_returns_false() -> None:
+    fixed = datetime.datetime(2026, 5, 20, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    rec = {"sub_expires_at": "2027-01-01T00:00:00Z"}
+    assert state.is_expired(rec, now=fixed) is False
+
+
+def test_is_expired_garbled_raises() -> None:
+    rec = {"sub_expires_at": "not a timestamp"}
+    with pytest.raises(state.StateError, match="not parseable"):
+        state.is_expired(rec)
+
+
+def test_expired_sub_tokens_filters_correctly(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Mix of: expired (returned), not-yet-expired (skipped), never-
+    expires (skipped), garbled timestamp (skipped silently)."""
+    idx = tmp_path / "users.index.json"
+    idx.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "users": {
+                    "expired_alice": {
+                        "reality_uuid": "u1",
+                        "hysteria_password": "p1",
+                        "sub_token": "tok-alice-expired",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "enabled": True,
+                        "sub_expires_at": "2020-01-01T00:00:00Z",
+                    },
+                    "future_bob": {
+                        "reality_uuid": "u2",
+                        "hysteria_password": "p2",
+                        "sub_token": "tok-bob-future",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "enabled": True,
+                        "sub_expires_at": "2099-01-01T00:00:00Z",
+                    },
+                    "never_carol": {
+                        "reality_uuid": "u3",
+                        "hysteria_password": "p3",
+                        "sub_token": "tok-carol-never",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "enabled": True,
+                        "sub_expires_at": None,
+                    },
+                    "garbled_dave": {
+                        "reality_uuid": "u4",
+                        "hysteria_password": "p4",
+                        "sub_token": "tok-dave-garbled",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "enabled": True,
+                        "sub_expires_at": "not-a-timestamp",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = state.expired_sub_tokens(str(idx))
+    # Only expired_alice. Garbled dave is SKIPPED (not raised) so the
+    # prune doesn't blow up on a single bad row.
+    assert out == [("expired_alice", "tok-alice-expired")]
+
+
+# ---------------------------------------------------------------------------
+# Schema migration v1 → v2
+# ---------------------------------------------------------------------------
+
+
+def test_load_users_index_upgrades_v1_to_v2(users_index_path: str) -> None:
+    """The fixture seeds a v1 file. load_users_index should silently
+    upgrade it in memory to v2 by adding sub_expires_at=None to every
+    user record."""
+    idx = state.load_users_index(users_index_path)
+    assert idx["version"] == 2
+    assert idx["users"]["alice"]["sub_expires_at"] is None
+
+
+def test_load_users_index_rejects_future_versions(tmp_path: pathlib.Path) -> None:
+    p = tmp_path / "future.json"
+    p.write_text(
+        json.dumps({"version": 99, "users": {}}), encoding="utf-8"
+    )
+    with pytest.raises(state.StateError, match="unsupported"):
+        state.load_users_index(str(p))
+
+
+def test_add_user_with_sub_expires_at(users_index_path: str) -> None:
+    state.add_user(
+        "bob",
+        reality_uuid="bob-uuid",
+        hysteria_password="bob-pw",
+        sub_token="bob-sub",
+        created_at="2026-01-01T00:00:00Z",
+        sub_expires_at="2099-01-01T00:00:00Z",
+        path=users_index_path,
+    )
+    assert state.get_user("bob", users_index_path)["sub_expires_at"] == "2099-01-01T00:00:00Z"
+
+
+def test_update_user_can_set_expiry_to_none() -> None:
+    """Operator wants to revoke an expiry (set it to never-expires).
+    Passing sub_expires_at=None explicitly should clear the field;
+    NOT setting it (the default _UNSET sentinel) leaves it alone."""
+    # Use a tmp idx with an existing expires_at to flip.
+    tmp = pathlib.Path(state.USERS_INDEX_PATH)  # any path — we override below
+    # Construct a tmp file manually.
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(
+            {
+                "version": 2,
+                "users": {
+                    "alice": {
+                        "reality_uuid": "u",
+                        "hysteria_password": "p",
+                        "sub_token": "t",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "enabled": True,
+                        "sub_expires_at": "2099-01-01T00:00:00Z",
+                    }
+                },
+            },
+            f,
+        )
+        path = f.name
+    try:
+        state.update_user("alice", sub_expires_at=None, path=path)
+        assert state.get_user("alice", path)["sub_expires_at"] is None
+    finally:
+        os.unlink(path)
 
 
 # ---------------------------------------------------------------------------

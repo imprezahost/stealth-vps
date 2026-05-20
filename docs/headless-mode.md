@@ -97,14 +97,18 @@ python3 -m stealth_vps.reloader --reality-enabled true --hysteria-enabled true .
 
 The bash wrapper at `/usr/local/bin/s-vps` dispatches v0.7+ verbs to `python3 -m stealth_vps.cli`:
 
-| Verb                  | What it does                                                                |
-|-----------------------|------------------------------------------------------------------------------|
-| `user add LABEL`      | Generate UUID + Hysteria password + sub token; write index; SIGHUP services |
-| `user revoke LABEL`   | Flip `enabled=false`; SIGHUP                                                |
-| `user list [--json]`  | Print the index as a table (or NDJSON)                                      |
-| `user show LABEL`     | Full record + VLESS/Hysteria2 URIs + sub URL (`--qr` for terminal QR)       |
-| `reload`              | Force a full re-render. Useful after manually editing the index.            |
-| `migrate from-3xui`   | Panel → headless cutover. See [migration-3xui-to-headless.md](migration-3xui-to-headless.md). |
+| Verb                       | What it does                                                                |
+|----------------------------|------------------------------------------------------------------------------|
+| `user add LABEL [--ttl D]` | Generate UUID + Hysteria password + sub token; write index; SIGHUP services. `--ttl` sets `sub_expires_at` (e.g. `30d`, `12h`, `1y`). |
+| `user revoke LABEL`        | Flip `enabled=false`; SIGHUP                                                |
+| `user purge LABEL`         | Hard-delete the row (idempotent); SIGHUP                                    |
+| `user rotate LABEL`        | Re-issue UUID + Hysteria pw + sub token; preserves `created_at`             |
+| `user list [--json]`       | Print the index as a table (or NDJSON)                                      |
+| `user show LABEL`          | Full record + VLESS/Hysteria2 URIs + sub URL (`--qr` for terminal QR)       |
+| `sub renew LABEL --ttl D`  | Set/bump the subscription expiry (`--clear` to remove). v0.9.0+.            |
+| `sub prune`                | Delete subscription files for users whose TTL elapsed (404s the URL). v0.9.0+. |
+| `reload`                   | Force a full re-render. Useful after manually editing the index.            |
+| `migrate from-3xui`        | Panel → headless cutover. See [migration-3xui-to-headless.md](migration-3xui-to-headless.md). |
 
 The legacy verbs (`update`, `diagnose`, `status`, `version`) stay in the bash wrapper unchanged.
 
@@ -166,6 +170,63 @@ Each mutation:
 3. `systemctl reload xray.service hysteria-server.service` → SIGHUP, in-flight connections survive.
 
 If step 3 fails (e.g. systemctl isn't reachable from the CLI's effective user), the index already reflects the change. Re-run `s-vps reload` after fixing the systemctl path.
+
+## Subscription TTL (v0.9.0+)
+
+Each user can carry a `sub_expires_at` ISO 8601 timestamp on their index row. When the timestamp elapses, `s-vps sub prune` deletes the user's subscription file — Caddy then returns 404 on the URL, operationally equivalent to "this subscription link is dead". The user record itself stays in the index (auditable), so the operator can re-issue with `s-vps sub renew`.
+
+### Workflow
+
+```bash
+# 1. Create a user with a 30-day expiry
+$ s-vps user add alice --ttl 30d
+✓ added user 'alice'
+  reality_uuid     : 7c1f...
+  hysteria_password: 32-char-token
+  sub_token        : 43-char-token
+  sub_expires_at   : 2026-06-19T03:17:00Z (TTL 30d)
+  ...
+
+# 2. Inspect a user's current expiry
+$ s-vps sub renew alice
+  current sub_expires_at: 2026-06-19T03:17:00Z
+Pass --ttl <duration> to (re)set the expiry, or --clear to remove it.
+
+# 3. Renew for another 30 days
+$ s-vps sub renew alice --ttl 30d
+✓ renewed 'alice': sub_expires_at = 2026-07-19T03:17:00Z (+30d)
+
+# 4. Make a never-expires user
+$ s-vps sub renew alice --clear
+✓ cleared expiry on 'alice' (never expires)
+
+# 5. Sweep expired users (idempotent)
+$ s-vps sub prune --verbose
+  removed sub file for 'bob' (token f1e2d3c4...)
+✓ pruned 1 expired subscription file(s) (1 expired user(s) in the index)
+```
+
+Accepted duration suffixes: `s` (seconds), `m` (minutes), `h` (hours), `d` (days), `w` (weeks), `mo` (30-day months), `y` (365-day years). No mixed forms — `30d`, not `1mo15d`.
+
+### Automating the prune
+
+For paid services where TTLs are normal, enable the daily systemd timer:
+
+```yaml
+# inventory or extra-vars
+stealth_vps_sub_prune_enabled: true
+# optional overrides
+stealth_vps_sub_prune_oncalendar: "*-*-* 03:17:00"     # default
+stealth_vps_sub_prune_randomized_delay: "600"          # 10 min jitter
+```
+
+After the next `s-vps update`, the role drops `/etc/systemd/system/stealth-vps-sub-prune.{service,timer}` and enables the timer. Flip the flag back to `false` to remove both units on the next converge.
+
+The prune is purely metadata + file-unlink — Xray and Hysteria2 don't restart. Active client connections survive; only the subscription URL goes dark.
+
+### Schema notes
+
+`users.index.json` is on schema **v2** as of v0.9.0. The bump is backwards-compatible: on load, any v1 file is automatically upgraded in memory (every row gets `sub_expires_at: null`) and rewritten to v2 on the next mutation. Operators upgrading from v0.8.x → v0.9.x don't need to migrate anything by hand — first `s-vps user add` (or any other mutation) persists the v2 shape.
 
 ## Operations notes
 
