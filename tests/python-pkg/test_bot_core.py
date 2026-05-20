@@ -516,6 +516,128 @@ def test_build_uris_for_user_multinode_skips_hysteria_when_user_has_no_pw() -> N
 
 
 # ---------------------------------------------------------------------------
+# v0.11.0+ — protocol additions in build_uris_for_user
+# ---------------------------------------------------------------------------
+
+
+def _rec_full() -> dict:
+    """A user record with EVERY v3 credential present, so each protocol
+    test can assert on the per-protocol emission rule (`enabled AND
+    rec.has(field)`) without per-test setup boilerplate."""
+    return {
+        "reality_uuid": "00000000-0000-0000-0000-000000000001",
+        "hysteria_password": "hy-pw",
+        "ss2022_psk": "USER_PSK_BASE64",
+        "trojan_password": "trojan-pw",
+        "wireguard_pubkey": "WG_PUBKEY",
+        "wireguard_client_ip": "10.99.0.5",
+    }
+
+
+def test_build_uris_for_user_emits_xhttp_when_enabled() -> None:
+    cfg = bot_core.UriRenderConfig(
+        public_host="vpn.example.com",
+        reality_port=43338,
+        reality_sni="www.microsoft.com",
+        reality_pubkey="PUB",
+        reality_short_id="SID",
+        xhttp_enabled=True,
+        xhttp_port=18543,
+        xhttp_path="/.well-known/xhttp-stream",
+        xhttp_sni="vpn.example.com",
+    )
+    uris = bot_core.build_uris_for_user(_rec_full(), cfg)
+    assert any(u.startswith("vless://") and "type=xhttp" in u for u in uris)
+
+
+def test_build_uris_for_user_emits_vmess_ws_when_enabled() -> None:
+    cfg = bot_core.UriRenderConfig(
+        public_host="vpn.example.com",
+        reality_port=43338, reality_sni="s", reality_pubkey="P", reality_short_id="S",
+        vmess_ws_enabled=True,
+        vmess_ws_port=19543,
+        vmess_ws_path="/.well-known/vmess-ws",
+    )
+    uris = bot_core.build_uris_for_user(_rec_full(), cfg)
+    assert any(u.startswith("vmess://") for u in uris)
+
+
+def test_build_uris_for_user_emits_ss2022_when_enabled_and_psk_present() -> None:
+    cfg = bot_core.UriRenderConfig(
+        public_host="vpn.example.com",
+        reality_port=43338, reality_sni="s", reality_pubkey="P", reality_short_id="S",
+        ss2022_enabled=True,
+        ss2022_port=8543,
+        ss2022_server_psk="SERVER_PSK",
+        ss2022_method="2022-blake3-aes-128-gcm",
+    )
+    uris = bot_core.build_uris_for_user(_rec_full(), cfg)
+    ss_uris = [u for u in uris if u.startswith("ss://")]
+    assert len(ss_uris) == 1
+
+
+def test_build_uris_for_user_skips_ss2022_when_user_psk_absent() -> None:
+    """User added pre-v0.11 has no `ss2022_psk` (migrated to None on
+    load). The URI builder must skip SS-2022 for them even when the
+    protocol is enabled on the host. Operator can issue a PSK later
+    via `update_user(label, ss2022_psk=...)`."""
+    cfg = bot_core.UriRenderConfig(
+        public_host="h", reality_port=1, reality_sni="s",
+        reality_pubkey="P", reality_short_id="S",
+        ss2022_enabled=True,
+        ss2022_port=8543,
+        ss2022_server_psk="SERVER_PSK",
+    )
+    rec = _rec_full()
+    rec["ss2022_psk"] = None
+    uris = bot_core.build_uris_for_user(rec, cfg)
+    assert not any(u.startswith("ss://") for u in uris)
+
+
+def test_build_uris_for_user_emits_trojan_when_enabled() -> None:
+    cfg = bot_core.UriRenderConfig(
+        public_host="vpn.example.com",
+        reality_port=43338, reality_sni="s", reality_pubkey="P", reality_short_id="S",
+        trojan_enabled=True,
+        trojan_port=4443,
+        trojan_sni="vpn.example.com",
+    )
+    uris = bot_core.build_uris_for_user(_rec_full(), cfg)
+    assert any(u.startswith("trojan://") for u in uris)
+
+
+def test_build_uris_for_user_skips_trojan_when_password_absent() -> None:
+    cfg = bot_core.UriRenderConfig(
+        public_host="h", reality_port=1, reality_sni="s",
+        reality_pubkey="P", reality_short_id="S",
+        trojan_enabled=True,
+        trojan_port=4443,
+    )
+    rec = _rec_full()
+    rec["trojan_password"] = None
+    uris = bot_core.build_uris_for_user(rec, cfg)
+    assert not any(u.startswith("trojan://") for u in uris)
+
+
+def test_build_uris_for_user_full_stack_emits_all_six_protocols() -> None:
+    """End-to-end: every protocol flag on + every credential present →
+    bundle contains 1 Reality + 1 Hysteria2 + 1 XHTTP + 1 VMess + 1 SS2022
+    + 1 Trojan = 6 URIs."""
+    cfg = bot_core.UriRenderConfig(
+        public_host="vpn.example.com",
+        reality_port=43338, reality_sni="s", reality_pubkey="P", reality_short_id="S",
+        hysteria_enabled=True, hysteria_port=49440, hysteria_sni="s",
+        xhttp_enabled=True, xhttp_port=18543, xhttp_path="/x",
+        vmess_ws_enabled=True, vmess_ws_port=19543, vmess_ws_path="/v",
+        ss2022_enabled=True, ss2022_port=8543, ss2022_server_psk="SP",
+        trojan_enabled=True, trojan_port=4443,
+    )
+    uris = bot_core.build_uris_for_user(_rec_full(), cfg)
+    schemes = [u.split("://", 1)[0] for u in uris]
+    assert schemes == ["vless", "hysteria2", "vless", "vmess", "ss", "trojan"]
+
+
+# ---------------------------------------------------------------------------
 # is_control_mode + make_backend control branch (v0.10.0+)
 # ---------------------------------------------------------------------------
 

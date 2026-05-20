@@ -1029,6 +1029,119 @@ def test_fleet_rotate_key_rolls_back_on_new_key_probe_failure(
     rollback_spy.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# v0.11.0 — SS-2022 PSK auto-gen + --ss2022-psk override
+# ---------------------------------------------------------------------------
+
+
+def test_autogen_ss2022_psk_for_aes128_is_22_chars() -> None:
+    """16 bytes base64-encoded → 22 chars + 2 padding = 24, but
+    standard base64 yields 24 chars including padding. Assert the
+    DECODED length is 16."""
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("2022-blake3-aes-128-gcm")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 16
+
+
+def test_autogen_ss2022_psk_for_aes256_is_32_bytes() -> None:
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("2022-blake3-aes-256-gcm")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_autogen_ss2022_psk_for_chacha20_is_32_bytes() -> None:
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("2022-blake3-chacha20-poly1305")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_autogen_ss2022_psk_for_unknown_falls_back_to_32_bytes() -> None:
+    """Forward-compat: a future cipher name we don't recognize gets
+    a 32-byte PSK (longest valid; safe default)."""
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("future-cipher-9999")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_maybe_autogen_ss2022_psk_returns_none_when_no_state_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """No ss2022.state.yml on disk → SS-2022 is not enabled on this
+    host → return None. The caller leaves the user's ss2022_psk as None."""
+    assert cli._maybe_autogen_ss2022_psk(str(tmp_path / "absent.yml")) is None
+
+
+def test_maybe_autogen_ss2022_psk_uses_method_from_state_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """When ss2022.state.yml exists with method=aes-256-gcm, the
+    generated PSK is 32 bytes (44 chars base64)."""
+    import base64
+    state_path = tmp_path / "ss2022.state.yml"
+    state_path.write_text(
+        "method: 2022-blake3-aes-256-gcm\nport: 8543\nserver_psk: SRV\n",
+        encoding="utf-8",
+    )
+    psk = cli._maybe_autogen_ss2022_psk(str(state_path))
+    assert psk is not None
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_user_add_explicit_ss2022_psk_overrides_autogen(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """`--ss2022-psk EXPLICIT` takes precedence over the autogen
+    branch even when ss2022.state.yml exists on disk."""
+    state_path = tmp_path / "ss2022.state.yml"
+    state_path.write_text("method: 2022-blake3-aes-128-gcm\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "SS2022_STATE_PATH", str(state_path)):
+        rc = cli.main([
+            "user", "add", "bob", "--ss2022-psk", "OPERATOR_SUPPLIED_PSK",
+        ])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] == "OPERATOR_SUPPLIED_PSK"
+
+
+def test_user_add_no_ss2022_state_file_leaves_psk_null(
+    users_index_path: str, reloader_args_json: str
+) -> None:
+    """Default single-node host without SS-2022 enabled: new user has
+    `ss2022_psk: None` (the v3 migration default). No autogen, no
+    URI emission later."""
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is None
+
+
+def test_user_add_with_ss2022_enabled_autogens_psk(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """ss2022.state.yml present + no --ss2022-psk flag → autogen a PSK
+    matching the configured cipher."""
+    import base64
+    state_path = tmp_path / "ss2022.state.yml"
+    state_path.write_text("method: 2022-blake3-aes-128-gcm\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "SS2022_STATE_PATH", str(state_path)):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is not None
+    assert len(base64.b64decode(rec["ss2022_psk"])) == 16
+
+
 def test_data_node_mode_unchanged_by_step6(
     users_index_path: str, reloader_args_json: str, capsys
 ) -> None:

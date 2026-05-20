@@ -15,6 +15,39 @@ stealth_vps_arch_map:
   x86_64: amd64
   aarch64: arm64
 
+# ---- v0.11.0: Xray protocol additions (XHTTP + VMess+WS + SS-2022) ----
+# All three live inside the existing xray.service as additional
+# inbounds. No new systemd service, no extra apt install. All default
+# OFF — adding a protocol is explicit operator opt-in.
+#
+# XHTTP: VLESS-over-XHTTP. Designed to live behind Cloudflare /
+# similar CDN. Xray binds loopback; Caddy reverse-proxies the
+# CDN-fronted path to it.
+stealth_vps_xhttp_enabled: false
+stealth_vps_xhttp_path: /.well-known/xhttp-stream
+# Loopback-bound; Caddy maps the public host's :443/<path> to here.
+stealth_vps_xhttp_listen_port_min: 18000
+stealth_vps_xhttp_listen_port_max: 18999
+
+# VMess+WS+TLS: legacy-compat (older Hiddify, V2RayN, V2Box pre-2024).
+# Behind Caddy reverse-proxy like XHTTP. Worse fingerprint than Reality
+# but compatible with clients that don't speak Reality yet.
+stealth_vps_vmess_ws_enabled: false
+stealth_vps_vmess_ws_path: /.well-known/vmess-ws
+stealth_vps_vmess_ws_listen_port_min: 19000
+stealth_vps_vmess_ws_listen_port_max: 19999
+
+# Shadowsocks-2022 (SIP022): different cipher family from Reality.
+# Unlike XHTTP / VMess+WS, SS-2022 binds publicly (no Caddy fronting).
+stealth_vps_ss2022_enabled: false
+# Method choices: 2022-blake3-aes-128-gcm (default — fastest),
+# 2022-blake3-aes-256-gcm, 2022-blake3-chacha20-poly1305 (ARM-friendly).
+stealth_vps_ss2022_method: "2022-blake3-aes-128-gcm"
+# Port range — disjoint from Reality + Hysteria to keep firewall rules
+# segmentable. SS-2022 needs both TCP and UDP open on the chosen port.
+stealth_vps_ss2022_port_min: 8400
+stealth_vps_ss2022_port_max: 8999
+
 # ---- v0.10.0: Multi-node control plane ----
 # When `true`, this host runs as the CONTROL of a multi-node fleet — it
 # holds users.index.json + bot + subscription endpoint + fleet management

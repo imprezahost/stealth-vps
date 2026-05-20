@@ -56,3 +56,25 @@
   ansible.builtin.include_tasks: reality_xray_standalone.yml
   when: not (stealth_vps_panel_enabled | bool)
   tags: [xray, reality]
+
+# v0.11.0+: optional per-protocol state files. Each generates its own
+# /etc/stealth-vps/<proto>.state.yml on first run + slurps on subsequent
+# converges. The actual Xray inbound rendering for these protocols lands
+# in a follow-up (Block A.2 — see docs/internal/roadmap-v0.11-protocols.md);
+# the state files exist now so per-user URIs in the subscription bundle
+# resolve to real ports even before the inbound rendering ships.
+
+- name: Generate Shadowsocks-2022 state (panel-independent)
+  ansible.builtin.include_tasks: ss2022_state.yml
+  when: stealth_vps_ss2022_enabled | bool
+  tags: [xray, ss2022]
+
+- name: Generate XHTTP state (panel-independent)
+  ansible.builtin.include_tasks: xhttp_state.yml
+  when: stealth_vps_xhttp_enabled | bool
+  tags: [xray, xhttp]
+
+- name: Generate VMess+WS state (panel-independent)
+  ansible.builtin.include_tasks: vmess_ws_state.yml
+  when: stealth_vps_vmess_ws_enabled | bool
+  tags: [xray, vmess]

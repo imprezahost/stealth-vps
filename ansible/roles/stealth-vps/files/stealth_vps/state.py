@@ -29,7 +29,7 @@ USERS_INDEX_PATH = "/etc/stealth-vps/users.index.json"
 
 # Current schema version this code emits. Older versions are accepted
 # on read for backwards compat — the load path auto-upgrades them.
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 # Duration parser regex — accepts "30d", "12h", "4w", "6mo", "1y".
 # We pick `mo` for months (rather than overloading `m` for minute vs
@@ -86,18 +86,30 @@ def load_users_index(path: str = USERS_INDEX_PATH) -> dict[str, Any]:
         raise StateError(
             f"users.index.json at {path} has unexpected shape (missing 'version' or 'users')"
         )
-    if data["version"] not in (1, 2):
+    if data["version"] not in (1, 2, 3):
         raise StateError(
             f"users.index.json schema version {data['version']} unsupported by this code "
-            f"(this code understands v1 and v2)"
+            f"(this code understands v1, v2, and v3)"
         )
-    # In-memory upgrade v1 → v2: add the sub_expires_at field with None
-    # default on every user. Doesn't persist until the next save —
-    # readers see a v2-shaped dict, writers will emit v2 on disk.
-    if data["version"] == 1:
+    # In-memory upgrade chain — applied lazily on load, persisted on next save.
+    #
+    # v1 → v2 (v0.9.0): add `sub_expires_at` (subscription TTL).
+    # v2 → v3 (v0.11.0): add the four new-protocol fields. `ss2022_psk`,
+    #   `wireguard_pubkey`, `wireguard_client_ip`, `trojan_password`. All
+    #   default to None — "this user hasn't been issued credentials for
+    #   this protocol yet". The URI builder emits a per-protocol URI only
+    #   when both the protocol is enabled on the host AND the user has a
+    #   non-null value for the matching field.
+    if data["version"] <= 1:
         for _label, rec in data["users"].items():
             rec.setdefault("sub_expires_at", None)
-        data["version"] = CURRENT_SCHEMA_VERSION
+    if data["version"] <= 2:
+        for _label, rec in data["users"].items():
+            rec.setdefault("ss2022_psk", None)
+            rec.setdefault("wireguard_pubkey", None)
+            rec.setdefault("wireguard_client_ip", None)
+            rec.setdefault("trojan_password", None)
+    data["version"] = CURRENT_SCHEMA_VERSION
     return data
 
 
@@ -142,6 +154,10 @@ def add_user(
     created_at: str,
     enabled: bool = True,
     sub_expires_at: str | None = None,
+    ss2022_psk: str | None = None,
+    wireguard_pubkey: str | None = None,
+    wireguard_client_ip: str | None = None,
+    trojan_password: str | None = None,
     path: str = USERS_INDEX_PATH,
     allow_reserved: bool = False,
 ) -> dict[str, Any]:
@@ -153,6 +169,18 @@ def add_user(
     operator's subscription URL becomes invalid. Use `parse_duration`
     + `compute_expiry` to compute it from a human-readable "30d"-style
     input. None means never-expires (the v0.8.x default).
+
+    v0.11.0+ optional fields (all default None — "not issued for this
+    protocol yet"):
+      - `ss2022_psk` — Shadowsocks-2022 per-user PSK (base64).
+      - `wireguard_pubkey` — WireGuard client public key (base64).
+      - `wireguard_client_ip` — assigned WG client IP (e.g. "10.99.0.5").
+      - `trojan_password` — Trojan-Go per-user password.
+
+    The URI builder skips a per-protocol URI when its field is None,
+    so leaving any of these unset just means "no URI for that protocol
+    in this user's subscription bundle." Operators can fill them in
+    later via `update_user` without disturbing the existing fields.
     """
     if not label_valid(label, allow_reserved=allow_reserved):
         raise StateError(
@@ -169,6 +197,10 @@ def add_user(
         "created_at": created_at,
         "enabled": enabled,
         "sub_expires_at": sub_expires_at,
+        "ss2022_psk": ss2022_psk,
+        "wireguard_pubkey": wireguard_pubkey,
+        "wireguard_client_ip": wireguard_client_ip,
+        "trojan_password": trojan_password,
     }
     save_users_index(data, path)
     return data
@@ -217,6 +249,10 @@ def update_user(
     sub_token: str | None = None,
     enabled: bool | None = None,
     sub_expires_at: Any = _UNSET,
+    ss2022_psk: Any = _UNSET,
+    wireguard_pubkey: Any = _UNSET,
+    wireguard_client_ip: Any = _UNSET,
+    trojan_password: Any = _UNSET,
     path: str = USERS_INDEX_PATH,
 ) -> dict[str, Any]:
     """Patch one or more fields of an existing user. Returns the updated
@@ -227,9 +263,10 @@ def update_user(
     preserving `created_at` and `label`. A single load → mutate → save
     keeps the atomic rename pattern intact.
 
-    `sub_expires_at` uses a sentinel rather than None-as-default so
-    callers can EXPLICITLY clear the expiry by passing None — vs the
-    other patch fields where None means "don't touch this field".
+    Sentinel-defaulted fields (`sub_expires_at` + the four v0.11.0+
+    protocol credentials) use `_UNSET` rather than None-as-default so
+    callers can EXPLICITLY clear them by passing None — vs the
+    str-defaulted fields where None means "don't touch this field".
     """
     data = load_users_index(path)
     if label not in data["users"]:
@@ -245,6 +282,14 @@ def update_user(
         rec["enabled"] = enabled
     if sub_expires_at is not _UNSET:
         rec["sub_expires_at"] = sub_expires_at
+    if ss2022_psk is not _UNSET:
+        rec["ss2022_psk"] = ss2022_psk
+    if wireguard_pubkey is not _UNSET:
+        rec["wireguard_pubkey"] = wireguard_pubkey
+    if wireguard_client_ip is not _UNSET:
+        rec["wireguard_client_ip"] = wireguard_client_ip
+    if trojan_password is not _UNSET:
+        rec["trojan_password"] = trojan_password
     save_users_index(data, path)
     return data
 

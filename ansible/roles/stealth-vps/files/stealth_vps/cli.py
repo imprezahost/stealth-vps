@@ -61,6 +61,13 @@ RELOADER_ARGS_PATH = "/etc/stealth-vps/reloader-args.json"
 INSTALLER_ENV_PATH = "/etc/stealth-vps/installer.env"
 REALITY_STATE_PATH = "/etc/stealth-vps/reality.state.yml"
 HYSTERIA_STATE_PATH = "/etc/stealth-vps/hysteria.state.yml"
+# v0.11.0+ — per-protocol state files. Presence on disk = "this host
+# terminates this protocol"; absence = "skip auto-credential-gen for
+# new users." The actual Xray inbound rendering for these protocols
+# lands in Block A.2 (a follow-up MR in the v0.11 sprint).
+SS2022_STATE_PATH = "/etc/stealth-vps/ss2022.state.yml"
+XHTTP_STATE_PATH = "/etc/stealth-vps/xhttp.state.yml"
+VMESS_WS_STATE_PATH = "/etc/stealth-vps/vmess_ws.state.yml"
 SUBSCRIPTION_BASE_URL_KEY = "STEALTH_VPS_SUB_BASE_URL"
 
 
@@ -424,6 +431,39 @@ def _load_states_for_render() -> tuple[dict[str, Any] | None, dict[str, Any] | N
 # ---------------------------------------------------------------------------
 
 
+def _autogen_ss2022_psk_for_method(method: str) -> str:
+    """Generate a per-user SS-2022 PSK matching the cipher's required
+    key length. Returns base64-encoded bytes; Xray's shadowsocks
+    inbound accepts this shape directly.
+
+    `2022-blake3-aes-128-gcm` → 16 bytes
+    `2022-blake3-aes-256-gcm` + `2022-blake3-chacha20-poly1305` → 32 bytes
+    Unknown methods → 32 bytes (longest valid; safe for forward compat
+    with future ciphers that adopt 32-byte keys).
+    """
+    import base64
+    import secrets
+    n_bytes = 16 if method == "2022-blake3-aes-128-gcm" else 32
+    return base64.b64encode(secrets.token_bytes(n_bytes)).decode("ascii")
+
+
+def _maybe_autogen_ss2022_psk(
+    ss2022_state_path: str | None = None,
+) -> str | None:
+    """If ss2022.state.yml is on disk, the host terminates SS-2022 and
+    every new user should get a per-user PSK. Returns None when SS-2022
+    isn't enabled on this host."""
+    p = ss2022_state_path or SS2022_STATE_PATH
+    if not os.path.exists(p):
+        return None
+    try:
+        ss_state = load_state_file(p)
+    except ReloadError:
+        return None
+    method = str(ss_state.get("method", "2022-blake3-aes-128-gcm"))
+    return _autogen_ss2022_psk_for_method(method)
+
+
 def cmd_user_add(args: argparse.Namespace) -> int:
     backend = _select_backend_for_cli()
     try:
@@ -444,6 +484,22 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         except state.StateError as exc:
             print(f"s-vps: ttl `{args.ttl}` invalid: {exc}", file=sys.stderr)
             return 1
+
+    # v0.11.0+: SS-2022 per-user PSK. Operator override via `--ss2022-psk`
+    # takes precedence; otherwise auto-gen when SS-2022 is enabled on
+    # this host (detected via state file presence). When neither
+    # condition holds, the user's `ss2022_psk` stays None — they have
+    # no SS-2022 URI in their bundle, no exposure.
+    ss2022_psk: str | None = None
+    if getattr(args, "ss2022_psk", ""):
+        ss2022_psk = args.ss2022_psk
+    else:
+        ss2022_psk = _maybe_autogen_ss2022_psk()
+    if ss2022_psk is not None:
+        state.update_user(
+            args.label, ss2022_psk=ss2022_psk, path=state.USERS_INDEX_PATH,
+        )
+        rec["ss2022_psk"] = ss2022_psk
 
     print(f"✓ added user {args.label!r}")
     print(f"  reality_uuid     : {rec['reality_uuid']}")
@@ -1665,6 +1721,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
              "user's subscription file (operationally a 404). The user record itself "
              "stays in the index; the operator can `sub renew` to re-issue. Omit to "
              "create a never-expires user (current default).",
+    )
+    p.add_argument(
+        "--ss2022-psk",
+        default="",
+        dest="ss2022_psk",
+        help="(v0.11.0+) operator-supplied Shadowsocks-2022 per-user PSK "
+             "(base64). When omitted, auto-generated to the right length "
+             "for the host's configured cipher (read from ss2022.state.yml). "
+             "On hosts without SS-2022 enabled, ignored — the user's "
+             "ss2022_psk stays null and the URI builder skips the ss:// entry.",
     )
     p.add_argument(
         "--no-sync",

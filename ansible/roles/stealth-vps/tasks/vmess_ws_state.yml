@@ -1,0 +1,47 @@
+---
+# VMess+WS state generation. Same shape as xhttp — operator-set path +
+# randomised loopback port. UUID comes from the per-user reality_uuid
+# in users.index.json (Open Question A1 default).
+#
+# Persisted shape:
+#   port: 19543
+#   path: /.well-known/vmess-ws
+
+- name: Probe existing vmess_ws state
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/vmess_ws.state.yml"
+  register: stealth_vps_vmess_ws_state_stat
+  tags: [xray, vmess]
+
+- name: Read existing vmess_ws state from the remote
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/vmess_ws.state.yml"
+  register: stealth_vps_vmess_ws_state_raw
+  when: stealth_vps_vmess_ws_state_stat.stat.exists
+  tags: [xray, vmess]
+
+- name: Set vmess_ws state fact from slurped YAML
+  ansible.builtin.set_fact:
+    stealth_vps_vmess_ws_state: "{{ stealth_vps_vmess_ws_state_raw.content | b64decode | from_yaml }}"
+  when: stealth_vps_vmess_ws_state_stat.stat.exists
+  tags: [xray, vmess]
+
+- name: Generate VMess+WS state (first run only)
+  when: not stealth_vps_vmess_ws_state_stat.stat.exists
+  tags: [xray, vmess]
+  block:
+
+    - name: Compose new vmess_ws state  # noqa: jinja[spacing]
+      ansible.builtin.set_fact:
+        stealth_vps_vmess_ws_state: "{{ {
+          'port': (range(stealth_vps_vmess_ws_listen_port_min, stealth_vps_vmess_ws_listen_port_max + 1) | random),
+          'path': stealth_vps_vmess_ws_path,
+        } }}"
+
+    - name: Persist vmess_ws state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_vmess_ws_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/vmess_ws.state.yml"
+        owner: root
+        group: root
+        mode: '0600'

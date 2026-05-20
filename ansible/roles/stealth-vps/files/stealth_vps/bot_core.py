@@ -46,7 +46,14 @@ from . import state
 from .backends import ThreeXUIBackend, ThreeXUIClient, UserBackend
 from .backends_headless import HeadlessBackend
 from .reloader import Reloader
-from .urivider import build_hysteria2_uri, build_vless_uri
+from .urivider import (
+    build_hysteria2_uri,
+    build_vless_uri,
+    build_ss2022_uri,
+    build_trojan_uri,
+    build_vmess_ws_uri,
+    build_xhttp_uri,
+)
 
 
 log = logging.getLogger("stealth_vps.bot_core")
@@ -221,6 +228,12 @@ class UriRenderConfig:
     """Per-protocol settings needed to render per-user URIs. The bot
     fills these from its env vars at startup; tests pass them directly
     in fixtures.
+
+    v0.11.0+ adds XHTTP / VMess+WS / SS-2022 / Trojan fields. Each is
+    OFF by default — the URI builder skips that protocol's URI unless
+    its `*_enabled` flag is true AND the per-user record has the
+    required credential (UUID for XHTTP/VMess from `reality_uuid`,
+    `ss2022_psk` for SS-2022, `trojan_password` for Trojan).
     """
 
     public_host: str
@@ -240,6 +253,37 @@ class UriRenderConfig:
     hysteria_insecure: bool = False
     hysteria_port_hop_min: int | None = None
     hysteria_port_hop_max: int | None = None
+
+    # v0.11.0+ — XHTTP (VLESS-over-XHTTP behind CDN front).
+    xhttp_enabled: bool = False
+    xhttp_port: int = 0
+    xhttp_path: str = ""
+    xhttp_host_header: str = ""
+    xhttp_sni: str = ""
+    xhttp_remark: str = "stealth-vps-xhttp"
+
+    # v0.11.0+ — VMess+WebSocket+TLS (legacy-compat path behind Caddy).
+    vmess_ws_enabled: bool = False
+    vmess_ws_port: int = 0
+    vmess_ws_path: str = ""
+    vmess_ws_host_header: str = ""
+    vmess_ws_sni: str = ""
+    vmess_ws_remark: str = "stealth-vps-vmess-ws"
+
+    # v0.11.0+ — Shadowsocks-2022 (SIP022).
+    ss2022_enabled: bool = False
+    ss2022_port: int = 0
+    ss2022_method: str = "2022-blake3-aes-128-gcm"
+    ss2022_server_psk: str = ""
+    ss2022_remark: str = "stealth-vps-ss2022"
+
+    # v0.11.0+ — Trojan-Go (separate daemon; URI shape lives here for
+    # parity with the others — wiring lands in Block B).
+    trojan_enabled: bool = False
+    trojan_port: int = 0
+    trojan_sni: str = ""
+    trojan_insecure: bool = False
+    trojan_remark: str = "stealth-vps-trojan"
 
 
 def build_uris_for_user(
@@ -290,6 +334,65 @@ def build_uris_for_user(
                 remark=uri_config.hysteria_remark,
             )
         )
+
+    # v0.11.0+ — XHTTP (uses Reality UUID per Open Question A1 default).
+    if uri_config.xhttp_enabled and rec.get("reality_uuid"):
+        uris.append(
+            build_xhttp_uri(
+                uuid=rec["reality_uuid"],
+                host=uri_config.public_host,
+                port=uri_config.xhttp_port,
+                path=uri_config.xhttp_path,
+                host_header=uri_config.xhttp_host_header,
+                sni=uri_config.xhttp_sni,
+                fingerprint=uri_config.reality_fingerprint,
+                remark=uri_config.xhttp_remark,
+            )
+        )
+
+    # v0.11.0+ — VMess+WS (uses Reality UUID per Open Question A1 default).
+    if uri_config.vmess_ws_enabled and rec.get("reality_uuid"):
+        uris.append(
+            build_vmess_ws_uri(
+                uuid=rec["reality_uuid"],
+                host=uri_config.public_host,
+                port=uri_config.vmess_ws_port,
+                ws_path=uri_config.vmess_ws_path,
+                host_header=uri_config.vmess_ws_host_header,
+                sni=uri_config.vmess_ws_sni,
+                remark=uri_config.vmess_ws_remark,
+            )
+        )
+
+    # v0.11.0+ — SS-2022. Per-user PSK; pre-concatenated with server PSK
+    # at render time per Open Question A2.
+    if uri_config.ss2022_enabled and rec.get("ss2022_psk"):
+        uris.append(
+            build_ss2022_uri(
+                server_psk=uri_config.ss2022_server_psk,
+                user_psk=rec["ss2022_psk"],
+                host=uri_config.public_host,
+                port=uri_config.ss2022_port,
+                method=uri_config.ss2022_method,
+                remark=uri_config.ss2022_remark,
+            )
+        )
+
+    # v0.11.0+ — Trojan-Go (separate daemon; URI shape lives here for
+    # parity. The CONFIG wiring for the daemon lands in Block B).
+    if uri_config.trojan_enabled and rec.get("trojan_password"):
+        uris.append(
+            build_trojan_uri(
+                password=rec["trojan_password"],
+                host=uri_config.public_host,
+                port=uri_config.trojan_port,
+                sni=uri_config.trojan_sni,
+                fingerprint=uri_config.reality_fingerprint,
+                allow_insecure=uri_config.trojan_insecure,
+                remark=uri_config.trojan_remark,
+            )
+        )
+
     return uris
 
 
