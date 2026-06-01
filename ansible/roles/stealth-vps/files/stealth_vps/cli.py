@@ -68,6 +68,9 @@ HYSTERIA_STATE_PATH = "/etc/stealth-vps/hysteria.state.yml"
 SS2022_STATE_PATH = "/etc/stealth-vps/ss2022.state.yml"
 XHTTP_STATE_PATH = "/etc/stealth-vps/xhttp.state.yml"
 VMESS_WS_STATE_PATH = "/etc/stealth-vps/vmess_ws.state.yml"
+# v0.11.0+ Block B — separate-daemon protocols.
+TROJAN_GO_STATE_PATH = "/etc/stealth-vps/trojan_go.state.yml"
+WIREGUARD_STATE_PATH = "/etc/stealth-vps/wireguard.state.yml"
 SUBSCRIPTION_BASE_URL_KEY = "STEALTH_VPS_SUB_BASE_URL"
 
 
@@ -464,6 +467,21 @@ def _maybe_autogen_ss2022_psk(
     return _autogen_ss2022_psk_for_method(method)
 
 
+def _maybe_autogen_trojan_password(
+    trojan_state_path: str | None = None,
+) -> str | None:
+    """If trojan_go.state.yml is on disk, the host runs Trojan-Go and
+    every new user gets a per-user password. Returns None when Trojan-Go
+    isn't enabled. Trojan passwords have no length constraint (unlike
+    SS-2022 PSKs) — a 32-char URL-safe token matches the Hysteria2
+    password style used elsewhere in the project."""
+    import secrets
+    p = trojan_state_path or TROJAN_GO_STATE_PATH
+    if not os.path.exists(p):
+        return None
+    return secrets.token_urlsafe(24).rstrip("=")
+
+
 def cmd_user_add(args: argparse.Namespace) -> int:
     backend = _select_backend_for_cli()
     try:
@@ -500,6 +518,20 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             args.label, ss2022_psk=ss2022_psk, path=state.USERS_INDEX_PATH,
         )
         rec["ss2022_psk"] = ss2022_psk
+
+    # v0.11.0+ Block B: Trojan-Go per-user password. Same opt-in shape
+    # as SS-2022 — explicit `--trojan-password` wins; else auto-gen when
+    # trojan_go.state.yml exists; else stays None (no trojan:// URI).
+    trojan_password: str | None = None
+    if getattr(args, "trojan_password", ""):
+        trojan_password = args.trojan_password
+    else:
+        trojan_password = _maybe_autogen_trojan_password()
+    if trojan_password is not None:
+        state.update_user(
+            args.label, trojan_password=trojan_password, path=state.USERS_INDEX_PATH,
+        )
+        rec["trojan_password"] = trojan_password
 
     print(f"✓ added user {args.label!r}")
     print(f"  reality_uuid     : {rec['reality_uuid']}")
@@ -1731,6 +1763,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
              "for the host's configured cipher (read from ss2022.state.yml). "
              "On hosts without SS-2022 enabled, ignored — the user's "
              "ss2022_psk stays null and the URI builder skips the ss:// entry.",
+    )
+    p.add_argument(
+        "--trojan-password",
+        default="",
+        dest="trojan_password",
+        help="(v0.11.0+) operator-supplied Trojan-Go per-user password. "
+             "When omitted, auto-generated when Trojan-Go is enabled on the "
+             "host (trojan_go.state.yml present). Ignored on hosts without "
+             "Trojan-Go — the user's trojan_password stays null.",
     )
     p.add_argument(
         "--no-sync",

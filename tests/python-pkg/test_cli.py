@@ -1142,6 +1142,66 @@ def test_user_add_with_ss2022_enabled_autogens_psk(
     assert len(base64.b64decode(rec["ss2022_psk"])) == 16
 
 
+# ---------------------------------------------------------------------------
+# v0.11.0 Block B — Trojan-Go per-user password autogen + override
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_autogen_trojan_password_none_when_no_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    assert cli._maybe_autogen_trojan_password(str(tmp_path / "absent.yml")) is None
+
+
+def test_maybe_autogen_trojan_password_generates_when_state_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    state_path = tmp_path / "trojan_go.state.yml"
+    state_path.write_text("port: 4443\n", encoding="utf-8")
+    pw = cli._maybe_autogen_trojan_password(str(state_path))
+    assert pw is not None
+    assert len(pw) >= 16          # token_urlsafe(24) → ~32 chars
+
+
+def test_user_add_explicit_trojan_password_overrides_autogen(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    state_path = tmp_path / "trojan_go.state.yml"
+    state_path.write_text("port: 4443\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "TROJAN_GO_STATE_PATH", str(state_path)):
+        rc = cli.main(["user", "add", "bob", "--trojan-password", "OPPW"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] == "OPPW"
+
+
+def test_user_add_autogens_trojan_password_when_enabled(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    state_path = tmp_path / "trojan_go.state.yml"
+    state_path.write_text("port: 4443\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "TROJAN_GO_STATE_PATH", str(state_path)):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] is not None
+
+
+def test_user_add_no_trojan_state_leaves_password_null(
+    users_index_path: str, reloader_args_json: str
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] is None
+
+
 def test_data_node_mode_unchanged_by_step6(
     users_index_path: str, reloader_args_json: str, capsys
 ) -> None:
