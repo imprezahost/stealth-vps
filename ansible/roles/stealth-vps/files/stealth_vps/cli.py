@@ -72,6 +72,11 @@ VMESS_WS_STATE_PATH = "/etc/stealth-vps/vmess_ws.state.yml"
 TROJAN_GO_STATE_PATH = "/etc/stealth-vps/trojan_go.state.yml"
 WIREGUARD_STATE_PATH = "/etc/stealth-vps/wireguard.state.yml"
 SUBSCRIPTION_BASE_URL_KEY = "STEALTH_VPS_SUB_BASE_URL"
+# v0.12.0+ — onboarding bridge base URL (full path, e.g.
+# https://vpn.example.com/.well-known/stealth-vps-onboard). Optional;
+# when unset we derive the onboard URL from the sub base's origin +
+# the default onboard path.
+ONBOARD_BASE_URL_KEY = "STEALTH_VPS_ONBOARD_BASE_URL"
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +414,25 @@ def _render_user_uris(
     if sub_token and sub_base:
         out["sub"] = f"{sub_base.rstrip('/')}/{sub_token}"
 
+    # v0.12.0+ — onboarding bridge URL. Explicit base wins; else derive
+    # from the sub base's origin + the default onboard path. Skipped
+    # entirely when there's no sub_token or no way to resolve an origin.
+    if sub_token:
+        onboard_base = env.get(ONBOARD_BASE_URL_KEY)
+        if onboard_base:
+            out["onboard"] = f"{onboard_base.rstrip('/')}/{sub_token}"
+        elif sub_base:
+            import urllib.parse as _u
+            from . import onboard as _onb
+            parsed = _u.urlparse(sub_base)
+            if parsed.scheme and parsed.netloc:
+                try:
+                    out["onboard"] = _onb.onboard_url_for(
+                        sub_token, f"{parsed.scheme}://{parsed.netloc}"
+                    )
+                except _onb.OnboardError:
+                    pass
+
     return out
 
 
@@ -676,6 +700,8 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             print(f"  hysteria2 URI   : {uris['hysteria2']}")
         if "sub" in uris:
             print(f"  subscription URL: {uris['sub']}")
+        if "onboard" in uris:
+            print(f"  onboarding link : {uris['onboard']}")
 
     _post_mutation_sync(args, affected_user=rec, affected_label=args.label)
     return 0
@@ -905,6 +931,8 @@ def cmd_user_show(args: argparse.Namespace) -> int:
             print(f"hysteria2 URI    : {uris['hysteria2']}")
         if "sub" in uris:
             print(f"subscription URL : {uris['sub']}")
+        if "onboard" in uris:
+            print(f"onboarding link  : {uris['onboard']}")
 
     if args.qr and uris:
         # Best-effort: shell out to `qrencode -t ANSIUTF8` if available.
@@ -986,6 +1014,52 @@ def cmd_user_wg_config(args: argparse.Namespace) -> int:
     )
     print(conf, end="")
     return 0
+
+
+def cmd_user_onboard_url(args: argparse.Namespace) -> int:
+    """Print the onboarding-bridge URL for a user (v0.12.0+).
+
+    The onboard URL wraps the user's sub_token in a friendly path that
+    serves a static page (UA detection + one-tap import buttons + QR).
+    Hand it to the user instead of the raw subscription URL — they tap
+    it on their phone and import into their client app in one step.
+
+    Resolves the URL from STEALTH_VPS_ONBOARD_BASE_URL (set by the role
+    when the onboard bridge is enabled) or derives it from the sub
+    base's origin. Errors if neither is configured (onboard bridge
+    not enabled on this host)."""
+    rec = state.get_user(args.label, state.USERS_INDEX_PATH)
+    if rec is None:
+        print(f"s-vps: no user labelled {args.label!r} in the index", file=sys.stderr)
+        return 1
+    sub_token = rec.get("sub_token")
+    if not sub_token:
+        print(f"s-vps: {args.label!r} has no sub_token — nothing to onboard", file=sys.stderr)
+        return 1
+
+    env = _load_installer_env()
+    onboard_base = env.get(ONBOARD_BASE_URL_KEY)
+    if onboard_base:
+        print(f"{onboard_base.rstrip('/')}/{sub_token}")
+        return 0
+    # Derive from the sub base's origin.
+    sub_base = env.get(SUBSCRIPTION_BASE_URL_KEY)
+    if sub_base:
+        import urllib.parse as _u
+        from . import onboard as _onb
+        parsed = _u.urlparse(sub_base)
+        if parsed.scheme and parsed.netloc:
+            print(_onb.onboard_url_for(sub_token, f"{parsed.scheme}://{parsed.netloc}"))
+            return 0
+    print(
+        "s-vps: can't resolve an onboard URL — neither "
+        f"{ONBOARD_BASE_URL_KEY} nor {SUBSCRIPTION_BASE_URL_KEY} is set in "
+        "installer.env. Enable the onboarding bridge "
+        "(stealth_vps_onboard_enabled=true) + a public subscription "
+        "endpoint, then re-run `s-vps update`.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -2051,6 +2125,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("label")
     p.set_defaults(func=cmd_user_wg_config)
+
+    p = user_sub.add_parser(
+        "onboard-url",
+        help="print a user's one-tap onboarding-bridge URL (v0.12+)",
+        description=cmd_user_onboard_url.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label")
+    p.set_defaults(func=cmd_user_onboard_url)
 
     # --- reload -------------------------------------------------------
     p = sub.add_parser("reload", help="re-render configs + SIGHUP services (headless only)")

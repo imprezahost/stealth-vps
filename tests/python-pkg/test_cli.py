@@ -1383,6 +1383,73 @@ def test_wg_config_user_without_wg_identity_errors(
     assert "no WireGuard identity" in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------------------
+# v0.12.0 — onboarding bridge URL surface
+# ---------------------------------------------------------------------------
+
+
+def test_onboard_url_derived_from_sub_base(
+    users_index_path: str, tmp_path: pathlib.Path, capsys
+) -> None:
+    """`s-vps user onboard-url alice` derives the onboard URL from the
+    sub base's origin when no explicit onboard base is set."""
+    (tmp_path / "installer.env").write_text(
+        'STEALTH_VPS_SUB_BASE_URL="https://vpn.example.com/.well-known/stealth-vps-sub"\n',
+        encoding="utf-8",
+    )
+    rc = cli.main(["user", "onboard-url", "alice"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert out == (
+        "https://vpn.example.com/.well-known/stealth-vps-onboard/alice-sub-token"
+    )
+
+
+def test_onboard_url_explicit_base_wins(
+    users_index_path: str, tmp_path: pathlib.Path, capsys
+) -> None:
+    (tmp_path / "installer.env").write_text(
+        'STEALTH_VPS_ONBOARD_BASE_URL="https://cdn.example.com/onb"\n'
+        'STEALTH_VPS_SUB_BASE_URL="https://vpn.example.com/.well-known/stealth-vps-sub"\n',
+        encoding="utf-8",
+    )
+    rc = cli.main(["user", "onboard-url", "alice"])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "https://cdn.example.com/onb/alice-sub-token"
+
+
+def test_onboard_url_errors_when_no_base_configured(
+    users_index_path: str, capsys
+) -> None:
+    rc = cli.main(["user", "onboard-url", "alice"])
+    assert rc == 1
+    assert "can't resolve an onboard URL" in capsys.readouterr().err
+
+
+def test_onboard_url_unknown_user_errors(users_index_path: str, capsys) -> None:
+    rc = cli.main(["user", "onboard-url", "ghost"])
+    assert rc == 1
+    assert "no user labelled 'ghost'" in capsys.readouterr().err
+
+
+def test_user_show_includes_onboard_link(
+    users_index_path: str, reality_state_yml, hysteria_state_yml,
+    tmp_path: pathlib.Path, capsys
+) -> None:
+    """`s-vps user show` prints the onboarding link alongside the sub URL
+    when the sub base is configured."""
+    (tmp_path / "installer.env").write_text(
+        'STEALTH_DOMAIN="vpn.example.com"\n'
+        'STEALTH_VPS_SUB_BASE_URL="https://vpn.example.com/.well-known/stealth-vps-sub"\n',
+        encoding="utf-8",
+    )
+    rc = cli.main(["user", "show", "alice"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "onboarding link" in out
+    assert "stealth-vps-onboard/alice-sub-token" in out
+
+
 def test_data_node_mode_unchanged_by_step6(
     users_index_path: str, reloader_args_json: str, capsys
 ) -> None:

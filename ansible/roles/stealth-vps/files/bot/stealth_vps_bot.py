@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from functools import wraps
@@ -154,6 +155,9 @@ TROJAN_SNI = _env("STEALTH_VPS_BOT_TROJAN_SNI")
 TROJAN_INSECURE = _env_bool("STEALTH_VPS_BOT_TROJAN_INSECURE")
 
 SUBSCRIPTION_PUBLIC_URL = _env("STEALTH_VPS_BOT_SUBSCRIPTION_PUBLIC_URL")
+# v0.12.0+ — onboarding bridge public URL prefix. Empty when the
+# onboard bridge isn't enabled.
+ONBOARD_PUBLIC_URL = _env("STEALTH_VPS_BOT_ONBOARD_PUBLIC_URL")
 
 # --- Headless-mode config -------------------------------------------------
 # In v0.7+ panel-less mode the bot constructs a HeadlessBackend instead of
@@ -334,6 +338,14 @@ def _sub_url_for(token: str) -> str:
     return sub_url_for(token, SUBSCRIPTION_PUBLIC_URL)
 
 
+def _onboard_url_for(token: str) -> str:
+    """The one-tap onboarding URL for a token, or '' when the onboard
+    bridge isn't enabled. Just the configured prefix + token."""
+    if not ONBOARD_PUBLIC_URL or not token:
+        return ""
+    return ONBOARD_PUBLIC_URL.rstrip("/") + "/" + token
+
+
 async def _post_mutation_sync(label: str) -> tuple[bool, str]:
     """If this host is a control box with registered nodes, push the
     new users.index.json to each. Runs the (blocking) sync_all in a
@@ -424,7 +436,8 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/user revoke <label> — disable a client\n"
         "/sub <label> — get a client's sub URL\n"
         "/sub revoke <label> — rotate sub token\n"
-        "/sub renew <label> <ttl|clear> — set/clear expiry (e.g. 30d)\n\n"
+        "/sub renew <label> <ttl|clear> — set/clear expiry (e.g. 30d)\n"
+        "/onboard <label> — one-tap onboarding link + QR (v0.12+)\n\n"
         "Labels must match `[a-zA-Z0-9_-]{1,32}`. "
         "Names starting with `stealth-vps-` are reserved.",
         parse_mode=ParseMode.MARKDOWN,
@@ -645,6 +658,17 @@ async def cmd_sub(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@admin_only
+async def cmd_onboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """`/onboard <label>` — DM the one-tap onboarding link (+ QR when
+    qrencode is present). v0.12.0+."""
+    args = ctx.args or []
+    if len(args) != 1:
+        await update.message.reply_text("Usage: /onboard <label>")
+        return
+    await _onboard_show(update, args[0])
+
+
 async def _sub_show(update: Update, label: str):
     rec = state.get_user(label, USERS_INDEX)
     if rec is None:
@@ -660,10 +684,57 @@ async def _sub_show(update: Update, label: str):
     except Exception as exc:
         log.warning("write_subscription_file refreshed failed: %s", exc)
     url = _sub_url_for(rec["sub_token"])
+    body = [f"Subscription URL for `{label}`:\n`{url}`"]
+    onboard = _onboard_url_for(rec["sub_token"])
+    if onboard:
+        body.append(f"\nOne-tap onboarding link (send this to the user):\n`{onboard}`")
     await update.message.reply_text(
-        f"Subscription URL for `{label}`:\n`{url}`",
+        "\n".join(body), parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def _onboard_show(update: Update, label: str):
+    """`/onboard <label>` — DM the one-tap onboarding link, with a QR
+    image when `qrencode` is available on the host (link-only fallback
+    otherwise; ADR O5)."""
+    rec = state.get_user(label, USERS_INDEX)
+    if rec is None:
+        await update.message.reply_text(f"⛔ user `{label}` not found.",
+                                         parse_mode=ParseMode.MARKDOWN)
+        return
+    onboard = _onboard_url_for(rec["sub_token"])
+    if not onboard:
+        await update.message.reply_text(
+            "⚠ Onboarding bridge not enabled. Set "
+            "`STEALTH_ONBOARD_ENABLED=true` (with a domain + exposed "
+            "subscription endpoint) and `s-vps update`.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    await update.message.reply_text(
+        f"One-tap onboarding link for `{label}`:\n`{onboard}`\n\n"
+        f"Send this to the user — they tap it and import into their "
+        f"client app in one step.",
         parse_mode=ParseMode.MARKDOWN,
     )
+    # Best-effort QR image via qrencode (ADR O5). Link-only if absent.
+    if shutil.which("qrencode") is None:
+        return
+    try:
+        import subprocess
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            png_path = f.name
+        subprocess.run(
+            ["qrencode", "-o", png_path, "-s", "8", onboard],
+            check=True, capture_output=True,
+        )
+        with open(png_path, "rb") as img:
+            await update.message.reply_photo(img, caption=f"Scan to onboard `{label}`",
+                                             parse_mode=ParseMode.MARKDOWN)
+        os.unlink(png_path)
+    except Exception as exc:  # noqa: BLE001 — QR is best-effort
+        log.warning("onboard QR generation failed: %s", exc)
 
 
 async def _sub_revoke(update: Update, label: str):
@@ -761,6 +832,7 @@ def main() -> None:
     app.add_handler(CommandHandler("creds", cmd_creds))
     app.add_handler(CommandHandler("user", cmd_user))
     app.add_handler(CommandHandler("sub", cmd_sub))
+    app.add_handler(CommandHandler("onboard", cmd_onboard))
     log.info("polling…")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
