@@ -64,12 +64,13 @@
     title: "Connect to your VPN",
     detected: "Detected platform:",
     tapToImport: "Tap to import into your client app:",
-    scanQr: "…or scan this QR with your client app:",
+    scanQr: "Or scan it with your VPN app's own QR scanner (Add subscription → Scan QR):",
     copyUrl: "Copy subscription URL",
     copied: "Copied!",
     showDetails: "Show server details",
     noToken: "No subscription token in the URL. Ask your operator for a fresh onboarding link.",
     qrUnavailable: "QR unavailable — use a button above or copy the URL below.",
+    qrHint: "Tip: pointing your phone camera at this just opens the raw subscription text — that's normal. Use your VPN app's own QR scanner (or a button above) instead.",
     moreOptions: "More client options"
   };
 
@@ -178,6 +179,7 @@
     var qrWrap = el("div", { class: "qr" });
     renderQr(qrWrap, subUrl);
     root.appendChild(qrWrap);
+    root.appendChild(el("p", { class: "muted", text: STRINGS.qrHint }));
 
     // Copy-URL fallback.
     var copyBtn = el("button", { class: "btn secondary", text: STRINGS.copyUrl });

@@ -728,6 +728,101 @@ def test_build_uris_for_user_full_stack_emits_all_six_protocols() -> None:
 
 
 # ---------------------------------------------------------------------------
+# uri_config_from_states (v0.12.1 — single-node config builder)
+# ---------------------------------------------------------------------------
+
+_REALITY_ST = {"port": 43338, "public_key": "PUB", "short_id": "SID"}
+_HYST_ST = {"port": 49440, "obfs_password": "OBFS"}
+
+
+def test_uri_config_from_states_reality_hysteria() -> None:
+    cfg = bot_core.uri_config_from_states(
+        public_host="vpn.example.com",
+        reality_state=_REALITY_ST,
+        hysteria_state=_HYST_ST,
+    )
+    assert cfg.public_host == "vpn.example.com"
+    assert cfg.reality_enabled is True
+    assert cfg.reality_port == 43338
+    assert cfg.reality_pubkey == "PUB"
+    assert cfg.reality_short_id == "SID"
+    # No client_servername in state → SNI falls back to the public host
+    # (matches cli._render_user_uris, the proven single-node behaviour).
+    assert cfg.reality_sni == "vpn.example.com"
+    assert cfg.hysteria_enabled is True
+    assert cfg.hysteria_port == 49440
+    assert cfg.hysteria_obfs_password == "OBFS"
+    assert cfg.hysteria_insecure is False   # has_domain defaults True
+
+
+def test_uri_config_from_states_no_domain_flips_insecure() -> None:
+    cfg = bot_core.uri_config_from_states(
+        public_host="203.0.113.5",
+        reality_state=_REALITY_ST,
+        hysteria_state=_HYST_ST,
+        has_domain=False,
+    )
+    assert cfg.hysteria_insecure is True
+
+
+def test_uri_config_from_states_no_reality_pubkey_disables_reality() -> None:
+    # A control box (no reality.state.yml → empty/portless dict) must not
+    # emit a bogus vless://host:0 entry.
+    cfg = bot_core.uri_config_from_states(
+        public_host="h", reality_state={"port": 51820},
+    )
+    assert cfg.reality_enabled is False
+
+
+def test_uri_config_from_states_hysteria_absent_stays_disabled() -> None:
+    cfg = bot_core.uri_config_from_states(
+        public_host="h", reality_state=_REALITY_ST, hysteria_state=None,
+    )
+    assert cfg.hysteria_enabled is False
+
+
+def test_uri_config_from_states_client_servername_wins_for_sni() -> None:
+    cfg = bot_core.uri_config_from_states(
+        public_host="h",
+        reality_state={**_REALITY_ST, "client_servername": "www.microsoft.com"},
+    )
+    assert cfg.reality_sni == "www.microsoft.com"
+
+
+def test_uri_config_from_states_v011_protocols_enabled_when_present() -> None:
+    cfg = bot_core.uri_config_from_states(
+        public_host="vpn.example.com",
+        reality_state=_REALITY_ST,
+        ss2022_state={"port": 8389, "method": "2022-blake3-aes-256-gcm",
+                      "server_psk": "SRV"},
+        xhttp_state={"port": 2096, "path": "/xh"},
+        vmess_ws_state={"port": 2097, "path": "/vm"},
+        trojan_state={"port": 2098},
+    )
+    assert cfg.ss2022_enabled and cfg.ss2022_port == 8389
+    assert cfg.ss2022_method == "2022-blake3-aes-256-gcm"
+    assert cfg.ss2022_server_psk == "SRV"
+    assert cfg.xhttp_enabled and cfg.xhttp_port == 2096 and cfg.xhttp_path == "/xh"
+    assert cfg.xhttp_host_header == "vpn.example.com"
+    assert cfg.vmess_ws_enabled and cfg.vmess_ws_path == "/vm"
+    assert cfg.trojan_enabled and cfg.trojan_port == 2098
+
+
+def test_uri_config_from_states_feeds_build_uris_for_user() -> None:
+    """The point of the helper: it drives build_uris_for_user to emit a
+    working single-node bundle — the path cli._refresh_subscription_file
+    takes on a no-fleet host."""
+    cfg = bot_core.uri_config_from_states(
+        public_host="vpn.example.com",
+        reality_state=_REALITY_ST, hysteria_state=_HYST_ST,
+    )
+    rec = {"reality_uuid": "uuid-1", "hysteria_password": "pw"}
+    uris = bot_core.build_uris_for_user(rec, cfg)
+    assert any(u.startswith("vless://") and "vpn.example.com" in u for u in uris)
+    assert any(u.startswith("hysteria2://") for u in uris)
+
+
+# ---------------------------------------------------------------------------
 # is_control_mode + make_backend control branch (v0.10.0+)
 # ---------------------------------------------------------------------------
 

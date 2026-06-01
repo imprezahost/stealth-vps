@@ -95,6 +95,8 @@ In v0.6 (panel mode) the panel side won't know about a direct edit until you als
 
 Only available when you installed with `STEALTH_SUBSCRIPTION_ENABLED=true`. Caddy serves per-user subscription files from `/var/lib/stealth-vps/subscriptions/<sub_token>.txt`.
 
+> The `.txt` file is materialised when you **add or rotate a user** (`s-vps user add` / `s-vps user rotate` / the bot's `/user add`), not at converge time — so on a fresh box a user's file appears after the first mutation. *(v0.12.1 fixed a bug where single-node hosts — no fleet registered — skipped this write entirely via the CLI, leaving the subscription URL 404'ing and the onboarding deep-links/QR pointing at a dead bundle.)*
+
 Get a user's subscription URL via the bot:
 
 ```text
@@ -112,6 +114,8 @@ Where `<scheme>` / `<host>` depend on the bind mode:
 
 - **Loopback (default, `STEALTH_SUBSCRIPTION_EXPOSE=false`)** — `http://127.0.0.1:8443/.well-known/stealth-vps-sub/<token>`. Fetch via SSH tunnel: `ssh -L 8443:127.0.0.1:8443 root@<vps>`.
 - **Public (`STEALTH_SUBSCRIPTION_EXPOSE=true`, requires a domain)** — `https://<your-domain>/.well-known/stealth-vps-sub/<token>` with a Let's Encrypt cert that Caddy maintains separately from acme.sh.
+
+> **Known limitation — dual ACME on a domain host.** With a public subscription endpoint *and* a domain, the box runs two ACME clients for the same name: acme.sh (HTTP-01 on :80, for the Hysteria2 / panel cert) and Caddy (TLS-ALPN-01 on :443, for the subscription + onboarding cert). They don't clash at first issuance, but once Caddy is up holding :80 + :443, an acme.sh **standalone** renewal can't bind :80. If you front a domain with Caddy, prefer letting Caddy own the cert (or open :80 only during acme.sh's renewal window). A first-class fix — Caddy issues once and Hysteria2 reads Caddy's cert — is tracked for a later release.
 
 The `sub_token` for each user is recorded in `users.index.json`. To grab one without the bot:
 

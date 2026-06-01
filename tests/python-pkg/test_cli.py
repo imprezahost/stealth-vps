@@ -871,6 +871,70 @@ def test_control_mode_user_add_writes_multinode_subscription_file(
     assert any("tokyo-1" in u for u in uris)
 
 
+def test_user_add_single_node_writes_subscription_file(
+    users_index_path: str,
+    reloader_args_json: str,
+    reality_state_yml,
+    hysteria_state_yml,
+    installer_env_panel_domain,
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    """Regression (v0.12.1): on a single-node host (no fleet) `s-vps user
+    add` MUST materialise the subscription .txt. Before the fix
+    _post_mutation_sync early-returned on the empty fleet — so the file
+    was never written, the sub URL 404'd, and the onboarding bridge's
+    deep-links + QR pointed at a dead bundle. The control-mode multi-node
+    write is covered above; this asserts the single-node `else` branch."""
+    from stealth_vps import fleet as _fleet
+    # No fleet registered → single-node path.
+    monkeypatch.setattr(_fleet, "load_fleet", lambda *a, **k: [])
+    # v0.11 protocol state files absent → kept out of the bundle (hermetic;
+    # the autouse fixture only redirects reality/hysteria paths).
+    for attr in ("SS2022_STATE_PATH", "XHTTP_STATE_PATH",
+                 "VMESS_WS_STATE_PATH", "TROJAN_GO_STATE_PATH"):
+        monkeypatch.setattr(cli, attr, str(tmp_path / f"absent-{attr}.yml"))
+
+    fake_reloader = MagicMock()
+    write_spy = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch("stealth_vps.subscription.write_subscription_file", write_spy):
+        rc = cli.main(["user", "add", "bob"])
+
+    assert rc == 0
+    write_spy.assert_called_once()
+    args, _ = write_spy.call_args
+    token, uris = args[0], args[1]
+    bob = state.get_user("bob", users_index_path)
+    assert token == bob["sub_token"]
+    # Reality + Hysteria, with the real host from installer.env — not the
+    # your.vps.example placeholder, and not a multi-node per-node remark.
+    assert any(u.startswith("vless://") and "vpn.example.com" in u for u in uris)
+    assert any(u.startswith("hysteria2://") for u in uris)
+    assert not any("your.vps.example" in u for u in uris)
+
+
+def test_user_add_single_node_no_sync_skips_subscription_write(
+    users_index_path: str,
+    reloader_args_json: str,
+    reality_state_yml,
+    hysteria_state_yml,
+    installer_env_panel_domain,
+    monkeypatch,
+) -> None:
+    """`--no-sync` still short-circuits the whole post-mutation hook,
+    including the (now unconditional) subscription refresh."""
+    from stealth_vps import fleet as _fleet
+    monkeypatch.setattr(_fleet, "load_fleet", lambda *a, **k: [])
+    fake_reloader = MagicMock()
+    write_spy = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch("stealth_vps.subscription.write_subscription_file", write_spy):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    write_spy.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # fleet rotate-key (v0.10.0 Step 7)
 # ---------------------------------------------------------------------------

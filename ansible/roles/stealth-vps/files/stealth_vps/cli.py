@@ -291,63 +291,120 @@ def _post_mutation_sync(
     affected_user: dict[str, Any] | None = None,
     affected_label: str | None = None,
 ) -> None:
-    """If we're on a control box with registered nodes, sync the
-    index + refresh the affected user's subscription bundle. Prints
-    per-node ✓/✗ on stdout; failures are reported to stderr but don't
-    propagate (the mutation already succeeded locally — partial sync
-    is operationally a retry-on-next-mutation, matching Open Question
-    #5).
+    """Propagate a user mutation. On a control box with registered fleet
+    nodes, push the index over SSH (per-node ✓/✗ on stdout; failures go
+    to stderr but don't propagate — the mutation already succeeded
+    locally, partial sync retries on the next mutation, per Open Question
+    #5). On EVERY host (single-node included) refresh the affected user's
+    subscription bundle so the `.txt` Caddy serves stays current.
 
     `args.no_sync` (default False) skips both the SSH push and the
-    subscription file refresh. Operators batching mutations should
-    follow up with a manual `s-vps fleet sync` + `s-vps fleet
-    refresh-subscriptions` (the latter lands as a CLI verb later).
+    subscription file refresh.
     """
     if getattr(args, "no_sync", False):
         return
     from . import fleet as _fleet
     nodes = _fleet.load_fleet()
-    if not nodes:
-        return
-    print()
-    print(f"Propagating to {len(nodes)} data node(s)...")
-    results = _fleet.sync_all(nodes, state.USERS_INDEX_PATH)
-    all_ok = True
-    for r in results:
-        status = "✓" if r.ok else "✗"
-        if not r.ok:
-            all_ok = False
-            detail = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
-            print(f"  {status} {r.node_id} ({r.duration_ms}ms): {detail}")
-        else:
-            print(f"  {status} {r.node_id} ({r.duration_ms}ms)")
-        # Persist per-node sync status.
-        try:
-            _fleet.update_sync_status(
-                r.node_id, status="ok" if r.ok else "failed",
-            )
-        except _fleet.FleetError:
-            pass
-    if not all_ok:
-        print("  (partial sync — re-run `s-vps fleet sync` to retry failed nodes)",
-              file=sys.stderr)
 
-    # Refresh the affected user's subscription file with multi-node URIs.
-    # Skipped when the affected user has no sub_token (legacy rows from
-    # pre-v0.6 panel installs that double-write didn't yet touch).
-    if affected_user and affected_user.get("sub_token"):
-        try:
-            from . import bot_core
-            from .subscription import write_subscription_file
+    # Fleet push — control box with registered data nodes only.
+    if nodes:
+        print()
+        print(f"Propagating to {len(nodes)} data node(s)...")
+        results = _fleet.sync_all(nodes, state.USERS_INDEX_PATH)
+        all_ok = True
+        for r in results:
+            status = "✓" if r.ok else "✗"
+            if not r.ok:
+                all_ok = False
+                detail = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+                print(f"  {status} {r.node_id} ({r.duration_ms}ms): {detail}")
+            else:
+                print(f"  {status} {r.node_id} ({r.duration_ms}ms)")
+            # Persist per-node sync status.
+            try:
+                _fleet.update_sync_status(
+                    r.node_id, status="ok" if r.ok else "failed",
+                )
+            except _fleet.FleetError:
+                pass
+        if not all_ok:
+            print("  (partial sync — re-run `s-vps fleet sync` to retry failed nodes)",
+                  file=sys.stderr)
+
+    # Refresh the affected user's subscription file — ALWAYS, single-node
+    # included. This is the write a single-node `s-vps user add` silently
+    # skipped before v0.12.1: it sat behind the fleet early-return above,
+    # so the sub URL 404'd and the onboarding deep-links/QR pointed at a
+    # dead bundle.
+    _refresh_subscription_file(affected_user, affected_label, nodes)
+
+
+def _refresh_subscription_file(
+    affected_user: dict[str, Any] | None,
+    affected_label: str | None,
+    nodes: list,
+) -> None:
+    """(Re)write `/var/lib/stealth-vps/subscriptions/<token>.txt` for the
+    affected user. Multi-node hosts emit N×P URIs (per node, per
+    protocol); single-node hosts build from this host's local state
+    files via `_local_uri_config`. Best-effort: a failure is reported but
+    never fails the mutation (the index write already succeeded).
+
+    Skipped when there's no affected user or it has no sub_token (e.g. a
+    purge — which deletes the file separately — or legacy pre-v0.6 rows
+    the panel double-write never touched).
+    """
+    if not (affected_user and affected_user.get("sub_token")):
+        return
+    try:
+        from . import bot_core
+        from .subscription import write_subscription_file
+        if nodes:
             uris = bot_core.build_uris_for_user_multinode(
                 affected_user, nodes, label=affected_label or "",
             )
-            if uris:
-                write_subscription_file(
-                    affected_user["sub_token"], uris,
-                )
-        except Exception as exc:  # noqa: BLE001 — best-effort
-            print(f"  (subscription file refresh skipped: {exc})", file=sys.stderr)
+        else:
+            uris = bot_core.build_uris_for_user(
+                affected_user, _local_uri_config(),
+            )
+        if uris:
+            write_subscription_file(affected_user["sub_token"], uris)
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        print(f"  (subscription file refresh skipped: {exc})", file=sys.stderr)
+
+
+def _local_uri_config(installer_env: Mapping[str, str] | None = None):
+    """Build this single host's `UriRenderConfig` from its `*.state.yml`
+    files + `installer.env`, for the single-node (no-fleet) subscription
+    bundle. Host resolution mirrors `_render_user_uris`
+    (STEALTH_DOMAIN / STEALTH_VPS_PUBLIC_HOST); the v0.11 protocols are
+    included when their state file is present on disk.
+    """
+    from . import bot_core
+    env = dict(installer_env if installer_env is not None else _load_installer_env())
+    host = (
+        env.get("STEALTH_DOMAIN")
+        or env.get("STEALTH_VPS_PUBLIC_HOST")
+        or "your.vps.example"
+    )
+    has_domain = bool(env.get("STEALTH_DOMAIN"))
+
+    def _try(path: str) -> dict[str, Any] | None:
+        try:
+            return load_state_file(path)
+        except ReloadError:
+            return None
+
+    return bot_core.uri_config_from_states(
+        public_host=host,
+        reality_state=_try(REALITY_STATE_PATH),
+        hysteria_state=_try(HYSTERIA_STATE_PATH),
+        ss2022_state=_try(SS2022_STATE_PATH),
+        xhttp_state=_try(XHTTP_STATE_PATH),
+        vmess_ws_state=_try(VMESS_WS_STATE_PATH),
+        trojan_state=_try(TROJAN_GO_STATE_PATH),
+        has_domain=has_domain,
+    )
 
 
 # ---------------------------------------------------------------------------

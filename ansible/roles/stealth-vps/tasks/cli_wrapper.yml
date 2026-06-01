@@ -102,6 +102,8 @@
       : "${STEALTH_BOT_ENABLED:={{ stealth_vps_bot_enabled | bool | ternary('true', 'false') }}}"
       : "${STEALTH_SUBSCRIPTION_ENABLED:={{ stealth_vps_subscription_enabled | bool | ternary('true', 'false') }}}"
       : "${STEALTH_SUBSCRIPTION_EXPOSE:={{ stealth_vps_subscription_expose | bool | ternary('true', 'false') }}}"
+      : "${STEALTH_TLS_EMAIL:={{ stealth_vps_tls_email | default('') }}}"
+      : "${STEALTH_ONBOARD_ENABLED:={{ stealth_vps_onboard_enabled | bool | ternary('true', 'false') }}}"
     dest: /etc/stealth-vps/installer.env
     owner: root
     group: root
