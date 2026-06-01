@@ -1,0 +1,71 @@
+---
+# Shadowsocks-2022 (SIP022) state generation. Idempotent: on first run
+# we pick a port + mint a server PSK; subsequent runs just slurp the
+# existing file.
+#
+# Persisted shape:
+#   port: 8543
+#   method: 2022-blake3-aes-128-gcm
+#   server_psk: <base64-16-or-32-bytes>
+#
+# `server_psk` length depends on `method`:
+#   aes-128-gcm → 16 bytes (22 chars base64)
+#   aes-256-gcm + chacha20-poly1305 → 32 bytes (44 chars base64)
+# We pick the right `openssl rand` size based on the configured method.
+
+- name: Probe existing ss2022 state
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/ss2022.state.yml"
+  register: stealth_vps_ss2022_state_stat
+  tags: [xray, ss2022]
+
+- name: Read existing ss2022 state from the remote
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/ss2022.state.yml"
+  register: stealth_vps_ss2022_state_raw
+  when: stealth_vps_ss2022_state_stat.stat.exists
+  tags: [xray, ss2022]
+
+- name: Set ss2022 state fact from slurped YAML
+  ansible.builtin.set_fact:
+    stealth_vps_ss2022_state: "{{ stealth_vps_ss2022_state_raw.content | b64decode | from_yaml }}"
+  when: stealth_vps_ss2022_state_stat.stat.exists
+  tags: [xray, ss2022]
+
+- name: Generate SS-2022 state (first run only)
+  when: not stealth_vps_ss2022_state_stat.stat.exists
+  tags: [xray, ss2022]
+  block:
+
+    - name: Compute PSK length from the chosen method
+      # aes-128-gcm → 16 bytes; aes-256-gcm / chacha20-poly1305 → 32.
+      # `openssl rand` takes byte count, then base64-encodes the bytes,
+      # giving us a key shape Xray's shadowsocks inbound accepts directly.
+      ansible.builtin.set_fact:
+        stealth_vps_ss2022_psk_bytes: >-
+          {{ 16 if stealth_vps_ss2022_method == '2022-blake3-aes-128-gcm' else 32 }}
+
+    - name: Generate server PSK via openssl rand
+      ansible.builtin.command:
+        cmd: "openssl rand -base64 {{ stealth_vps_ss2022_psk_bytes }}"
+      register: stealth_vps_ss2022_psk_raw
+      changed_when: false
+      no_log: true
+
+    - name: Compose new ss2022 state  # noqa: jinja[spacing]
+      ansible.builtin.set_fact:
+        stealth_vps_ss2022_state: "{{ {
+          'port': (range(stealth_vps_ss2022_port_min, stealth_vps_ss2022_port_max + 1) | random),
+          'method': stealth_vps_ss2022_method,
+          'server_psk': (stealth_vps_ss2022_psk_raw.stdout | trim),
+        } }}"
+      no_log: true
+
+    - name: Persist ss2022 state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_ss2022_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/ss2022.state.yml"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true

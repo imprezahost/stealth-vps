@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.10.0)
-- **Multi-node** — control plane pushes `users.index.json` over SSH to N data nodes, per-node Reality keys, subscription bundles include all-node URIs. ADR locked: push from control + per-node keys (operator decision recorded).
-
-### Planned (v0.11.0)
-- **Wireguard fallback** + Xray protocol additions (XHTTP, VMess+WS, Trojan-Go, SS-2022) gated on per-protocol enable flags.
-
 ### Planned (v0.12.0)
 - **Subscription bridge web UI** — `/.well-known/stealth-vps-onboard/<token>` detects user-agent and shows QR + deep-link for Hiddify Next / V2Box / NekoBox.
 
@@ -28,6 +22,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Signed releases (cosign + GPG).
 - External security audit.
+
+## [0.11.0] - 2026-05-20
+
+Thirty-first tagged release. **Five opt-in protocols.** Reality + Hysteria2 stay the default; v0.11 adds XHTTP, VMess+WS, Shadowsocks-2022, Trojan-Go, and WireGuard for the network conditions the two defaults don't cover (hard-DPI national networks, Cloudflare-fronted-only links, legacy clients, cipher-family diversity). Every protocol is off by default — flip a flag per host or per fleet node.
+
+`users.index.json` migrates schema v2 → v3 (auto-applied on load, persisted on next mutation — no operator action). Single-node v0.10 → v0.11 is a no-op feature-wise.
+
+Design doc: [`docs/internal/roadmap-v0.11-protocols.md`](docs/internal/roadmap-v0.11-protocols.md). Operator runbook: [`docs/protocols.md`](docs/protocols.md).
+
+### Added
+
+- **XHTTP (VLESS-over-XHTTP)** — `stealth_vps_xhttp_enabled`. Xray binds loopback; Caddy reverse-proxies the CDN-fronted `https://<domain>/<path>` to it. For Cloudflare-fronted networks. Reuses the user's Reality UUID (no separate per-user credential — ADR A1). Requires `subscription_expose: true` + a domain.
+- **VMess+WebSocket+TLS** — `stealth_vps_vmess_ws_enabled`. Legacy-compat for pre-2024 clients. Same Caddy-fronting model + Reality-UUID reuse. `vmess://` URI is base64-encoded JSON (v2rayN scheme).
+- **Shadowsocks-2022 (SIP022)** — `stealth_vps_ss2022_enabled`. Different cipher family; binds public TCP+UDP (no fronting). Per-user PSK auto-minted on `s-vps user add` (length matched to the cipher: 16 bytes for aes-128-gcm, 32 for the others), or `--ss2022-psk` to supply one. URI pre-concatenates server PSK + user PSK (ADR A2) for paste-and-go.
+- **Trojan-Go** — `stealth_vps_trojan_go_enabled`. Separate `trojan-go.service`, TLS-terminated (LE cert with a domain, Hysteria2 self-signed otherwise). Per-user password auto-minted or `--trojan-password`. **Upstream is in maintenance mode — deprecated target 2027** (ADR B1); prefer SS-2022/XHTTP for new deployments.
+- **WireGuard** — `stealth_vps_wireguard_enabled`. `wg-quick@stealth` + `wireguard-tools`. The "boring VPN" fallback for hard-DPI networks. Server mints each user a keypair on `s-vps user add` (ADR B4), allocates the next-free `/24` IP (ADR B3), stashes the privkey for delivery. **No URI** — `s-vps user wg-config <label>` prints the importable `.conf`. Single-node only (excluded from multi-node bundles — per-node servers would need per-node client identities).
+- **`stealth_vps.wireguard` module** — pure stdlib (keygen via `wg`, sequential IP allocation via `ipaddress`, server + client `.conf` rendering). **`stealth_vps.reloader`** gains `render_trojan_go_config` + a WireGuard server-conf render branch so `s-vps user add` propagates to both daemons.
+- **`s-vps user wg-config LABEL`** — render a user's WireGuard client config.
+- **Multi-node protocol discovery (Block C)** — `FleetNode` carries per-node protocol blocks; `s-vps fleet add` slurps the new state files; the subscription bundle emits per-node URIs for exactly the protocols each node serves (heterogeneous fleets are first-class). The control auto-mints a user's SS-2022 PSK / Trojan password when **any** fleet node runs that protocol. New `reality_enabled` gate fixes a Reality-less node (e.g. XHTTP-only CDN front) wrongly emitting `vless://host:0`.
+- **Health-exporter gauges** — `stealth_vps_{ss2022,xhttp,vmess_ws,trojan_go}_port_listening` + `trojan-go.service` / `wg-quick@stealth.service` unit-active. Molecule `multinode` scenario extended to a heterogeneous fleet (data-1 runs SS-2022, data-2 Reality-only) with discovery + autogen assertions.
+- **`docs/protocols.md`** — operator runbook for all five protocols.
+
+### Changed
+
+- **`users.index.json` schema v2 → v3** — four nullable per-user fields (`ss2022_psk`, `wireguard_pubkey`, `wireguard_client_ip`, `trojan_password`). Auto-migrated on load.
+- **`s-vps user add`** auto-mints per-protocol credentials when the protocol is enabled (local state file present, or — for SS-2022/Trojan on a control box — any fleet node runs it).
+- **Caddyfile** restructured so the public-TLS site adds reverse-proxy `handle` blocks for XHTTP + VMess+WS when enabled.
+- **bot.env** + the bot's `UriRenderConfig` carry the new protocols so `/user add` + `/sub` emit them in single-node mode.
+
+### Test counts
+
+424 (v0.10.0) → **517 pytest** (+93). Suite total: **536 automated tests** (517 pytest + 9 Python builder + 10 Go builder). New coverage: schema v3 migration, 4 URI builders, Xray inbound rendering parity, SS-2022/Trojan/WireGuard credential autogen, the WireGuard module (keygen/IP-allocation/conf-render), reloader trojan + wireguard branches, multi-node heterogeneous bundle + per-node server-PSK, health-exporter gauges.
 
 ## [0.10.0] - 2026-05-20
 

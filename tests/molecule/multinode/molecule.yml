@@ -109,6 +109,13 @@ provisioner:
         stealth_vps_panel_enabled: false
         stealth_vps_reality_enabled: true
         stealth_vps_hysteria_enabled: false   # B3 enabled-by-default elsewhere
+    host_vars:
+      stealth-vps-data-1:
+        # v0.11 Block C: heterogeneous fleet. data-1 ALSO terminates
+        # SS-2022 — the verify step asserts `fleet add` discovers it +
+        # the control mints a per-user PSK + the bundle carries ss://.
+        # data-2 stays Reality-only, proving per-node protocol mix.
+        stealth_vps_ss2022_enabled: true
 
 verifier:
   name: ansible

@@ -207,6 +207,38 @@
   when: stealth_vps_hysteria_enabled | bool
   tags: [bot]
 
+# v0.11.0+: load the optional protocol states so bot.env can hand the
+# bot the per-protocol URI params (ports, paths, ss2022 server PSK).
+# Gated on the enable flags; absent when the protocol isn't running.
+
+- name: Load SS-2022 state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/ss2022.state.yml"
+    name: stealth_vps_ss2022_state
+  when: stealth_vps_ss2022_enabled | default(false) | bool
+  tags: [bot]
+
+- name: Load XHTTP state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/xhttp.state.yml"
+    name: stealth_vps_xhttp_state
+  when: stealth_vps_xhttp_enabled | default(false) | bool
+  tags: [bot]
+
+- name: Load VMess+WS state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/vmess_ws.state.yml"
+    name: stealth_vps_vmess_ws_state
+  when: stealth_vps_vmess_ws_enabled | default(false) | bool
+  tags: [bot]
+
+- name: Load Trojan-Go state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/trojan_go.state.yml"
+    name: stealth_vps_trojan_go_state
+  when: stealth_vps_trojan_go_enabled | default(false) | bool
+  tags: [bot]
+
 - name: Render bot.env
   ansible.builtin.template:
     src: stealth-vps-bot.env.j2

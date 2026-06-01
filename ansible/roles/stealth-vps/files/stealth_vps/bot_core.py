@@ -46,7 +46,14 @@ from . import state
 from .backends import ThreeXUIBackend, ThreeXUIClient, UserBackend
 from .backends_headless import HeadlessBackend
 from .reloader import Reloader
-from .urivider import build_hysteria2_uri, build_vless_uri
+from .urivider import (
+    build_hysteria2_uri,
+    build_vless_uri,
+    build_ss2022_uri,
+    build_trojan_uri,
+    build_vmess_ws_uri,
+    build_xhttp_uri,
+)
 
 
 log = logging.getLogger("stealth_vps.bot_core")
@@ -221,6 +228,12 @@ class UriRenderConfig:
     """Per-protocol settings needed to render per-user URIs. The bot
     fills these from its env vars at startup; tests pass them directly
     in fixtures.
+
+    v0.11.0+ adds XHTTP / VMess+WS / SS-2022 / Trojan fields. Each is
+    OFF by default — the URI builder skips that protocol's URI unless
+    its `*_enabled` flag is true AND the per-user record has the
+    required credential (UUID for XHTTP/VMess from `reality_uuid`,
+    `ss2022_psk` for SS-2022, `trojan_password` for Trojan).
     """
 
     public_host: str
@@ -231,6 +244,11 @@ class UriRenderConfig:
     reality_fingerprint: str = "chrome"
     reality_flow: str = "xtls-rprx-vision"
     reality_remark: str = "stealth-vps-reality"
+    # Defaults True so single-node callers (which always run Reality)
+    # keep emitting the Reality URI without setting this. Multi-node
+    # sets it False for a Reality-less node (e.g. an XHTTP-only CDN
+    # front) so the bundle doesn't carry a bogus vless://host:0 entry.
+    reality_enabled: bool = True
     hysteria_enabled: bool = False
     hysteria_port: int = 0
     hysteria_sni: str = ""
@@ -241,35 +259,69 @@ class UriRenderConfig:
     hysteria_port_hop_min: int | None = None
     hysteria_port_hop_max: int | None = None
 
+    # v0.11.0+ — XHTTP (VLESS-over-XHTTP behind CDN front).
+    xhttp_enabled: bool = False
+    xhttp_port: int = 0
+    xhttp_path: str = ""
+    xhttp_host_header: str = ""
+    xhttp_sni: str = ""
+    xhttp_remark: str = "stealth-vps-xhttp"
+
+    # v0.11.0+ — VMess+WebSocket+TLS (legacy-compat path behind Caddy).
+    vmess_ws_enabled: bool = False
+    vmess_ws_port: int = 0
+    vmess_ws_path: str = ""
+    vmess_ws_host_header: str = ""
+    vmess_ws_sni: str = ""
+    vmess_ws_remark: str = "stealth-vps-vmess-ws"
+
+    # v0.11.0+ — Shadowsocks-2022 (SIP022).
+    ss2022_enabled: bool = False
+    ss2022_port: int = 0
+    ss2022_method: str = "2022-blake3-aes-128-gcm"
+    ss2022_server_psk: str = ""
+    ss2022_remark: str = "stealth-vps-ss2022"
+
+    # v0.11.0+ — Trojan-Go (separate daemon; URI shape lives here for
+    # parity with the others — wiring lands in Block B).
+    trojan_enabled: bool = False
+    trojan_port: int = 0
+    trojan_sni: str = ""
+    trojan_insecure: bool = False
+    trojan_remark: str = "stealth-vps-trojan"
+
 
 def build_uris_for_user(
     rec: Mapping[str, Any], uri_config: UriRenderConfig
 ) -> list[str]:
     """Return the list of connection URIs for a user record.
 
-    Output:
-      [0] always: VLESS-Reality URI
-      [1] when hysteria_enabled AND rec has a hysteria_password:
-          Hysteria2 URI (with port-hop range when configured, insecure
-          flag when no domain is set)
+    Output (each entry present only when its protocol is enabled +
+    the user has the matching credential):
+      - VLESS-Reality URI (when reality_enabled — True by default for
+        single-node; False for a Reality-less multi-node data node)
+      - Hysteria2 URI (hysteria_enabled AND hysteria_password)
+      - XHTTP / VMess+WS / SS-2022 / Trojan URIs (v0.11.0+)
 
     Headless-mode callers pass per-user hysteria_password (from
     HeadlessBackend.add's random gen). Panel-mode callers pass the
     shared seed password — same shape from this function's POV.
     """
-    uris = [
-        build_vless_uri(
-            uuid=rec["reality_uuid"],
-            host=uri_config.public_host,
-            port=uri_config.reality_port,
-            sni=uri_config.reality_sni,
-            public_key=uri_config.reality_pubkey,
-            short_id=uri_config.reality_short_id,
-            fingerprint=uri_config.reality_fingerprint,
-            flow=uri_config.reality_flow,
-            remark=uri_config.reality_remark,
+    uris: list[str] = []
+    if uri_config.reality_enabled and rec.get("reality_uuid"):
+        uris.append(
+            build_vless_uri(
+                uuid=rec["reality_uuid"],
+                host=uri_config.public_host,
+                port=uri_config.reality_port,
+                sni=uri_config.reality_sni,
+                public_key=uri_config.reality_pubkey,
+                short_id=uri_config.reality_short_id,
+                fingerprint=uri_config.reality_fingerprint,
+                flow=uri_config.reality_flow,
+                remark=uri_config.reality_remark,
+            )
         )
-    ]
     if uri_config.hysteria_enabled and rec.get("hysteria_password"):
         port_hop: tuple[int, int] | None = None
         if uri_config.hysteria_port_hop_min and uri_config.hysteria_port_hop_max:
@@ -290,6 +342,65 @@ def build_uris_for_user(
                 remark=uri_config.hysteria_remark,
             )
         )
+
+    # v0.11.0+ — XHTTP (uses Reality UUID per Open Question A1 default).
+    if uri_config.xhttp_enabled and rec.get("reality_uuid"):
+        uris.append(
+            build_xhttp_uri(
+                uuid=rec["reality_uuid"],
+                host=uri_config.public_host,
+                port=uri_config.xhttp_port,
+                path=uri_config.xhttp_path,
+                host_header=uri_config.xhttp_host_header,
+                sni=uri_config.xhttp_sni,
+                fingerprint=uri_config.reality_fingerprint,
+                remark=uri_config.xhttp_remark,
+            )
+        )
+
+    # v0.11.0+ — VMess+WS (uses Reality UUID per Open Question A1 default).
+    if uri_config.vmess_ws_enabled and rec.get("reality_uuid"):
+        uris.append(
+            build_vmess_ws_uri(
+                uuid=rec["reality_uuid"],
+                host=uri_config.public_host,
+                port=uri_config.vmess_ws_port,
+                ws_path=uri_config.vmess_ws_path,
+                host_header=uri_config.vmess_ws_host_header,
+                sni=uri_config.vmess_ws_sni,
+                remark=uri_config.vmess_ws_remark,
+            )
+        )
+
+    # v0.11.0+ — SS-2022. Per-user PSK; pre-concatenated with server PSK
+    # at render time per Open Question A2.
+    if uri_config.ss2022_enabled and rec.get("ss2022_psk"):
+        uris.append(
+            build_ss2022_uri(
+                server_psk=uri_config.ss2022_server_psk,
+                user_psk=rec["ss2022_psk"],
+                host=uri_config.public_host,
+                port=uri_config.ss2022_port,
+                method=uri_config.ss2022_method,
+                remark=uri_config.ss2022_remark,
+            )
+        )
+
+    # v0.11.0+ — Trojan-Go (separate daemon; URI shape lives here for
+    # parity. The CONFIG wiring for the daemon lands in Block B).
+    if uri_config.trojan_enabled and rec.get("trojan_password"):
+        uris.append(
+            build_trojan_uri(
+                password=rec["trojan_password"],
+                host=uri_config.public_host,
+                port=uri_config.trojan_port,
+                sni=uri_config.trojan_sni,
+                fingerprint=uri_config.reality_fingerprint,
+                allow_insecure=uri_config.trojan_insecure,
+                remark=uri_config.trojan_remark,
+            )
+        )
+
     return uris
 
 
@@ -327,23 +438,51 @@ def uri_config_from_node(node: "FleetNode") -> UriRenderConfig:  # noqa: F821
     `hysteria_enabled` is set to True only when the node has a hysteria
     port — single-protocol data nodes (Reality-only) emit one URI per
     user, not two.
+
+    v0.11.0+ per-protocol blocks (XHTTP / VMess+WS / SS-2022 / Trojan)
+    are each enabled only when the node terminates them (port > 0,
+    discovered by `fleet add`). A heterogeneous fleet — say tokyo-1
+    runs Reality+Hysteria+SS-2022 while cdn-1 runs only XHTTP — yields
+    a bundle with exactly the URIs each node actually serves.
     """
     sni = (
         node.reality_servernames[0]
         if node.reality_servernames
         else node.public_endpoint
     )
+    endpoint = node.public_endpoint
+    no_domain = not node.domain
     return UriRenderConfig(
-        public_host=node.public_endpoint,
+        public_host=endpoint,
+        reality_enabled=node.reality_port > 0,
         reality_port=node.reality_port,
         reality_sni=sni,
         reality_pubkey=node.reality_public_key,
         reality_short_id=node.reality_short_id,
         hysteria_enabled=node.hysteria_port > 0,
         hysteria_port=node.hysteria_port,
-        hysteria_sni=node.public_endpoint,
+        hysteria_sni=endpoint,
         hysteria_obfs_password=node.hysteria_obfs_password,
-        hysteria_insecure=(not node.domain),
+        hysteria_insecure=no_domain,
+        # v0.11.0+ — each protocol on iff the node has a port for it.
+        xhttp_enabled=node.xhttp_port > 0,
+        xhttp_port=node.xhttp_port,
+        xhttp_path=node.xhttp_path,
+        xhttp_host_header=endpoint,
+        xhttp_sni=(node.domain or endpoint),
+        vmess_ws_enabled=node.vmess_ws_port > 0,
+        vmess_ws_port=node.vmess_ws_port,
+        vmess_ws_path=node.vmess_ws_path,
+        vmess_ws_host_header=endpoint,
+        vmess_ws_sni=(node.domain or endpoint),
+        ss2022_enabled=node.ss2022_port > 0,
+        ss2022_port=node.ss2022_port,
+        ss2022_method=(node.ss2022_method or "2022-blake3-aes-128-gcm"),
+        ss2022_server_psk=node.ss2022_server_psk,
+        trojan_enabled=node.trojan_port > 0,
+        trojan_port=node.trojan_port,
+        trojan_sni=(node.domain or endpoint),
+        trojan_insecure=no_domain,
     )
 
 
@@ -370,12 +509,16 @@ def build_uris_for_user_multinode(
     uris: list[str] = []
     for node in nodes:
         cfg = uri_config_from_node(node)
-        if label:
-            cfg.reality_remark = f"stealth-vps-reality-{label}-{node.node_id}"
-            cfg.hysteria_remark = f"stealth-vps-hysteria2-{label}-{node.node_id}"
-        else:
-            cfg.reality_remark = f"stealth-vps-reality-{node.node_id}"
-            cfg.hysteria_remark = f"stealth-vps-hysteria2-{node.node_id}"
+        # Per-node remark suffix so a client importing the bundle sees
+        # one labelled profile per (protocol, node). Suffix is
+        # `-<label>-<node_id>` when a label is given, else `-<node_id>`.
+        suffix = f"-{label}-{node.node_id}" if label else f"-{node.node_id}"
+        cfg.reality_remark = f"stealth-vps-reality{suffix}"
+        cfg.hysteria_remark = f"stealth-vps-hysteria2{suffix}"
+        cfg.xhttp_remark = f"stealth-vps-xhttp{suffix}"
+        cfg.vmess_ws_remark = f"stealth-vps-vmess-ws{suffix}"
+        cfg.ss2022_remark = f"stealth-vps-ss2022{suffix}"
+        cfg.trojan_remark = f"stealth-vps-trojan{suffix}"
         uris.extend(build_uris_for_user(rec, cfg))
     return uris
 

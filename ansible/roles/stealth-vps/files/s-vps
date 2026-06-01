@@ -65,11 +65,14 @@ Usage:
 User management (v0.7+):
   s-vps user add LABEL [--ttl D] Add a user to users.index.json, SIGHUP services.
                                  --ttl sets a subscription expiry (e.g. 30d).
+                                 Auto-mints per-protocol creds (SS-2022 PSK,
+                                 Trojan password, WireGuard key) when enabled.
   s-vps user revoke LABEL        Disable a user (does not delete the record).
   s-vps user purge LABEL         Hard-delete a user (idempotent). v0.8+.
   s-vps user rotate LABEL        Re-issue creds preserving created_at. v0.8+.
   s-vps user list [--json]       List users in the index.
   s-vps user show LABEL [--qr]   Show one user's URIs + sub URL.
+  s-vps user wg-config LABEL     Print a user's WireGuard client .conf. v0.11+.
 
 Subscription TTL (v0.9+):
   s-vps sub renew LABEL --ttl D  Set/bump a user's subscription expiry.

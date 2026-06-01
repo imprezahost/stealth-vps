@@ -231,6 +231,9 @@ def render_xray_config(
     reality_dest: str = "www.cloudflare.com:443",
     reality_servernames: Iterable[str] = ("www.cloudflare.com",),
     reality_flow: str = "xtls-rprx-vision",
+    ss2022_state: Mapping[str, Any] | None = None,
+    xhttp_state: Mapping[str, Any] | None = None,
+    vmess_ws_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Xray `config.json` dict from reality state + the user
     list. The shape matches templates/xray-config.json.j2 byte-for-byte
@@ -242,20 +245,40 @@ def render_xray_config(
     Empty `users` list raises ReloadError: Xray will fail to start with
     `clients: []`, so we'd rather get a Python exception we can log
     than a service crash-loop.
+
+    v0.11.0+ optional state args. When None, the matching inbound is
+    NOT emitted — output is byte-identical to v0.10 in the all-None
+    case. When non-None, the inbound is appended to `inbounds[]`:
+
+      `ss2022_state` shape: {port: int, method: str, server_psk: str}
+      `xhttp_state`   shape: {port: int, path: str}
+      `vmess_ws_state` shape: {port: int, path: str}
+
+    Per Open Question A1, XHTTP + VMess+WS reuse the per-user
+    reality_uuid — no new per-user field on the user record. SS-2022
+    needs `ss2022_psk` per user; users with `ss2022_psk = None` are
+    skipped from the SS-2022 clients list (no error — operator can
+    backfill them via `update_user`).
     """
-    clients: list[dict[str, Any]] = []
-    for label, rec in users:
+    # Materialise users once — we may walk the list 4× (Reality + XHTTP
+    # + VMess+WS + SS-2022) so an iterator would exhaust after the
+    # first pass. tuple() also stabilises ordering across protocol
+    # inbounds so the rendered config is deterministic.
+    users_list = list(users)
+
+    reality_clients: list[dict[str, Any]] = []
+    for label, rec in users_list:
         uuid = rec.get("reality_uuid")
         if not uuid:
             raise ReloadError(f"user {label!r} missing reality_uuid in index")
-        clients.append(
+        reality_clients.append(
             {
                 "id": uuid,
                 "email": label,
                 "flow": reality_flow,
             }
         )
-    if not clients:
+    if not reality_clients:
         raise ReloadError(
             "render_xray_config got an empty user list — Xray won't start with no clients. "
             "Check that the index has at least one enabled user."
@@ -268,38 +291,57 @@ def render_xray_config(
     except (KeyError, TypeError, ValueError) as exc:
         raise ReloadError(f"reality state missing required fields: {exc}") from exc
 
+    inbounds: list[dict[str, Any]] = [
+        {
+            "tag": "reality-in",
+            "listen": "0.0.0.0",
+            "port": port,
+            "protocol": "vless",
+            "settings": {
+                "clients": reality_clients,
+                "decryption": "none",
+            },
+            "streamSettings": {
+                "network": "tcp",
+                "security": "reality",
+                "realitySettings": {
+                    "show": False,
+                    "xver": 0,
+                    "dest": reality_dest,
+                    "serverNames": list(reality_servernames),
+                    "privateKey": private_key,
+                    "shortIds": [short_id],
+                },
+            },
+            "sniffing": {
+                "enabled": True,
+                "destOverride": ["http", "tls", "quic"],
+                "metadataOnly": False,
+                "routeOnly": False,
+            },
+        }
+    ]
+
+    # v0.11.0+ inbounds (append in a fixed order: xhttp, vmess_ws,
+    # ss2022 — alphabetic on tag for output stability).
+
+    if ss2022_state is not None:
+        inbounds.append(_render_ss2022_inbound(ss2022_state, users_list))
+
+    if vmess_ws_state is not None:
+        inbounds.append(_render_vmess_ws_inbound(vmess_ws_state, users_list))
+
+    if xhttp_state is not None:
+        inbounds.append(_render_xhttp_inbound(xhttp_state, users_list))
+
+    # Sort inbounds by tag — molecule's idempotence test relies on
+    # repeated runs producing identical bytes regardless of which
+    # protocols are enabled in which order.
+    inbounds.sort(key=lambda i: i["tag"])
+
     return {
         "log": {"loglevel": "warning"},
-        "inbounds": [
-            {
-                "tag": "reality-in",
-                "listen": "0.0.0.0",
-                "port": port,
-                "protocol": "vless",
-                "settings": {
-                    "clients": clients,
-                    "decryption": "none",
-                },
-                "streamSettings": {
-                    "network": "tcp",
-                    "security": "reality",
-                    "realitySettings": {
-                        "show": False,
-                        "xver": 0,
-                        "dest": reality_dest,
-                        "serverNames": list(reality_servernames),
-                        "privateKey": private_key,
-                        "shortIds": [short_id],
-                    },
-                },
-                "sniffing": {
-                    "enabled": True,
-                    "destOverride": ["http", "tls", "quic"],
-                    "metadataOnly": False,
-                    "routeOnly": False,
-                },
-            }
-        ],
+        "inbounds": inbounds,
         "outbounds": [
             {"protocol": "freedom", "tag": "direct"},
             {"protocol": "blackhole", "tag": "blocked"},
@@ -313,6 +355,152 @@ def render_xray_config(
                     "outboundTag": "blocked",
                 }
             ],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# v0.11.0+ inbound renderers
+# ---------------------------------------------------------------------------
+#
+# Each takes the protocol's state dict (loaded from /etc/stealth-vps/
+# <proto>.state.yml) + the same users_list as the Reality renderer.
+# Output: one inbound dict the parent `render_xray_config` appends to
+# the inbounds[] list.
+#
+# Listen address: loopback for XHTTP + VMess+WS (Caddy fronts), 0.0.0.0
+# for SS-2022 (no fronting — direct UDP/TCP).
+
+
+def _render_xhttp_inbound(
+    xhttp_state: Mapping[str, Any],
+    users_list: list[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """VLESS-over-XHTTP inbound. Reuses Reality UUIDs per Open Question
+    A1; no `flow` (XHTTP doesn't carry XTLS Vision). TLS is terminated
+    by Caddy in front, so this inbound's `security` is "none"."""
+    try:
+        port = int(xhttp_state["port"])
+        path = str(xhttp_state["path"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"xhttp state missing required fields: {exc}") from exc
+
+    clients = [
+        {"id": str(rec["reality_uuid"]), "email": label}
+        for label, rec in users_list
+        if rec.get("reality_uuid")
+    ]
+    return {
+        "tag": "xhttp-in",
+        "listen": "127.0.0.1",
+        "port": port,
+        "protocol": "vless",
+        "settings": {
+            "clients": clients,
+            "decryption": "none",
+        },
+        "streamSettings": {
+            "network": "xhttp",
+            "security": "none",
+            "xhttpSettings": {
+                "path": path,
+                "host": "",
+                "mode": "auto",
+            },
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls"],
+            "metadataOnly": False,
+            "routeOnly": False,
+        },
+    }
+
+
+def _render_vmess_ws_inbound(
+    vmess_ws_state: Mapping[str, Any],
+    users_list: list[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """VMess-over-WebSocket inbound. Reuses Reality UUIDs (Open Q A1).
+    TLS at Caddy; this inbound is `security: none`. alterId=0 is the
+    modern default (pre-2022 setups used 64)."""
+    try:
+        port = int(vmess_ws_state["port"])
+        path = str(vmess_ws_state["path"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"vmess_ws state missing required fields: {exc}") from exc
+
+    clients = [
+        {"id": str(rec["reality_uuid"]), "email": label, "alterId": 0}
+        for label, rec in users_list
+        if rec.get("reality_uuid")
+    ]
+    return {
+        "tag": "vmess-ws-in",
+        "listen": "127.0.0.1",
+        "port": port,
+        "protocol": "vmess",
+        "settings": {
+            "clients": clients,
+        },
+        "streamSettings": {
+            "network": "ws",
+            "security": "none",
+            "wsSettings": {
+                "path": path,
+                "headers": {"Host": ""},
+            },
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls"],
+            "metadataOnly": False,
+            "routeOnly": False,
+        },
+    }
+
+
+def _render_ss2022_inbound(
+    ss2022_state: Mapping[str, Any],
+    users_list: list[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Shadowsocks-2022 (SIP022) inbound. Multi-user via clients[];
+    server PSK is the inbound-level secret, per-user PSK is each
+    client's secret. Users with `ss2022_psk = None` are skipped —
+    they get no SS-2022 access (operator backfills later)."""
+    try:
+        port = int(ss2022_state["port"])
+        method = str(ss2022_state["method"])
+        server_psk = str(ss2022_state["server_psk"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"ss2022 state missing required fields: {exc}") from exc
+
+    clients = [
+        {"password": str(rec["ss2022_psk"]), "email": label}
+        for label, rec in users_list
+        if rec.get("ss2022_psk")
+    ]
+    # Empty clients[] is allowed by Xray's shadowsocks-2022 inbound —
+    # only the server PSK is required for the listener to start. But
+    # the inbound becomes useless (no per-user auth). Operator added
+    # the protocol but no user yet has a PSK; render anyway so the
+    # listener is up; URIs simply won't be generated.
+    return {
+        "tag": "ss2022-in",
+        "listen": "0.0.0.0",
+        "port": port,
+        "protocol": "shadowsocks",
+        "settings": {
+            "method": method,
+            "password": server_psk,
+            "clients": clients,
+            "network": "tcp,udp",
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": False,
+            "routeOnly": False,
         },
     }
 
@@ -435,6 +623,71 @@ def render_hysteria_config_text(*args: Any, **kwargs: Any) -> str:
     return json.dumps(cfg, indent=2, sort_keys=True)
 
 
+# --- trojan-go (v0.11.0+) -----------------------------------------------
+
+
+def render_trojan_go_config(
+    trojan_state: Mapping[str, Any],
+    users: Iterable[tuple[str, Mapping[str, Any]]],
+    *,
+    tls_cert: str,
+    tls_key: str,
+    sni: str = "",
+    fallback_addr: str = "127.0.0.1",
+    fallback_port: int = 80,
+) -> dict[str, Any]:
+    """Build the Trojan-Go server config dict (config.json, server mode).
+
+    Trojan-Go's multi-user auth is a flat `password` array — every
+    user's `trojan_password` from the index. Users with a None password
+    (migrated pre-v0.11, or never issued Trojan creds) are skipped.
+
+    `remote_addr`/`remote_port` is the active-probe fallback: a
+    connection that doesn't present a valid password is transparently
+    proxied there, exactly like Reality's `dest`. Defaults to a local
+    web server on :80; operators front it with a real masquerade.
+
+    Empty password list is allowed by Trojan-Go (the listener starts but
+    rejects everyone) — same "enabled but no users yet" tolerance as the
+    SS-2022 inbound. The URI builder simply emits no trojan:// entries
+    until a user gets a password.
+    """
+    try:
+        port = int(trojan_state["port"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"trojan_go state missing required fields: {exc}") from exc
+
+    passwords = [
+        str(rec["trojan_password"])
+        for _label, rec in users
+        if rec.get("trojan_password")
+    ]
+
+    return {
+        "run_type": "server",
+        "local_addr": "0.0.0.0",
+        "local_port": port,
+        "remote_addr": fallback_addr,
+        "remote_port": int(fallback_port),
+        "password": passwords,
+        "ssl": {
+            "cert": tls_cert,
+            "key": tls_key,
+            "sni": sni,
+            # fallback when SNI mismatches — same anti-probe story.
+            "fallback_addr": fallback_addr,
+            "fallback_port": int(fallback_port),
+        },
+    }
+
+
+def render_trojan_go_config_text(*args: Any, **kwargs: Any) -> str:
+    """`render_trojan_go_config` + deterministic JSON dump. Same
+    sort_keys parity contract as the xray + hysteria renderers so the
+    Ansible seed template and the reloader emit byte-identical files."""
+    return json.dumps(render_trojan_go_config(*args, **kwargs), indent=2, sort_keys=True)
+
+
 # --- systemctl wrapper --------------------------------------------------
 
 
@@ -525,6 +778,13 @@ class Reloader:
         reality_dest: str = "www.cloudflare.com:443",
         reality_servernames: Iterable[str] = ("www.cloudflare.com",),
         reality_flow: str = "xtls-rprx-vision",
+        # v0.11.0+ — optional per-protocol state file paths. When None,
+        # the matching inbound is not emitted (single-protocol Reality
+        # behaviour preserved). When set, the file must exist on disk
+        # or `reload_all` raises ReloadError before any write.
+        ss2022_state_path: str | None = None,
+        xhttp_state_path: str | None = None,
+        vmess_ws_state_path: str | None = None,
         # hysteria
         hysteria_enabled: bool = False,
         hysteria_state_path: str = HYSTERIA_STATE_PATH,
@@ -538,6 +798,21 @@ class Reloader:
         hysteria_bandwidth_up: str = "100 mbps",
         hysteria_bandwidth_down: str = "100 mbps",
         hysteria_metrics_enabled: bool = False,
+        # v0.11.0+ Block B — Trojan-Go (separate daemon).
+        trojan_enabled: bool = False,
+        trojan_state_path: str = "/etc/stealth-vps/trojan_go.state.yml",
+        trojan_config_path: str = "/etc/trojan-go/config.json",
+        trojan_service: str = "trojan-go.service",
+        trojan_group: str | None = None,
+        trojan_tls_cert: str = "",
+        trojan_tls_key: str = "",
+        trojan_sni: str = "",
+        # v0.11.0+ Block B — WireGuard (kernel + wg-quick).
+        wireguard_enabled: bool = False,
+        wireguard_state_path: str = "/etc/stealth-vps/wireguard.state.yml",
+        wireguard_conf_path: str = "/etc/wireguard/stealth.conf",
+        wireguard_service: str = "wg-quick@stealth.service",
+        wireguard_subnet: str = "10.99.0.0/24",
         # control
         dry_run: bool = False,
         use_sudo: bool = False,
@@ -552,6 +827,10 @@ class Reloader:
         self.reality_dest = reality_dest
         self.reality_servernames = tuple(reality_servernames)
         self.reality_flow = reality_flow
+        # v0.11.0+
+        self.ss2022_state_path = ss2022_state_path
+        self.xhttp_state_path = xhttp_state_path
+        self.vmess_ws_state_path = vmess_ws_state_path
         # hysteria
         self.hysteria_enabled = hysteria_enabled
         self.hysteria_state_path = hysteria_state_path
@@ -565,6 +844,21 @@ class Reloader:
         self.hysteria_bandwidth_up = hysteria_bandwidth_up
         self.hysteria_bandwidth_down = hysteria_bandwidth_down
         self.hysteria_metrics_enabled = hysteria_metrics_enabled
+        # trojan-go (v0.11.0+)
+        self.trojan_enabled = trojan_enabled
+        self.trojan_state_path = trojan_state_path
+        self.trojan_config_path = trojan_config_path
+        self.trojan_service = trojan_service
+        self.trojan_group = trojan_group
+        self.trojan_tls_cert = trojan_tls_cert
+        self.trojan_tls_key = trojan_tls_key
+        self.trojan_sni = trojan_sni
+        # wireguard (v0.11.0+)
+        self.wireguard_enabled = wireguard_enabled
+        self.wireguard_state_path = wireguard_state_path
+        self.wireguard_conf_path = wireguard_conf_path
+        self.wireguard_service = wireguard_service
+        self.wireguard_subnet = wireguard_subnet
         # control
         self.dry_run = dry_run
         self.use_sudo = use_sudo
@@ -587,12 +881,37 @@ class Reloader:
         xray_text: str | None = None
         if self.reality_enabled:
             reality_state = load_state_file(self.reality_state_path)
+            # v0.11.0+ — load optional per-protocol states. Each is
+            # `None` when the operator hasn't enabled that protocol, so
+            # render_xray_config skips its inbound entirely. Loading
+            # eagerly here (vs lazily inside render_xray_config) keeps
+            # the "fail before any write" property — a corrupt
+            # ss2022.state.yml aborts the whole reload, doesn't leave
+            # us with a half-rendered Xray config.
+            ss2022_state = (
+                load_state_file(self.ss2022_state_path)
+                if self.ss2022_state_path
+                else None
+            )
+            xhttp_state = (
+                load_state_file(self.xhttp_state_path)
+                if self.xhttp_state_path
+                else None
+            )
+            vmess_ws_state = (
+                load_state_file(self.vmess_ws_state_path)
+                if self.vmess_ws_state_path
+                else None
+            )
             xray_text = render_xray_config_text(
                 reality_state,
                 users,
                 reality_dest=self.reality_dest,
                 reality_servernames=self.reality_servernames,
                 reality_flow=self.reality_flow,
+                ss2022_state=ss2022_state,
+                xhttp_state=xhttp_state,
+                vmess_ws_state=vmess_ws_state,
             )
 
         # --- hysteria ---------------------------------------------------
@@ -610,6 +929,51 @@ class Reloader:
                 bandwidth_down=self.hysteria_bandwidth_down,
                 metrics_enabled=self.hysteria_metrics_enabled,
             )
+
+        # --- trojan-go (v0.11.0+) ---------------------------------------
+        trojan_text: str | None = None
+        if self.trojan_enabled:
+            trojan_state = load_state_file(self.trojan_state_path)
+            trojan_text = render_trojan_go_config_text(
+                trojan_state,
+                users,
+                tls_cert=self.trojan_tls_cert,
+                tls_key=self.trojan_tls_key,
+                sni=self.trojan_sni,
+            )
+
+        # --- wireguard (v0.11.0+) ---------------------------------------
+        # The server conf is rendered from the index: every user with a
+        # wireguard_pubkey + wireguard_client_ip becomes a [Peer]. Users
+        # without those fields (no WG creds issued) are skipped. The
+        # wireguard module owns the rendering — the reloader just feeds
+        # it the server keypair/port from wireguard.state.yml + the peer
+        # tuples from the index.
+        wg_text: str | None = None
+        if self.wireguard_enabled:
+            from . import wireguard as _wg
+            wg_state = load_state_file(self.wireguard_state_path)
+            try:
+                wg_priv = str(wg_state["private_key"])
+                wg_port = int(wg_state["port"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ReloadError(
+                    f"wireguard state missing required fields: {exc}"
+                ) from exc
+            peers = [
+                (label, str(rec["wireguard_pubkey"]), str(rec["wireguard_client_ip"]))
+                for label, rec in users
+                if rec.get("wireguard_pubkey") and rec.get("wireguard_client_ip")
+            ]
+            try:
+                wg_text = _wg.render_server_conf(
+                    server_private_key=wg_priv,
+                    listen_port=wg_port,
+                    subnet=self.wireguard_subnet,
+                    peers=peers,
+                )
+            except _wg.WireGuardError as exc:
+                raise ReloadError(f"wireguard render failed: {exc}") from exc
 
         # --- writes -----------------------------------------------------
         # All renders succeeded; safe to commit to disk now.
@@ -635,6 +999,25 @@ class Reloader:
                 self.hysteria_per_user,
                 len(users),
             )
+
+        if trojan_text is not None:
+            _write_atomic(
+                self.trojan_config_path,
+                trojan_text,
+                mode=0o640,
+                group=self.trojan_group,
+            )
+            log.info("rendered %s (%d users)", self.trojan_config_path, len(users))
+
+        if wg_text is not None:
+            # WG conf holds the server private key — mode 0600, no group.
+            _write_atomic(
+                self.wireguard_conf_path,
+                wg_text,
+                mode=0o600,
+                group=None,
+            )
+            log.info("rendered %s", self.wireguard_conf_path)
 
         # --- reloads ----------------------------------------------------
         # Both services use `restart` (not `reload`) because neither
@@ -663,6 +1046,30 @@ class Reloader:
         if hy_text is not None:
             reload_service(
                 self.hysteria_service,
+                dry_run=self.dry_run,
+                mode="restart",
+                use_sudo=self.use_sudo,
+            )
+        if trojan_text is not None:
+            # Trojan-Go, like Hysteria, treats SIGHUP as graceful-stop
+            # (no real hot reload upstream) — use restart. Sub-second
+            # cutover; clients reconnect on their retry loop.
+            reload_service(
+                self.trojan_service,
+                dry_run=self.dry_run,
+                mode="restart",
+                use_sudo=self.use_sudo,
+            )
+        if wg_text is not None:
+            # WireGuard DOES support hot reload via `wg syncconf`, which
+            # applies peer changes without tearing down live tunnels.
+            # The Ansible-side reload uses a `wg syncconf` pipeline;
+            # here in the Python reloader we restart wg-quick@stealth
+            # (simpler + correct — a brief tunnel blip vs. the syncconf
+            # shell gymnastics). A future optimisation can wire the
+            # syncconf path through reload_service with mode="reload".
+            reload_service(
+                self.wireguard_service,
                 dry_run=self.dry_run,
                 mode="restart",
                 use_sudo=self.use_sudo,
@@ -723,6 +1130,28 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
     p.add_argument("--hysteria-bandwidth-up", default="100 mbps")
     p.add_argument("--hysteria-bandwidth-down", default="100 mbps")
     p.add_argument("--hysteria-metrics-enabled", type=_bool_flag, default=False)
+    # v0.11.0+ — optional per-protocol state paths. Empty string =
+    # protocol not enabled on this host → inbound NOT emitted. Path =
+    # state file location, loaded eagerly so corrupt files fail-fast
+    # before we touch any on-disk config.
+    p.add_argument("--ss2022-state-path", default="")
+    p.add_argument("--xhttp-state-path", default="")
+    p.add_argument("--vmess-ws-state-path", default="")
+    # v0.11.0+ Block B — Trojan-Go (separate daemon).
+    p.add_argument("--trojan-enabled", type=_bool_flag, default=False)
+    p.add_argument("--trojan-state-path", default="/etc/stealth-vps/trojan_go.state.yml")
+    p.add_argument("--trojan-config-path", default="/etc/trojan-go/config.json")
+    p.add_argument("--trojan-service", default="trojan-go.service")
+    p.add_argument("--trojan-group", default="")
+    p.add_argument("--trojan-tls-cert", default="")
+    p.add_argument("--trojan-tls-key", default="")
+    p.add_argument("--trojan-sni", default="")
+    # v0.11.0+ Block B — WireGuard (kernel + wg-quick).
+    p.add_argument("--wireguard-enabled", type=_bool_flag, default=False)
+    p.add_argument("--wireguard-state-path", default="/etc/stealth-vps/wireguard.state.yml")
+    p.add_argument("--wireguard-conf-path", default="/etc/wireguard/stealth.conf")
+    p.add_argument("--wireguard-service", default="wg-quick@stealth.service")
+    p.add_argument("--wireguard-subnet", default="10.99.0.0/24")
     # control
     p.add_argument(
         "--dry-run",
@@ -768,6 +1197,22 @@ def main(argv: list[str] | None = None) -> int:
         hysteria_bandwidth_up=args.hysteria_bandwidth_up,
         hysteria_bandwidth_down=args.hysteria_bandwidth_down,
         hysteria_metrics_enabled=args.hysteria_metrics_enabled,
+        ss2022_state_path=(args.ss2022_state_path or None),
+        xhttp_state_path=(args.xhttp_state_path or None),
+        vmess_ws_state_path=(args.vmess_ws_state_path or None),
+        trojan_enabled=args.trojan_enabled,
+        trojan_state_path=args.trojan_state_path,
+        trojan_config_path=args.trojan_config_path,
+        trojan_service=args.trojan_service,
+        trojan_group=(args.trojan_group or None),
+        trojan_tls_cert=args.trojan_tls_cert,
+        trojan_tls_key=args.trojan_tls_key,
+        trojan_sni=args.trojan_sni,
+        wireguard_enabled=args.wireguard_enabled,
+        wireguard_state_path=args.wireguard_state_path,
+        wireguard_conf_path=args.wireguard_conf_path,
+        wireguard_service=args.wireguard_service,
+        wireguard_subnet=args.wireguard_subnet,
         dry_run=args.dry_run,
         use_sudo=args.use_sudo,
     )

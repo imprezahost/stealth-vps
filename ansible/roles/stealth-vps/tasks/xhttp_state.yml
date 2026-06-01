@@ -1,0 +1,51 @@
+---
+# XHTTP state generation. Loopback-bound port + the operator-set path.
+# No crypto material here — XHTTP reuses Reality's UUID auth via the
+# user index (Open Question A1 default).
+#
+# Persisted shape:
+#   port: 18543
+#   path: /.well-known/xhttp-stream
+#
+# Path is operator-controlled (default in defaults/main.yml). The port
+# is randomised within the configured range and persisted so Caddy's
+# reverse-proxy config stays stable across converges.
+
+- name: Probe existing xhttp state
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/xhttp.state.yml"
+  register: stealth_vps_xhttp_state_stat
+  tags: [xray, xhttp]
+
+- name: Read existing xhttp state from the remote
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/xhttp.state.yml"
+  register: stealth_vps_xhttp_state_raw
+  when: stealth_vps_xhttp_state_stat.stat.exists
+  tags: [xray, xhttp]
+
+- name: Set xhttp state fact from slurped YAML
+  ansible.builtin.set_fact:
+    stealth_vps_xhttp_state: "{{ stealth_vps_xhttp_state_raw.content | b64decode | from_yaml }}"
+  when: stealth_vps_xhttp_state_stat.stat.exists
+  tags: [xray, xhttp]
+
+- name: Generate XHTTP state (first run only)
+  when: not stealth_vps_xhttp_state_stat.stat.exists
+  tags: [xray, xhttp]
+  block:
+
+    - name: Compose new xhttp state  # noqa: jinja[spacing]
+      ansible.builtin.set_fact:
+        stealth_vps_xhttp_state: "{{ {
+          'port': (range(stealth_vps_xhttp_listen_port_min, stealth_vps_xhttp_listen_port_max + 1) | random),
+          'path': stealth_vps_xhttp_path,
+        } }}"
+
+    - name: Persist xhttp state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_xhttp_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/xhttp.state.yml"
+        owner: root
+        group: root
+        mode: '0600'

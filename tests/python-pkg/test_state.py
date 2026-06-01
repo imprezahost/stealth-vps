@@ -62,13 +62,20 @@ def test_label_valid_allow_reserved_lets_reserved_through() -> None:
 
 def test_load_users_index_returns_dict(users_index_path: str) -> None:
     data = state.load_users_index(users_index_path)
-    # v0.9.0+: the load step auto-upgrades v1 fixtures to v2 in memory
-    # by adding sub_expires_at=None. The on-disk file stays v1 until
-    # the next mutation triggers save_users_index.
-    assert data["version"] == 2
+    # v0.9.0+: the load step auto-upgrades v1 fixtures to v2 by adding
+    # sub_expires_at=None. v0.11.0+: extends to v3 by adding the four
+    # new-protocol fields. Both upgrades are in-memory only — the on-
+    # disk file stays at its written version until the next mutation
+    # triggers save_users_index.
+    assert data["version"] == 3
     assert "alice" in data["users"]
     assert data["users"]["alice"]["enabled"] is True
     assert data["users"]["alice"]["sub_expires_at"] is None
+    # v3 fields default to None on auto-upgrade.
+    assert data["users"]["alice"]["ss2022_psk"] is None
+    assert data["users"]["alice"]["wireguard_pubkey"] is None
+    assert data["users"]["alice"]["wireguard_client_ip"] is None
+    assert data["users"]["alice"]["trojan_password"] is None
 
 
 def test_load_users_index_missing_file_raises_stateerror(tmp_path: pathlib.Path) -> None:
@@ -125,15 +132,11 @@ def test_save_users_index_sets_mode_0600(tmp_path: pathlib.Path) -> None:
 
 
 def test_save_users_index_round_trip(tmp_path: pathlib.Path) -> None:
-    """A v2 payload writes and reads back unchanged. Pre-v0.9.0 this
-    test used a v1 payload — now load auto-migrates v1 to v2 in memory,
-    so a round-trip of a v1 payload comes back as v2 with the new
-    sub_expires_at field. Stick with v2 here to keep the equality check
-    direct; the migration is exercised separately by
-    test_load_users_index_upgrades_v1_to_v2.
+    """A v3 payload writes and reads back unchanged. The migration chain
+    (v1→v2→v3) is exercised separately; here we keep equality direct.
     """
     payload = {
-        "version": 2,
+        "version": 3,
         "users": {
             "bob": {
                 "reality_uuid": "uuid-bob",
@@ -142,6 +145,10 @@ def test_save_users_index_round_trip(tmp_path: pathlib.Path) -> None:
                 "created_at": "2026-02-02T02:02:02Z",
                 "enabled": False,
                 "sub_expires_at": None,
+                "ss2022_psk": None,
+                "wireguard_pubkey": None,
+                "wireguard_client_ip": None,
+                "trojan_password": None,
             },
         },
     }
@@ -466,17 +473,46 @@ def test_expired_sub_tokens_filters_correctly(
 
 
 # ---------------------------------------------------------------------------
-# Schema migration v1 → v2
+# Schema migration v1 → v2 → v3
 # ---------------------------------------------------------------------------
 
 
-def test_load_users_index_upgrades_v1_to_v2(users_index_path: str) -> None:
-    """The fixture seeds a v1 file. load_users_index should silently
-    upgrade it in memory to v2 by adding sub_expires_at=None to every
-    user record."""
+def test_load_users_index_upgrades_v1_to_v3(users_index_path: str) -> None:
+    """The fixture seeds a v1 file. `load_users_index` walks the
+    migration chain (v1 → v2 → v3) in one pass: every user gets
+    sub_expires_at + the four v3 protocol credentials (all None)."""
     idx = state.load_users_index(users_index_path)
-    assert idx["version"] == 2
-    assert idx["users"]["alice"]["sub_expires_at"] is None
+    assert idx["version"] == 3
+    alice = idx["users"]["alice"]
+    assert alice["sub_expires_at"] is None
+    assert alice["ss2022_psk"] is None
+    assert alice["wireguard_pubkey"] is None
+    assert alice["wireguard_client_ip"] is None
+    assert alice["trojan_password"] is None
+
+
+def test_load_users_index_upgrades_v2_to_v3(tmp_path: pathlib.Path) -> None:
+    """A file written by a v0.9 / v0.10 box (schema v2) loads cleanly
+    on v0.11. v3 fields default to None on the in-memory upgrade."""
+    payload = {
+        "version": 2,
+        "users": {
+            "carol": {
+                "reality_uuid": "u",
+                "hysteria_password": "p",
+                "sub_token": "t",
+                "created_at": "2026-01-01T00:00:00Z",
+                "enabled": True,
+                "sub_expires_at": None,
+            },
+        },
+    }
+    p = tmp_path / "v2.json"
+    p.write_text(json.dumps(payload), encoding="utf-8")
+    idx = state.load_users_index(str(p))
+    assert idx["version"] == 3
+    assert idx["users"]["carol"]["ss2022_psk"] is None
+    assert idx["users"]["carol"]["trojan_password"] is None
 
 
 def test_load_users_index_rejects_future_versions(tmp_path: pathlib.Path) -> None:

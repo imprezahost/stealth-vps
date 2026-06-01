@@ -1029,6 +1029,360 @@ def test_fleet_rotate_key_rolls_back_on_new_key_probe_failure(
     rollback_spy.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# v0.11.0 — SS-2022 PSK auto-gen + --ss2022-psk override
+# ---------------------------------------------------------------------------
+
+
+def test_autogen_ss2022_psk_for_aes128_is_22_chars() -> None:
+    """16 bytes base64-encoded → 22 chars + 2 padding = 24, but
+    standard base64 yields 24 chars including padding. Assert the
+    DECODED length is 16."""
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("2022-blake3-aes-128-gcm")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 16
+
+
+def test_autogen_ss2022_psk_for_aes256_is_32_bytes() -> None:
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("2022-blake3-aes-256-gcm")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_autogen_ss2022_psk_for_chacha20_is_32_bytes() -> None:
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("2022-blake3-chacha20-poly1305")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_autogen_ss2022_psk_for_unknown_falls_back_to_32_bytes() -> None:
+    """Forward-compat: a future cipher name we don't recognize gets
+    a 32-byte PSK (longest valid; safe default)."""
+    import base64
+    psk = cli._autogen_ss2022_psk_for_method("future-cipher-9999")
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_maybe_autogen_ss2022_psk_returns_none_when_no_state_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """No ss2022.state.yml on disk → SS-2022 is not enabled on this
+    host → return None. The caller leaves the user's ss2022_psk as None."""
+    assert cli._maybe_autogen_ss2022_psk(str(tmp_path / "absent.yml")) is None
+
+
+def test_maybe_autogen_ss2022_psk_uses_method_from_state_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """When ss2022.state.yml exists with method=aes-256-gcm, the
+    generated PSK is 32 bytes (44 chars base64)."""
+    import base64
+    state_path = tmp_path / "ss2022.state.yml"
+    state_path.write_text(
+        "method: 2022-blake3-aes-256-gcm\nport: 8543\nserver_psk: SRV\n",
+        encoding="utf-8",
+    )
+    psk = cli._maybe_autogen_ss2022_psk(str(state_path))
+    assert psk is not None
+    raw = base64.b64decode(psk)
+    assert len(raw) == 32
+
+
+def test_user_add_explicit_ss2022_psk_overrides_autogen(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """`--ss2022-psk EXPLICIT` takes precedence over the autogen
+    branch even when ss2022.state.yml exists on disk."""
+    state_path = tmp_path / "ss2022.state.yml"
+    state_path.write_text("method: 2022-blake3-aes-128-gcm\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "SS2022_STATE_PATH", str(state_path)):
+        rc = cli.main([
+            "user", "add", "bob", "--ss2022-psk", "OPERATOR_SUPPLIED_PSK",
+        ])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] == "OPERATOR_SUPPLIED_PSK"
+
+
+def test_user_add_no_ss2022_state_file_leaves_psk_null(
+    users_index_path: str, reloader_args_json: str
+) -> None:
+    """Default single-node host without SS-2022 enabled: new user has
+    `ss2022_psk: None` (the v3 migration default). No autogen, no
+    URI emission later."""
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is None
+
+
+def test_user_add_with_ss2022_enabled_autogens_psk(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """ss2022.state.yml present + no --ss2022-psk flag → autogen a PSK
+    matching the configured cipher."""
+    import base64
+    state_path = tmp_path / "ss2022.state.yml"
+    state_path.write_text("method: 2022-blake3-aes-128-gcm\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "SS2022_STATE_PATH", str(state_path)):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is not None
+    assert len(base64.b64decode(rec["ss2022_psk"])) == 16
+
+
+# ---------------------------------------------------------------------------
+# v0.11.0 Block B — Trojan-Go per-user password autogen + override
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_autogen_trojan_password_none_when_no_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    assert cli._maybe_autogen_trojan_password(str(tmp_path / "absent.yml")) is None
+
+
+def test_maybe_autogen_trojan_password_generates_when_state_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    state_path = tmp_path / "trojan_go.state.yml"
+    state_path.write_text("port: 4443\n", encoding="utf-8")
+    pw = cli._maybe_autogen_trojan_password(str(state_path))
+    assert pw is not None
+    assert len(pw) >= 16          # token_urlsafe(24) → ~32 chars
+
+
+def test_user_add_explicit_trojan_password_overrides_autogen(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    state_path = tmp_path / "trojan_go.state.yml"
+    state_path.write_text("port: 4443\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "TROJAN_GO_STATE_PATH", str(state_path)):
+        rc = cli.main(["user", "add", "bob", "--trojan-password", "OPPW"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] == "OPPW"
+
+
+def test_user_add_autogens_trojan_password_when_enabled(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    state_path = tmp_path / "trojan_go.state.yml"
+    state_path.write_text("port: 4443\n", encoding="utf-8")
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "TROJAN_GO_STATE_PATH", str(state_path)):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] is not None
+
+
+def test_user_add_no_trojan_state_leaves_password_null(
+    users_index_path: str, reloader_args_json: str
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] is None
+
+
+def test_control_mode_autogens_ss2022_psk_when_fleet_node_runs_it(
+    users_index_path: str, control_mode: pathlib.Path
+) -> None:
+    """v0.11 Block C: on a control box, `s-vps user add` mints an
+    ss2022_psk when a registered fleet node terminates SS-2022 — even
+    though the control itself has no ss2022.state.yml."""
+    import base64
+    from stealth_vps import fleet as _fleet
+    _fleet.save_node(
+        _fleet.FleetNode(
+            node_id="tokyo-1", ssh_host="h", ssh_key_path="/k",
+            ss2022_port=8543, ss2022_method="2022-blake3-aes-128-gcm",
+            ss2022_server_psk="SRV",
+        ),
+        fleet_dir=str(control_mode),
+    )
+    # No SS-2022 sync push to assert here — patch sync_all to a no-op.
+    with patch("stealth_vps.fleet.load_fleet",
+               return_value=[_fleet.FleetNode(
+                   node_id="tokyo-1", ssh_host="h", ssh_key_path="/k",
+                   ss2022_port=8543, ss2022_method="2022-blake3-aes-128-gcm",
+                   ss2022_server_psk="SRV")]), \
+         patch("stealth_vps.fleet.sync_all", return_value=[]), \
+         patch("stealth_vps.fleet.update_sync_status"):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is not None
+    assert len(base64.b64decode(rec["ss2022_psk"])) == 16   # aes-128 → 16 bytes
+
+
+def test_control_mode_autogens_trojan_password_when_fleet_node_runs_it(
+    users_index_path: str, control_mode: pathlib.Path
+) -> None:
+    from stealth_vps import fleet as _fleet
+    node = _fleet.FleetNode(
+        node_id="tokyo-1", ssh_host="h", ssh_key_path="/k", trojan_port=4443,
+    )
+    _fleet.save_node(node, fleet_dir=str(control_mode))
+    with patch("stealth_vps.fleet.load_fleet", return_value=[node]), \
+         patch("stealth_vps.fleet.sync_all", return_value=[]), \
+         patch("stealth_vps.fleet.update_sync_status"):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] is not None
+
+
+def test_control_mode_no_protocol_node_leaves_creds_null(
+    users_index_path: str, control_mode: pathlib.Path
+) -> None:
+    """Control box whose fleet nodes run only Reality+Hysteria → no
+    ss2022/trojan creds minted (no node serves them)."""
+    from stealth_vps import fleet as _fleet
+    node = _fleet.FleetNode(
+        node_id="tokyo-1", ssh_host="h", ssh_key_path="/k",
+        reality_port=43338, hysteria_port=49440,
+    )
+    _fleet.save_node(node, fleet_dir=str(control_mode))
+    with patch("stealth_vps.fleet.load_fleet", return_value=[node]), \
+         patch("stealth_vps.fleet.sync_all", return_value=[]), \
+         patch("stealth_vps.fleet.update_sync_status"):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is None
+    assert rec["trojan_password"] is None
+
+
+# ---------------------------------------------------------------------------
+# v0.11.0 Block D — WireGuard per-user setup + wg-config
+# ---------------------------------------------------------------------------
+
+
+def _fake_wg_keygen():
+    """Patch target: stealth_vps.wireguard.generate_keypair → fixed pair."""
+    return ("CLIENT_PRIV_B64", "CLIENT_PUB_B64")
+
+
+def test_user_add_sets_up_wireguard_when_enabled(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """wireguard.state.yml present → user add mints a keypair, allocates
+    an IP, stores pubkey + client_ip in the index, stashes the privkey."""
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SRV_PRIV\npublic_key: SRV_PUB\nsubnet: 10.99.0.0/24\n",
+        encoding="utf-8",
+    )
+    keys_dir = tmp_path / "wg-keys"
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "WIREGUARD_STATE_PATH", str(wg_state)), \
+         patch.object(cli, "WIREGUARD_CLIENT_KEYS_DIR", str(keys_dir)), \
+         patch("stealth_vps.wireguard.generate_keypair", side_effect=_fake_wg_keygen):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["wireguard_pubkey"] == "CLIENT_PUB_B64"
+    assert rec["wireguard_client_ip"] == "10.99.0.2"   # first free in /24
+    priv = keys_dir / "bob.privkey"
+    assert priv.read_text().strip() == "CLIENT_PRIV_B64"
+
+
+def test_user_add_no_wireguard_state_leaves_wg_fields_null(
+    users_index_path: str, reloader_args_json: str
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["wireguard_pubkey"] is None
+    assert rec["wireguard_client_ip"] is None
+
+
+def test_user_add_wireguard_allocates_sequential_ips(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """Two WG users get .2 and .3 (alice from the fixture has no WG IP)."""
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SRV\npublic_key: SRVP\nsubnet: 10.99.0.0/24\n",
+        encoding="utf-8",
+    )
+    keys_dir = tmp_path / "wg-keys"
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "WIREGUARD_STATE_PATH", str(wg_state)), \
+         patch.object(cli, "WIREGUARD_CLIENT_KEYS_DIR", str(keys_dir)), \
+         patch("stealth_vps.wireguard.generate_keypair", side_effect=_fake_wg_keygen):
+        cli.main(["user", "add", "bob"])
+        cli.main(["user", "add", "carol"])
+    idx = state.load_users_index(users_index_path)["users"]
+    ips = {idx["bob"]["wireguard_client_ip"], idx["carol"]["wireguard_client_ip"]}
+    assert ips == {"10.99.0.2", "10.99.0.3"}
+
+
+def test_wg_config_renders_client_conf(
+    users_index_path: str, tmp_path: pathlib.Path, capsys
+) -> None:
+    state.update_user(
+        "alice", wireguard_pubkey="ALICE_PUB", wireguard_client_ip="10.99.0.2",
+        path=users_index_path,
+    )
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SRV\npublic_key: SERVER_PUB_B64\nsubnet: 10.99.0.0/24\n",
+        encoding="utf-8",
+    )
+    keys_dir = tmp_path / "wg-keys"
+    keys_dir.mkdir()
+    (keys_dir / "alice.privkey").write_text("ALICE_PRIV_B64\n", encoding="utf-8")
+    (tmp_path / "installer.env").write_text('STEALTH_DOMAIN="vpn.example.com"\n', encoding="utf-8")
+
+    with patch.object(cli, "WIREGUARD_STATE_PATH", str(wg_state)), \
+         patch.object(cli, "WIREGUARD_CLIENT_KEYS_DIR", str(keys_dir)):
+        rc = cli.main(["user", "wg-config", "alice"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "[Interface]" in out
+    assert "PrivateKey = ALICE_PRIV_B64" in out
+    assert "Address = 10.99.0.2/32" in out
+    assert "PublicKey = SERVER_PUB_B64" in out
+    assert "Endpoint = vpn.example.com:51820" in out
+
+
+def test_wg_config_unknown_user_errors(users_index_path: str, capsys) -> None:
+    rc = cli.main(["user", "wg-config", "ghost"])
+    assert rc == 1
+    assert "no user labelled 'ghost'" in capsys.readouterr().err
+
+
+def test_wg_config_user_without_wg_identity_errors(
+    users_index_path: str, capsys
+) -> None:
+    rc = cli.main(["user", "wg-config", "alice"])
+    assert rc == 1
+    assert "no WireGuard identity" in capsys.readouterr().err
+
+
 def test_data_node_mode_unchanged_by_step6(
     users_index_path: str, reloader_args_json: str, capsys
 ) -> None:

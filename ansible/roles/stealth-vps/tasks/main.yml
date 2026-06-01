@@ -83,6 +83,37 @@
   when: stealth_vps_observability_enabled | bool
   tags: [observability]
 
+# v0.11.0 Block B — separate-daemon protocols. Both run only in headless
+# mode (no panel) since they don't integrate with 3X-UI. The config
+# render + service reload on day-2 mutations is owned by the reloader
+# (headless_reload.yml); these tasks install the binary + state + unit.
+
+- name: Install and configure Trojan-Go server
+  ansible.builtin.include_tasks: trojan_go.yml
+  when:
+    - stealth_vps_trojan_go_enabled | bool
+    - not (stealth_vps_panel_enabled | bool)
+  tags: [trojan]
+
+- name: Generate Trojan-Go state (port) for the reloader/sub bundle
+  # When Trojan-Go is enabled the state file is created by trojan_go.yml
+  # above. This standalone include covers the (rare) case where an
+  # operator wants the state generated without the full daemon install
+  # — e.g. a control box building sub bundles. No-op when the file
+  # already exists.
+  ansible.builtin.include_tasks: trojan_go_state.yml
+  when:
+    - stealth_vps_trojan_go_enabled | bool
+    - stealth_vps_control_enabled | bool
+  tags: [trojan]
+
+- name: Install and configure WireGuard server
+  ansible.builtin.include_tasks: wireguard.yml
+  when:
+    - stealth_vps_wireguard_enabled | bool
+    - not (stealth_vps_panel_enabled | bool)
+  tags: [wireguard, wg]
+
 # --- v0.6.0: users index + Python pkg + bot + sub + CLI ----------------
 # Ordering: users_index needs reality.state.yml + hysteria.state.yml on
 # disk (created by xray.yml + hysteria.yml above). Python pkg seeds the
@@ -120,7 +151,11 @@
   ansible.builtin.include_tasks: headless_reload.yml
   when:
     - not (stealth_vps_panel_enabled | bool)
-    - (stealth_vps_reality_enabled | bool) or (stealth_vps_hysteria_enabled | bool)
+    - >-
+      (stealth_vps_reality_enabled | bool)
+      or (stealth_vps_hysteria_enabled | bool)
+      or (stealth_vps_trojan_go_enabled | default(false) | bool)
+      or (stealth_vps_wireguard_enabled | default(false) | bool)
   tags: [users, index, headless]
 
 - name: Install Telegram bot (opt-in)

@@ -61,6 +61,16 @@ RELOADER_ARGS_PATH = "/etc/stealth-vps/reloader-args.json"
 INSTALLER_ENV_PATH = "/etc/stealth-vps/installer.env"
 REALITY_STATE_PATH = "/etc/stealth-vps/reality.state.yml"
 HYSTERIA_STATE_PATH = "/etc/stealth-vps/hysteria.state.yml"
+# v0.11.0+ — per-protocol state files. Presence on disk = "this host
+# terminates this protocol"; absence = "skip auto-credential-gen for
+# new users." The actual Xray inbound rendering for these protocols
+# lands in Block A.2 (a follow-up MR in the v0.11 sprint).
+SS2022_STATE_PATH = "/etc/stealth-vps/ss2022.state.yml"
+XHTTP_STATE_PATH = "/etc/stealth-vps/xhttp.state.yml"
+VMESS_WS_STATE_PATH = "/etc/stealth-vps/vmess_ws.state.yml"
+# v0.11.0+ Block B — separate-daemon protocols.
+TROJAN_GO_STATE_PATH = "/etc/stealth-vps/trojan_go.state.yml"
+WIREGUARD_STATE_PATH = "/etc/stealth-vps/wireguard.state.yml"
 SUBSCRIPTION_BASE_URL_KEY = "STEALTH_VPS_SUB_BASE_URL"
 
 
@@ -424,6 +434,151 @@ def _load_states_for_render() -> tuple[dict[str, Any] | None, dict[str, Any] | N
 # ---------------------------------------------------------------------------
 
 
+def _autogen_ss2022_psk_for_method(method: str) -> str:
+    """Generate a per-user SS-2022 PSK matching the cipher's required
+    key length. Returns base64-encoded bytes; Xray's shadowsocks
+    inbound accepts this shape directly.
+
+    `2022-blake3-aes-128-gcm` → 16 bytes
+    `2022-blake3-aes-256-gcm` + `2022-blake3-chacha20-poly1305` → 32 bytes
+    Unknown methods → 32 bytes (longest valid; safe for forward compat
+    with future ciphers that adopt 32-byte keys).
+    """
+    import base64
+    import secrets
+    n_bytes = 16 if method == "2022-blake3-aes-128-gcm" else 32
+    return base64.b64encode(secrets.token_bytes(n_bytes)).decode("ascii")
+
+
+def _maybe_autogen_ss2022_psk(
+    ss2022_state_path: str | None = None,
+) -> str | None:
+    """If ss2022.state.yml is on disk, the host terminates SS-2022 and
+    every new user should get a per-user PSK. Returns None when SS-2022
+    isn't enabled on this host."""
+    p = ss2022_state_path or SS2022_STATE_PATH
+    if not os.path.exists(p):
+        return None
+    try:
+        ss_state = load_state_file(p)
+    except ReloadError:
+        return None
+    method = str(ss_state.get("method", "2022-blake3-aes-128-gcm"))
+    return _autogen_ss2022_psk_for_method(method)
+
+
+def _fleet_runs_protocol(port_field: str) -> bool:
+    """True iff this is a control box AND at least one registered fleet
+    node terminates the protocol identified by `port_field` (a FleetNode
+    attribute name like 'ss2022_port' / 'trojan_port' — non-zero means
+    enabled on that node). Used so `s-vps user add` on a control mints
+    the per-user credential for protocols its DATA NODES run, even
+    though the control itself doesn't.
+
+    Returns False (no fleet introspection) on single-node / data-node
+    hosts so their autogen stays driven purely by local state files."""
+    if not _is_control_box():
+        return False
+    try:
+        from . import fleet as _fleet
+        nodes = _fleet.load_fleet()
+    except Exception:  # noqa: BLE001 — fleet dir missing / unreadable
+        return False
+    return any(int(getattr(n, port_field, 0) or 0) > 0 for n in nodes)
+
+
+def _fleet_ss2022_method() -> str | None:
+    """Return the SS-2022 cipher method of the first fleet node that
+    runs SS-2022, so the control mints a PSK of the right byte length.
+    None when no node runs it. If nodes disagree on the method (unusual)
+    the first wins — the PSK length only differs aes-128 (16) vs the
+    others (32), and a 32-byte PSK is accepted by every cipher anyway."""
+    if not _is_control_box():
+        return None
+    try:
+        from . import fleet as _fleet
+        for n in _fleet.load_fleet():
+            if int(getattr(n, "ss2022_port", 0) or 0) > 0 and n.ss2022_method:
+                return n.ss2022_method
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+WIREGUARD_CLIENT_KEYS_DIR = "/var/lib/stealth-vps/wireguard"
+
+
+def _maybe_setup_wireguard_for_user(
+    label: str,
+    *,
+    wireguard_state_path: str | None = None,
+    client_keys_dir: str | None = None,
+) -> tuple[str, str] | None:
+    """When this host runs WireGuard (wireguard.state.yml present),
+    mint a client keypair, allocate the next-free /24 IP, stash the
+    private key for later `wg-config` rendering, and return
+    (client_pubkey, client_ip). Returns None when WG isn't enabled here.
+
+    Server-gen flow (ADR B4): the server holds the client privkey at
+    `<client_keys_dir>/<label>.privkey` (0600) so `s-vps user wg-config`
+    can render the importable .conf on demand. Only the pubkey + IP go
+    into the index — the privkey never leaves the box except in the
+    rendered client config the operator hands to the user.
+    """
+    from . import wireguard as _wg
+    state_path = wireguard_state_path or WIREGUARD_STATE_PATH
+    keys_dir = client_keys_dir or WIREGUARD_CLIENT_KEYS_DIR
+    if not os.path.exists(state_path):
+        return None
+    try:
+        wg_state = load_state_file(state_path)
+    except ReloadError:
+        return None
+    subnet = str(wg_state.get("subnet", _wg.DEFAULT_SUBNET))
+
+    # Collect already-assigned client IPs from the index so the
+    # allocator skips them.
+    used_ips: list[str] = []
+    try:
+        idx = state.load_users_index(state.USERS_INDEX_PATH)
+        for _lbl, urec in idx.get("users", {}).items():
+            ip = urec.get("wireguard_client_ip")
+            if ip:
+                used_ips.append(ip)
+    except state.StateError:
+        pass
+
+    try:
+        priv, pub = _wg.generate_keypair()
+        client_ip = _wg.allocate_client_ip(subnet, used_ips)
+    except _wg.WireGuardError as exc:
+        print(f"s-vps: WireGuard setup for {label!r} failed: {exc}", file=sys.stderr)
+        return None
+
+    # Stash the client privkey 0600 so wg-config can render later.
+    os.makedirs(keys_dir, mode=0o700, exist_ok=True)
+    priv_path = os.path.join(keys_dir, f"{label}.privkey")
+    with open(priv_path, "w", encoding="utf-8") as f:
+        f.write(priv + "\n")
+    os.chmod(priv_path, 0o600)
+    return pub, client_ip
+
+
+def _maybe_autogen_trojan_password(
+    trojan_state_path: str | None = None,
+) -> str | None:
+    """If trojan_go.state.yml is on disk, the host runs Trojan-Go and
+    every new user gets a per-user password. Returns None when Trojan-Go
+    isn't enabled. Trojan passwords have no length constraint (unlike
+    SS-2022 PSKs) — a 32-char URL-safe token matches the Hysteria2
+    password style used elsewhere in the project."""
+    import secrets
+    p = trojan_state_path or TROJAN_GO_STATE_PATH
+    if not os.path.exists(p):
+        return None
+    return secrets.token_urlsafe(24).rstrip("=")
+
+
 def cmd_user_add(args: argparse.Namespace) -> int:
     backend = _select_backend_for_cli()
     try:
@@ -444,6 +599,65 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         except state.StateError as exc:
             print(f"s-vps: ttl `{args.ttl}` invalid: {exc}", file=sys.stderr)
             return 1
+
+    # v0.11.0+: SS-2022 per-user PSK. Resolution order:
+    #   1. explicit --ss2022-psk → use it.
+    #   2. local SS-2022 enabled (ss2022.state.yml present) → auto-gen.
+    #   3. CONTROL box with a fleet node running SS-2022 → auto-gen.
+    #      (The control doesn't run SS-2022 itself, so its state file is
+    #      absent — but the user still needs a PSK for the per-node
+    #      ss:// URIs. The server PSK is per-node; the user PSK is
+    #      shared across nodes, so one autogen covers the whole fleet.)
+    # Otherwise None → no SS-2022 URI, no exposure.
+    ss2022_psk: str | None = None
+    if getattr(args, "ss2022_psk", ""):
+        ss2022_psk = args.ss2022_psk
+    else:
+        ss2022_psk = _maybe_autogen_ss2022_psk()
+        if ss2022_psk is None and _fleet_runs_protocol("ss2022_port"):
+            ss2022_psk = _autogen_ss2022_psk_for_method(
+                _fleet_ss2022_method() or "2022-blake3-aes-128-gcm"
+            )
+    if ss2022_psk is not None:
+        state.update_user(
+            args.label, ss2022_psk=ss2022_psk, path=state.USERS_INDEX_PATH,
+        )
+        rec["ss2022_psk"] = ss2022_psk
+
+    # v0.11.0+ Block B: Trojan-Go per-user password. Same resolution
+    # order as SS-2022: explicit flag → local state → control-with-fleet.
+    trojan_password: str | None = None
+    if getattr(args, "trojan_password", ""):
+        trojan_password = args.trojan_password
+    else:
+        trojan_password = _maybe_autogen_trojan_password()
+        if trojan_password is None and _fleet_runs_protocol("trojan_port"):
+            import secrets
+            trojan_password = secrets.token_urlsafe(24).rstrip("=")
+    if trojan_password is not None:
+        state.update_user(
+            args.label, trojan_password=trojan_password, path=state.USERS_INDEX_PATH,
+        )
+        rec["trojan_password"] = trojan_password
+
+    # v0.11.0+ Block B: WireGuard per-user identity. WG is single-node
+    # (excluded from the multi-node bundle — see Block C), so there's no
+    # fleet-aware branch: we only act when this host runs WG locally
+    # (wireguard.state.yml present). The server mints the client keypair
+    # (ADR B4 default), allocates the next-free /24 IP, stores pubkey +
+    # IP in the index, and stashes the privkey for `s-vps user wg-config`
+    # to render the client .conf later.
+    wg_setup = _maybe_setup_wireguard_for_user(args.label)
+    if wg_setup is not None:
+        pubkey, client_ip = wg_setup
+        state.update_user(
+            args.label,
+            wireguard_pubkey=pubkey,
+            wireguard_client_ip=client_ip,
+            path=state.USERS_INDEX_PATH,
+        )
+        rec["wireguard_pubkey"] = pubkey
+        rec["wireguard_client_ip"] = client_ip
 
     print(f"✓ added user {args.label!r}")
     print(f"  reality_uuid     : {rec['reality_uuid']}")
@@ -708,6 +922,69 @@ def cmd_user_show(args: argparse.Namespace) -> int:
             except subprocess.CalledProcessError:
                 pass
 
+    return 0
+
+
+def cmd_user_wg_config(args: argparse.Namespace) -> int:
+    """Print a user's WireGuard client .conf (v0.11.0+).
+
+    WireGuard has no URI form — the client imports a multi-line config.
+    The server stashed the user's private key at
+    /var/lib/stealth-vps/wireguard/<label>.privkey when `user add`
+    generated their identity; this command pairs it with the server's
+    public key + endpoint to render the importable .conf.
+
+    Operator hands the output to the user (paste into the WG app, or
+    `qrencode` it). The private key is the user's secret — the operator
+    delivers it once and shouldn't retain copies beyond the stash.
+    """
+    from . import wireguard as _wg
+
+    rec = state.get_user(args.label, state.USERS_INDEX_PATH)
+    if rec is None:
+        print(f"s-vps: no user labelled {args.label!r} in the index", file=sys.stderr)
+        return 1
+    if not rec.get("wireguard_pubkey") or not rec.get("wireguard_client_ip"):
+        print(
+            f"s-vps: {args.label!r} has no WireGuard identity. WireGuard "
+            f"isn't enabled on this host, or the user predates it. Re-run "
+            f"`s-vps user rotate {args.label}` on a WG-enabled host to issue one.",
+            file=sys.stderr,
+        )
+        return 1
+
+    priv_path = os.path.join(WIREGUARD_CLIENT_KEYS_DIR, f"{args.label}.privkey")
+    try:
+        client_priv = pathlib.Path(priv_path).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        print(
+            f"s-vps: client private key for {args.label!r} not found at "
+            f"{priv_path}. It's generated at `user add` time on a WG-enabled "
+            f"host; if this user was added elsewhere, the key isn't on this box.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        wg_state = load_state_file(WIREGUARD_STATE_PATH)
+    except ReloadError as exc:
+        print(f"s-vps: can't read wireguard.state.yml ({exc})", file=sys.stderr)
+        return 1
+
+    env = _load_installer_env()
+    endpoint_host = (
+        env.get("STEALTH_DOMAIN")
+        or env.get("STEALTH_VPS_PUBLIC_HOST")
+        or "your.vps.example"
+    )
+    conf = _wg.render_client_conf(
+        client_private_key=client_priv,
+        client_ip=rec["wireguard_client_ip"],
+        server_public_key=str(wg_state.get("public_key", "")),
+        endpoint_host=endpoint_host,
+        endpoint_port=int(wg_state.get("port", 51820)),
+    )
+    print(conf, end="")
     return 0
 
 
@@ -994,6 +1271,19 @@ def _slurp_remote_yaml(node, remote_path: str) -> dict:
     return _parse_node_yaml(result.stdout.decode("utf-8", errors="replace"))
 
 
+def _slurp_optional_remote_yaml(node, remote_path: str) -> dict:
+    """Like `_slurp_remote_yaml` but soft-fails to `{}` when the file is
+    absent or unreadable. Used by `fleet add` to discover the v0.11
+    optional protocol states (ss2022/xhttp/vmess_ws/trojan) — a node
+    that doesn't run a protocol simply has no state file, which is not
+    an error: the FleetNode's port for it stays 0 and the subscription
+    bundle skips it."""
+    try:
+        return _slurp_remote_yaml(node, remote_path)
+    except SystemExit:
+        return {}
+
+
 def _install_restricted_authorized_keys(node, pubkey_text: str) -> None:
     """SSH into `node` and replace any line containing our pubkey body
     with a restricted entry that forces `s-vps fleet-receive` as the
@@ -1187,6 +1477,15 @@ def cmd_fleet_add(args: argparse.Namespace) -> int:
         # Hysteria might be disabled on this node — soft-fail.
         hysteria = {}
 
+    # v0.11.0+ — discover the optional protocol states. Each is a
+    # soft-fail: a node not running that protocol simply has no state
+    # file, so the FleetNode's port stays 0 and the bundle skips it.
+    print("  discovering v0.11 protocols (ss2022/xhttp/vmess_ws/trojan)...")
+    ss2022 = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/ss2022.state.yml")
+    xhttp = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/xhttp.state.yml")
+    vmess_ws = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/vmess_ws.state.yml")
+    trojan = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/trojan_go.state.yml")
+
     # Compose the FleetNode with discovered fields.
     node = _fleet.FleetNode(
         node_id=args.label,
@@ -1200,6 +1499,14 @@ def cmd_fleet_add(args: argparse.Namespace) -> int:
         reality_servernames=_servernames_from_state(reality),
         hysteria_port=int(hysteria.get("port", 0) or 0),
         hysteria_obfs_password=str(hysteria.get("obfs_password", "")),
+        ss2022_port=int(ss2022.get("port", 0) or 0),
+        ss2022_method=str(ss2022.get("method", "")),
+        ss2022_server_psk=str(ss2022.get("server_psk", "")),
+        xhttp_port=int(xhttp.get("port", 0) or 0),
+        xhttp_path=str(xhttp.get("path", "")),
+        vmess_ws_port=int(vmess_ws.get("port", 0) or 0),
+        vmess_ws_path=str(vmess_ws.get("path", "")),
+        trojan_port=int(trojan.get("port", 0) or 0),
         public_host=args.public_host or None,
         domain=args.domain or "",
         added_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1667,6 +1974,25 @@ def _build_arg_parser() -> argparse.ArgumentParser:
              "create a never-expires user (current default).",
     )
     p.add_argument(
+        "--ss2022-psk",
+        default="",
+        dest="ss2022_psk",
+        help="(v0.11.0+) operator-supplied Shadowsocks-2022 per-user PSK "
+             "(base64). When omitted, auto-generated to the right length "
+             "for the host's configured cipher (read from ss2022.state.yml). "
+             "On hosts without SS-2022 enabled, ignored — the user's "
+             "ss2022_psk stays null and the URI builder skips the ss:// entry.",
+    )
+    p.add_argument(
+        "--trojan-password",
+        default="",
+        dest="trojan_password",
+        help="(v0.11.0+) operator-supplied Trojan-Go per-user password. "
+             "When omitted, auto-generated when Trojan-Go is enabled on the "
+             "host (trojan_go.state.yml present). Ignored on hosts without "
+             "Trojan-Go — the user's trojan_password stays null.",
+    )
+    p.add_argument(
         "--no-sync",
         action="store_true",
         help="(control mode only) skip the post-mutation `fleet sync`. "
@@ -1716,6 +2042,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--qr", action="store_true",
                    help="render terminal QR codes for the URIs (needs qrencode).")
     p.set_defaults(func=cmd_user_show)
+
+    p = user_sub.add_parser(
+        "wg-config",
+        help="print a user's WireGuard client .conf (v0.11+)",
+        description=cmd_user_wg_config.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label")
+    p.set_defaults(func=cmd_user_wg_config)
 
     # --- reload -------------------------------------------------------
     p = sub.add_parser("reload", help="re-render configs + SIGHUP services (headless only)")

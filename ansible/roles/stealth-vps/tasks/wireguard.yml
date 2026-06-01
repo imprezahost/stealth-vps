@@ -1,0 +1,67 @@
+---
+# WireGuard install + server bring-up (v0.11.0+).
+#
+# Runs when stealth_vps_wireguard_enabled=true. Generates the server
+# keypair (wireguard_state.yml), sets up /etc/wireguard + the client
+# key dir, enables IP forwarding, opens the UDP port. The actual
+# stealth.conf is rendered by the reloader (headless_reload.yml) from
+# the index — on first install there are no WG users yet, so the conf
+# is just the [Interface] block until `s-vps user add` issues a peer.
+#
+# The reloader (not this task) renders + reloads the conf so a single
+# code path owns the server config across both first-converge and
+# day-2 `s-vps user add` mutations.
+
+- name: Generate WireGuard server state (keypair + port + subnet)
+  ansible.builtin.include_tasks: wireguard_state.yml
+  tags: [wireguard, wg]
+
+- name: Ensure /etc/wireguard exists
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [wireguard, wg]
+
+- name: Ensure server-generated client key dir exists (ADR B4)
+  # Server-gen WG client privkeys land here for the operator to fetch
+  # (`s-vps` / bot deliver the .conf). 0700 root — these are client
+  # secrets the operator hands out once.
+  ansible.builtin.file:
+    path: "{{ stealth_vps_wg_client_keys_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: [wireguard, wg]
+
+- name: Enable IPv4 forwarding for WireGuard routing
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+  tags: [wireguard, wg]
+
+- name: Open the WireGuard UDP port via UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ stealth_vps_wireguard_state.port }}"
+    proto: udp
+    comment: "stealth-vps WireGuard"
+  failed_when: false   # tolerate UFW absent / not yet configured
+  tags: [wireguard, wg, ufw]
+
+# The conf render + wg-quick@stealth enable/start is owned by
+# headless_reload.yml (it calls the reloader with --wireguard-enabled).
+# Enabling the unit here without a conf would fail; we let the reloader
+# write the conf first, then bring the interface up.
+- name: Enable wg-quick@stealth (started by the reloader after conf render)
+  ansible.builtin.systemd:
+    name: wg-quick@stealth.service
+    enabled: true
+  failed_when: false   # unit may not be loadable until conf exists
+  tags: [wireguard, wg]

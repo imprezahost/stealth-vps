@@ -42,7 +42,27 @@ from .subscription import (  # noqa: F401
     write_subscription_file,
     SUBSCRIPTION_DIR,
 )
-from .urivider import build_vless_uri, build_hysteria2_uri  # noqa: F401
+from .urivider import (  # noqa: F401
+    build_vless_uri,
+    build_hysteria2_uri,
+    build_xhttp_uri,
+    build_vmess_ws_uri,
+    build_ss2022_uri,
+    build_trojan_uri,
+)
+
+# v0.11.0+ Block B — WireGuard config + key + IP-allocation helpers.
+# Pure-stdlib; the `wg` binary is shelled out for keygen. Only used on
+# a host that enables WireGuard.
+from .wireguard import (  # noqa: F401
+    WireGuardError,
+    generate_keypair,
+    allocate_client_ip,
+    server_ip,
+    render_server_conf,
+    render_client_conf,
+    DEFAULT_SUBNET,
+)
 
 # v0.10.0+: multi-node fleet management. Re-exported here so callers
 # (bot, CLI) can `from stealth_vps import FleetNode, load_fleet`. Only

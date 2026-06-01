@@ -19,6 +19,13 @@
    output, byte-for-byte. ansible-lint flags multi-line jinja dicts
    (jinja[spacing]); disabled per-template.
 
+   v0.11.0+: when the operator enables XHTTP / VMess+WS / SS-2022, the
+   matching `*_state.yml` is present and we append an inbound block
+   per protocol. The reloader's `_render_<proto>_inbound` helpers
+   produce the same dict shape. Inbounds are sorted by `tag` for
+   deterministic ordering — alphabetic: reality-in < ss2022-in <
+   vmess-ws-in < xhttp-in.
+
    Schema (Xray-core ≥1.8): https://xtls.github.io/config/
 -#}
 {%- set _client = {
@@ -27,38 +34,132 @@
             | default(stealth_vps_reality_default_client_email)),
   "flow": stealth_vps_reality_flow,
 } -%}
+{%- set _inbounds = [
+  {
+    "tag": "reality-in",
+    "listen": "0.0.0.0",
+    "port": stealth_vps_reality_state.port,
+    "protocol": "vless",
+    "settings": {
+      "clients": [_client],
+      "decryption": "none",
+    },
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "show": false,
+        "xver": 0,
+        "dest": stealth_vps_reality_dest,
+        "serverNames": stealth_vps_reality_servernames,
+        "privateKey": stealth_vps_reality_state.private_key,
+        "shortIds": [stealth_vps_reality_state.short_id],
+      },
+    },
+    "sniffing": {
+      "enabled": true,
+      "destOverride": ["http", "tls", "quic"],
+      "metadataOnly": false,
+      "routeOnly": false,
+    },
+  },
+] -%}
+{#- v0.11.0+ — XHTTP. Reuses Reality UUID; TLS at Caddy; no XTLS flow. -#}
+{%- if stealth_vps_xhttp_enabled | default(false) | bool
+    and stealth_vps_xhttp_state is defined -%}
+{%- set _xhttp_client = {
+  "id": stealth_vps_reality_state.client_uuid,
+  "email": (stealth_vps_reality_state.client_email
+            | default(stealth_vps_reality_default_client_email)),
+} -%}
+{%- set _ = _inbounds.append({
+  "tag": "xhttp-in",
+  "listen": "127.0.0.1",
+  "port": stealth_vps_xhttp_state.port,
+  "protocol": "vless",
+  "settings": {
+    "clients": [_xhttp_client],
+    "decryption": "none",
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "none",
+    "xhttpSettings": {
+      "path": stealth_vps_xhttp_state.path,
+      "host": "",
+      "mode": "auto",
+    },
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls"],
+    "metadataOnly": false,
+    "routeOnly": false,
+  },
+}) -%}
+{%- endif -%}
+{#- v0.11.0+ — VMess+WS. Reuses Reality UUID; alterId=0 modern default. -#}
+{%- if stealth_vps_vmess_ws_enabled | default(false) | bool
+    and stealth_vps_vmess_ws_state is defined -%}
+{%- set _vmess_client = {
+  "id": stealth_vps_reality_state.client_uuid,
+  "email": (stealth_vps_reality_state.client_email
+            | default(stealth_vps_reality_default_client_email)),
+  "alterId": 0,
+} -%}
+{%- set _ = _inbounds.append({
+  "tag": "vmess-ws-in",
+  "listen": "127.0.0.1",
+  "port": stealth_vps_vmess_ws_state.port,
+  "protocol": "vmess",
+  "settings": {
+    "clients": [_vmess_client],
+  },
+  "streamSettings": {
+    "network": "ws",
+    "security": "none",
+    "wsSettings": {
+      "path": stealth_vps_vmess_ws_state.path,
+      "headers": {"Host": ""},
+    },
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls"],
+    "metadataOnly": false,
+    "routeOnly": false,
+  },
+}) -%}
+{%- endif -%}
+{#- v0.11.0+ — SS-2022. Seed render has NO per-user clients (the default
+    client doesn't carry an ss2022_psk; operators issue PSKs per user
+    via `s-vps user add`). The reloader renders the same shape until
+    a user gets a PSK, so byte parity holds on the seed-only path. -#}
+{%- if stealth_vps_ss2022_enabled | default(false) | bool
+    and stealth_vps_ss2022_state is defined -%}
+{%- set _ = _inbounds.append({
+  "tag": "ss2022-in",
+  "listen": "0.0.0.0",
+  "port": stealth_vps_ss2022_state.port,
+  "protocol": "shadowsocks",
+  "settings": {
+    "method": stealth_vps_ss2022_state.method,
+    "password": stealth_vps_ss2022_state.server_psk,
+    "clients": [],
+    "network": "tcp,udp",
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic"],
+    "metadataOnly": false,
+    "routeOnly": false,
+  },
+}) -%}
+{%- endif -%}
+{%- set _inbounds_sorted = _inbounds | sort(attribute='tag') -%}
 {%- set _config = {
   "log": {"loglevel": "warning"},
-  "inbounds": [
-    {
-      "tag": "reality-in",
-      "listen": "0.0.0.0",
-      "port": stealth_vps_reality_state.port,
-      "protocol": "vless",
-      "settings": {
-        "clients": [_client],
-        "decryption": "none",
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "xver": 0,
-          "dest": stealth_vps_reality_dest,
-          "serverNames": stealth_vps_reality_servernames,
-          "privateKey": stealth_vps_reality_state.private_key,
-          "shortIds": [stealth_vps_reality_state.short_id],
-        },
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": ["http", "tls", "quic"],
-        "metadataOnly": false,
-        "routeOnly": false,
-      },
-    }
-  ],
+  "inbounds": _inbounds_sorted,
   "outbounds": [
     {"protocol": "freedom", "tag": "direct"},
     {"protocol": "blackhole", "tag": "blocked"},
