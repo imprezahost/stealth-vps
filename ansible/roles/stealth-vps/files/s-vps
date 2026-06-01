@@ -209,6 +209,12 @@ s_cmd_update() {
     "stealth_vps_bot_token=${bot_token}"
     "stealth_vps_subscription_enabled=${STEALTH_SUBSCRIPTION_ENABLED:-false}"
     "stealth_vps_subscription_expose=${STEALTH_SUBSCRIPTION_EXPOSE:-false}"
+    # tls_email is REQUIRED by tasks/tls.yml whenever a domain is set, so
+    # an `s-vps update` on a domain host fails the assert without it.
+    "stealth_vps_tls_email=${STEALTH_TLS_EMAIL:-}"
+    # onboard flag — without this, the v0.12.0 onboarding bridge can't be
+    # enabled through installer.env + `s-vps update` (only via -e by hand).
+    "stealth_vps_onboard_enabled=${STEALTH_ONBOARD_ENABLED:-false}"
   )
 
   if ansible-pull \

@@ -424,6 +424,87 @@ def build_uris_for_user(
 # remarks so the client can label/sort by region.
 
 
+def uri_config_from_states(
+    *,
+    public_host: str,
+    reality_state: Mapping[str, Any] | None,
+    hysteria_state: Mapping[str, Any] | None = None,
+    ss2022_state: Mapping[str, Any] | None = None,
+    xhttp_state: Mapping[str, Any] | None = None,
+    vmess_ws_state: Mapping[str, Any] | None = None,
+    trojan_state: Mapping[str, Any] | None = None,
+    has_domain: bool = True,
+    reality_sni: str | None = None,
+    reality_flow: str = "xtls-rprx-vision",
+    reality_fingerprint: str = "chrome",
+) -> UriRenderConfig:
+    """Build a single-node `UriRenderConfig` from this host's `*.state.yml`
+    dicts + the public host.
+
+    This is the single-node counterpart to `uri_config_from_node` (which
+    builds from a fleet `FleetNode`). It mirrors the state→config mapping
+    in the role's `stealth-vps-bot.env.j2`, but sourced from the state
+    files the CLI can read directly — the CLI has no `bot.env` to read.
+
+    Pure: callers parse the files and pass dicts; tests pass fixtures.
+
+    A protocol is enabled iff its state dict is provided (non-None) — i.e.
+    the host terminates it. v0.11 protocols whose state file is absent
+    stay at their `UriRenderConfig` defaults (disabled), so
+    `build_uris_for_user()` skips them. Reality SNI defaults to the state
+    file's `client_servername` (when present) else the public host — the
+    same rule `cli._render_user_uris` has always used, so the bundle's
+    Reality URI is byte-identical to what `s-vps user show` prints.
+    """
+    rstate = reality_state or {}
+    sni = reality_sni or str(rstate.get("client_servername") or public_host)
+    cfg = UriRenderConfig(
+        public_host=public_host,
+        reality_port=int(rstate.get("port", 0) or 0),
+        reality_sni=sni,
+        reality_pubkey=str(rstate.get("public_key", "")),
+        reality_short_id=str(rstate.get("short_id", "")),
+        reality_fingerprint=reality_fingerprint,
+        reality_flow=reality_flow,
+        # A host with no reality.state.yml (e.g. a control box) shouldn't
+        # emit a bogus vless://host:0 entry.
+        reality_enabled=bool(rstate.get("public_key")),
+    )
+    if hysteria_state:
+        cfg.hysteria_enabled = True
+        cfg.hysteria_port = int(hysteria_state.get("port", 0) or 0)
+        cfg.hysteria_sni = public_host
+        cfg.hysteria_obfs_type = "salamander"
+        cfg.hysteria_obfs_password = str(hysteria_state.get("obfs_password", ""))
+        # insecure when no domain → Hysteria reuses a self-signed cert.
+        cfg.hysteria_insecure = not has_domain
+    if xhttp_state:
+        cfg.xhttp_enabled = True
+        cfg.xhttp_port = int(xhttp_state.get("port", 0) or 0)
+        cfg.xhttp_path = str(xhttp_state.get("path", ""))
+        cfg.xhttp_host_header = public_host
+        cfg.xhttp_sni = public_host
+    if vmess_ws_state:
+        cfg.vmess_ws_enabled = True
+        cfg.vmess_ws_port = int(vmess_ws_state.get("port", 0) or 0)
+        cfg.vmess_ws_path = str(vmess_ws_state.get("path", ""))
+        cfg.vmess_ws_host_header = public_host
+        cfg.vmess_ws_sni = public_host
+    if ss2022_state:
+        cfg.ss2022_enabled = True
+        cfg.ss2022_port = int(ss2022_state.get("port", 0) or 0)
+        cfg.ss2022_method = str(
+            ss2022_state.get("method", "2022-blake3-aes-128-gcm")
+        )
+        cfg.ss2022_server_psk = str(ss2022_state.get("server_psk", ""))
+    if trojan_state:
+        cfg.trojan_enabled = True
+        cfg.trojan_port = int(trojan_state.get("port", 0) or 0)
+        cfg.trojan_sni = public_host
+        cfg.trojan_insecure = not has_domain
+    return cfg
+
+
 def uri_config_from_node(node: "FleetNode") -> UriRenderConfig:  # noqa: F821
     """Materialise a `UriRenderConfig` from a `FleetNode`. The node's
     own Reality keys + ports go into the config; the operator's host

@@ -27,7 +27,7 @@ Tapping `https://vpn.example.com/.well-known/stealth-vps-onboard/<token>` on a p
 └─────────────────────────────────────┘
 ```
 
-The page detects the OS (Android / iOS / macOS / Windows / Linux) and orders the client buttons accordingly. Every button is a deep-link that opens the app and imports the subscription directly — no manual paste. The QR encodes the subscription URL for camera-scan import. "Copy subscription URL" is the universal fallback for any client.
+The page detects the OS (Android / iOS / macOS / Windows / Linux) and orders the client buttons accordingly. Every button is a deep-link that opens the app and imports the subscription directly — no manual paste. The QR encodes the subscription URL — scan it from **inside your client app** ("Add subscription → Scan QR"), not the phone camera (a camera scan just opens the raw subscription text in a browser). "Copy subscription URL" is the universal fallback for any client.
 
 ## Enabling it
 
@@ -87,7 +87,9 @@ The onboarding URL embeds the subscription token — **identical exposure to han
 
 ## QR validation note
 
-The QR encoder is a compact in-tree implementation (no JS build step, no CDN — see [`files/onboard/vendor/README.md`](../ansible/roles/stealth-vps/files/onboard/vendor/README.md)). It's structurally tested in CI but not scan-validated there (the repo has no JS runtime). **Before relying on QR import, open the onboarding page in a browser and scan it once with a real client app.** If the encoder ever fails, the page degrades gracefully to "QR unavailable — use a button or copy the URL", so import-by-button always works.
+The QR encoder is a compact in-tree implementation (no JS build step, no CDN — see [`files/onboard/vendor/README.md`](../ansible/roles/stealth-vps/files/onboard/vendor/README.md)). It's structurally tested in CI (no JS runtime there) and was **field-validated on a live deployment in v0.12.1** — the rendered QR scans cleanly from a client app's import screen.
+
+**Scan the QR from inside your VPN app** ("Add subscription → Scan QR"), not the phone camera. It encodes the subscription URL, so a camera scan just opens that URL as a web page (the raw base64 bundle) — which is why button-import is the primary one-tap path. If the encoder ever fails, the page degrades gracefully to "QR unavailable — use a button or copy the URL", so import-by-button always works.
 
 ## Platform → client recommendations
 

@@ -20,6 +20,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signed releases (cosign + GPG).
 - External security audit.
 
+## [0.12.1] - 2026-06-01
+
+Patch release. Three fixes surfaced by field-testing the v0.12.0 onboarding bridge on a live VPS. The headline one made the subscription **and** onboarding features non-functional on single-node, CLI-driven hosts — the most common shape — so this ships promptly. (Button-import was confirmed working end-to-end during the test: V2Box imported + connected over Reality/Hysteria.)
+
+Design notes: [`docs/internal/roadmap-v0.12.1-fixes.md`](docs/internal/roadmap-v0.12.1-fixes.md).
+
+### Fixed
+
+- **Single-node hosts never wrote the subscription `.txt`.** `cli._post_mutation_sync` early-returned on an empty fleet *before* the only `write_subscription_file` call, so on a single-node (no-fleet) box `s-vps user add` / `s-vps user rotate` minted the token but never materialised `/var/lib/stealth-vps/subscriptions/<token>.txt`. The subscription URL 404'd and the onboarding deep-links + QR pointed at a dead bundle. The `.txt` refresh is now **unconditional** — single-node builds the bundle from this host's local state files via the new `bot_core.uri_config_from_states`, while the SSH fleet push stays fleet-gated. Regression from the v0.10 fleet refactor; affected single-node, CLI-driven hosts with no Telegram bot.
+- **`s-vps update` couldn't enable onboarding and broke on domain hosts.** The wrapper's `extra_vars` omitted `stealth_vps_onboard_enabled` (the v0.12.0 bridge was unreachable via the blessed `installer.env` + `s-vps update` path — only `ansible-pull -e` by hand worked) and `stealth_vps_tls_email` (so `s-vps update` on any domain-configured host failed `tasks/tls.yml`'s contact-email assert). Both are now passed through `files/s-vps` and persisted in the `installer.env` template (`cli_wrapper.yml`).
+
+### Changed
+
+- **Onboarding QR copy.** The QR encodes the subscription URL, which is meant to be scanned from a client app's in-app QR scanner — scanning it with the phone *camera* just opens the raw subscription text. The page copy now says "scan with your VPN app's own QR scanner (Add subscription → Scan QR)" and adds a note about the camera behaviour. No functional change to the QR; button-import remains the primary one-tap path.
+
+### Test counts
+
+540 (v0.12.0) → **556 pytest** (+16: `uri_config_from_states` builder units, single-node `user add` writes-the-`.txt` regression + `--no-sync` guard, `s-vps` wrapper + installer.env-template plumbing for the onboard/tls_email vars). Suite total: **575 automated tests** (556 pytest + 9 Python builder + 10 Go builder).
+
+### Known limitation
+
+A domain-configured host runs two ACME clients for the same name — acme.sh (HTTP-01 on :80, the Hysteria2 / panel cert) and Caddy (TLS-ALPN-01 on :443, the subscription + onboarding cert). They don't clash at first issuance, but once Caddy holds :80 + :443 an acme.sh *standalone* renewal can't bind :80. A first-class fix (Caddy issues once, Hysteria2 reads Caddy's cert) is deferred to a later release. See `docs/operations.md` → Subscription endpoints.
+
 ## [0.12.0] - 2026-05-20
 
 Thirty-second tagged release. **Onboarding bridge.** A static web page at `/.well-known/stealth-vps-onboard/<token>` turns a subscription token into a one-tap client import — detects the visitor's OS, shows deep-link buttons (Hiddify Next / V2Box / NekoBox / sing-box / Streisand), renders a QR of the subscription URL, and falls back to copy-URL. The operator hands the user one link instead of a raw base64 blob. Off by default; single-node v0.11 → v0.12 is a no-op.
