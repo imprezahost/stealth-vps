@@ -127,6 +127,26 @@ HYSTERIA_INSECURE = _env_bool("STEALTH_VPS_BOT_HYSTERIA_INSECURE")
 HYSTERIA_HOP_MIN = _env("STEALTH_VPS_BOT_HYSTERIA_PORT_HOP_MIN")
 HYSTERIA_HOP_MAX = _env("STEALTH_VPS_BOT_HYSTERIA_PORT_HOP_MAX")
 
+# v0.11.0+ — XHTTP / VMess+WS / SS-2022 URI parameters. Each protocol's
+# block is rendered into bot.env only when the protocol is enabled;
+# the *_ENABLED flag gates whether build_uris_for_user emits its URI.
+XHTTP_ENABLED = _env_bool("STEALTH_VPS_BOT_XHTTP_ENABLED")
+XHTTP_PORT = int(_env("STEALTH_VPS_BOT_XHTTP_PORT", "0") or "0")
+XHTTP_PATH = _env("STEALTH_VPS_BOT_XHTTP_PATH")
+XHTTP_HOST_HEADER = _env("STEALTH_VPS_BOT_XHTTP_HOST_HEADER")
+XHTTP_SNI = _env("STEALTH_VPS_BOT_XHTTP_SNI")
+
+VMESS_WS_ENABLED = _env_bool("STEALTH_VPS_BOT_VMESS_WS_ENABLED")
+VMESS_WS_PORT = int(_env("STEALTH_VPS_BOT_VMESS_WS_PORT", "0") or "0")
+VMESS_WS_PATH = _env("STEALTH_VPS_BOT_VMESS_WS_PATH")
+VMESS_WS_HOST_HEADER = _env("STEALTH_VPS_BOT_VMESS_WS_HOST_HEADER")
+VMESS_WS_SNI = _env("STEALTH_VPS_BOT_VMESS_WS_SNI")
+
+SS2022_ENABLED = _env_bool("STEALTH_VPS_BOT_SS2022_ENABLED")
+SS2022_PORT = int(_env("STEALTH_VPS_BOT_SS2022_PORT", "0") or "0")
+SS2022_METHOD = _env("STEALTH_VPS_BOT_SS2022_METHOD", "2022-blake3-aes-128-gcm")
+SS2022_SERVER_PSK = _env("STEALTH_VPS_BOT_SS2022_SERVER_PSK")
+
 SUBSCRIPTION_PUBLIC_URL = _env("STEALTH_VPS_BOT_SUBSCRIPTION_PUBLIC_URL")
 
 # --- Headless-mode config -------------------------------------------------
@@ -238,6 +258,21 @@ def _uri_render_config() -> UriRenderConfig:
         hysteria_insecure=HYSTERIA_INSECURE,
         hysteria_port_hop_min=int(HYSTERIA_HOP_MIN) if HYSTERIA_HOP_MIN else None,
         hysteria_port_hop_max=int(HYSTERIA_HOP_MAX) if HYSTERIA_HOP_MAX else None,
+        # v0.11.0+ protocol params — each gated by its *_enabled flag.
+        xhttp_enabled=XHTTP_ENABLED,
+        xhttp_port=XHTTP_PORT,
+        xhttp_path=XHTTP_PATH,
+        xhttp_host_header=XHTTP_HOST_HEADER,
+        xhttp_sni=XHTTP_SNI,
+        vmess_ws_enabled=VMESS_WS_ENABLED,
+        vmess_ws_port=VMESS_WS_PORT,
+        vmess_ws_path=VMESS_WS_PATH,
+        vmess_ws_host_header=VMESS_WS_HOST_HEADER,
+        vmess_ws_sni=VMESS_WS_SNI,
+        ss2022_enabled=SS2022_ENABLED,
+        ss2022_port=SS2022_PORT,
+        ss2022_method=SS2022_METHOD,
+        ss2022_server_psk=SS2022_SERVER_PSK,
     )
 
 

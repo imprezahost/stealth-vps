@@ -181,6 +181,84 @@ def test_render_metrics_emits_negative_one_when_reality_state_missing(
 
 
 # ---------------------------------------------------------------------------
+# v0.11.0+ — per-protocol port gauges + new units
+# ---------------------------------------------------------------------------
+
+
+def test_render_metrics_includes_new_protocol_units(
+    users_index_path: str, tmp_path: pathlib.Path
+) -> None:
+    """trojan-go + wg-quick@stealth units appear in the unit-active
+    family (reporting 0 = inactive on a host that hasn't enabled them)."""
+    with patch("subprocess.run", return_value=MagicMock(stdout="inactive\n", returncode=3)):
+        body = health_exporter.render_metrics(
+            reality_state_path=str(tmp_path / "missing.yml"),
+            users_index_path=users_index_path,
+            protocol_state_paths={},
+        )
+    assert 'stealth_vps_unit_active{unit="trojan-go.service"} 0' in body
+    assert 'stealth_vps_unit_active{unit="wg-quick@stealth.service"} 0' in body
+
+
+def test_render_metrics_protocol_port_gauge_negative_one_when_state_absent(
+    users_index_path: str, tmp_path: pathlib.Path
+) -> None:
+    """A protocol whose state file doesn't exist → -1 (not enabled),
+    distinguishable on dashboards from 0 (enabled but down)."""
+    with patch("subprocess.run", return_value=MagicMock(stdout="active\n", returncode=0)):
+        body = health_exporter.render_metrics(
+            reality_state_path=str(tmp_path / "missing.yml"),
+            users_index_path=users_index_path,
+            protocol_state_paths={
+                "ss2022": str(tmp_path / "absent-ss2022.yml"),
+                "xhttp": str(tmp_path / "absent-xhttp.yml"),
+                "vmess_ws": str(tmp_path / "absent-vmess.yml"),
+            },
+        )
+    assert 'stealth_vps_ss2022_port_listening{port=""} -1' in body
+    assert 'stealth_vps_xhttp_port_listening{port=""} -1' in body
+    assert 'stealth_vps_vmess_ws_port_listening{port=""} -1' in body
+
+
+def test_render_metrics_protocol_port_gauge_probes_when_state_present(
+    users_index_path: str, tmp_path: pathlib.Path
+) -> None:
+    """A protocol with a state file → the gauge carries the port label
+    + the TCP probe result (mocked to 1 = listening here)."""
+    ss_state = tmp_path / "ss2022.state.yml"
+    ss_state.write_text(
+        "port: 8543\nmethod: 2022-blake3-aes-128-gcm\nserver_psk: SP\n",
+        encoding="utf-8",
+    )
+    with patch("subprocess.run", return_value=MagicMock(stdout="active\n", returncode=0)), \
+         patch.object(health_exporter, "probe_tcp_port", return_value=1):
+        body = health_exporter.render_metrics(
+            reality_state_path=str(tmp_path / "missing.yml"),
+            users_index_path=users_index_path,
+            protocol_state_paths={"ss2022": str(ss_state)},
+        )
+    assert 'stealth_vps_ss2022_port_listening{port="8543"} 1' in body
+
+
+def test_render_metrics_help_type_balance_holds_with_new_gauges(
+    users_index_path: str, tmp_path: pathlib.Path
+) -> None:
+    """Every new gauge family still pairs a HELP with a TYPE — a
+    malformed exposition body breaks Prometheus parsing."""
+    with patch("subprocess.run", return_value=MagicMock(stdout="active\n", returncode=0)):
+        body = health_exporter.render_metrics(
+            reality_state_path=str(tmp_path / "missing.yml"),
+            users_index_path=users_index_path,
+            protocol_state_paths={
+                "ss2022": str(tmp_path / "a.yml"),
+                "xhttp": str(tmp_path / "b.yml"),
+                "vmess_ws": str(tmp_path / "c.yml"),
+            },
+        )
+    assert body.count("# HELP ") == body.count("# TYPE ")
+
+
+# ---------------------------------------------------------------------------
 # HTTP server smoke
 # ---------------------------------------------------------------------------
 

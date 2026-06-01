@@ -48,16 +48,34 @@ DEFAULT_BIND_PORT = 9102
 
 # Units we probe. Each entry: (systemd name, optional reality_state.yml
 # key holding the listen port for liveness check).
+#
+# v0.11.0+: trojan-go + wg-quick@stealth are probed too. They report 0
+# (inactive/missing) on hosts that haven't enabled those protocols —
+# same self-describing behaviour as x-ui on a headless box. No harm in
+# probing a unit that doesn't exist.
 _PROBE_UNITS = (
     ("xray.service", "port"),
     ("hysteria-server.service", None),       # UDP — separate probe path
     ("x-ui.service", None),                  # Panel mode only
     ("caddy.service", None),                 # Subscription endpoint
     ("stealth-vps-bot.service", None),       # Bot
+    ("trojan-go.service", None),             # v0.11.0+ Trojan-Go
+    ("wg-quick@stealth.service", None),      # v0.11.0+ WireGuard
 )
 
 # Path defaults — same constants the rest of the package pins.
 _DEFAULT_REALITY_STATE_PATH = "/etc/stealth-vps/reality.state.yml"
+
+# v0.11.0+ — per-protocol state files. Each carries a `port: NNNNN`
+# line the generic port reader extracts. When the file is absent (the
+# protocol isn't enabled on this host) the gauge is emitted with -1
+# ("no signal") rather than dropped, so dashboards can tell "disabled"
+# from "down". Tag → state file path.
+_PROTOCOL_STATE_PATHS = {
+    "ss2022": "/etc/stealth-vps/ss2022.state.yml",
+    "xhttp": "/etc/stealth-vps/xhttp.state.yml",
+    "vmess_ws": "/etc/stealth-vps/vmess_ws.state.yml",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -94,11 +112,11 @@ def probe_tcp_port(host: str, port: int, *, timeout: float = 2.0) -> int:
         return 0
 
 
-def _read_reality_port(path: str = _DEFAULT_REALITY_STATE_PATH) -> int | None:
-    """Extract the Reality listen port from reality.state.yml. Stays
-    None when the file's absent (panel mode, or pre-converge box).
-    We don't pull in a YAML parser — the field is one line `port: NNNNN`
-    and we can read it with a regex."""
+def _read_state_port(path: str) -> int | None:
+    """Extract the `port: NNNNN` line from any stealth-vps state file.
+    Returns None when the file is absent (protocol not enabled, panel
+    mode, or pre-converge box). We don't pull in a YAML parser — the
+    field is one line and a regex is enough."""
     import re
     try:
         text = pathlib.Path(path).read_text(encoding="utf-8")
@@ -108,6 +126,13 @@ def _read_reality_port(path: str = _DEFAULT_REALITY_STATE_PATH) -> int | None:
     if not m:
         return None
     return int(m.group(1))
+
+
+def _read_reality_port(path: str = _DEFAULT_REALITY_STATE_PATH) -> int | None:
+    """Reality-specific wrapper around `_read_state_port`. Kept as a
+    named function because the render path + tests reference it
+    directly."""
+    return _read_state_port(path)
 
 
 def count_users(path: str | None = None) -> tuple[int, int, int]:
@@ -156,14 +181,23 @@ def is_index_readable(path: str | None = None) -> int:
 
 
 def render_metrics(*, reality_state_path: str = _DEFAULT_REALITY_STATE_PATH,
-                   users_index_path: str | None = None) -> str:
+                   users_index_path: str | None = None,
+                   protocol_state_paths: dict[str, str] | None = None) -> str:
     """Snapshot every probe and return the Prometheus text body.
 
     Why we re-probe on every scrape rather than caching: scrapes are
     typically once per 30s, and each probe is a sub-millisecond
     syscall (systemctl is-active reads a tiny file; the TCP port check
     times out at 2s but we only call it for the Reality port). Caching
-    would add staleness without a meaningful CPU win."""
+    would add staleness without a meaningful CPU win.
+
+    `protocol_state_paths` (v0.11.0+) maps a protocol tag (ss2022 /
+    xhttp / vmess_ws) to its state-file path. Defaults to the role's
+    canonical paths; tests pass tmp paths. Each emits a
+    `stealth_vps_<tag>_port_listening` gauge (-1 when the protocol
+    isn't enabled, 0 when enabled-but-down, 1 when listening)."""
+    if protocol_state_paths is None:
+        protocol_state_paths = _PROTOCOL_STATE_PATHS
     lines: list[str] = []
 
     # --- systemd unit health ----------------------------------------------
@@ -186,6 +220,27 @@ def render_metrics(*, reality_state_path: str = _DEFAULT_REALITY_STATE_PATH,
         # Emit the metric anyway with -1 so dashboards see "no signal"
         # vs "down". Prometheus tolerates negative values for gauges.
         lines.append('stealth_vps_reality_port_listening{port=""} -1')
+
+    # --- v0.11.0+ per-protocol TCP ports -------------------------------
+    # One gauge per protocol tag. -1 = state file absent (protocol not
+    # enabled on this host); 0 = enabled but the port isn't accepting
+    # connections; 1 = listening. XHTTP + VMess+WS bind loopback (Caddy
+    # fronts), SS-2022 binds 0.0.0.0 — all reachable via 127.0.0.1 for
+    # the local probe.
+    for tag in sorted(protocol_state_paths):
+        state_path = protocol_state_paths[tag]
+        metric = f"stealth_vps_{tag}_port_listening"
+        lines.append(
+            f"# HELP {metric} 1 when TCP connect to the {tag} port succeeds "
+            f"(-1 = protocol not enabled)."
+        )
+        lines.append(f"# TYPE {metric} gauge")
+        port = _read_state_port(state_path)
+        if port is not None:
+            v = probe_tcp_port("127.0.0.1", port)
+            lines.append(f'{metric}{{port="{port}"}} {v}')
+        else:
+            lines.append(f'{metric}{{port=""}} -1')
 
     # --- users index health + counts ----------------------------------
     readable = is_index_readable(users_index_path)
@@ -241,6 +296,9 @@ class _MetricsHandler(BaseHTTPRequestHandler):
                 body = render_metrics(
                     reality_state_path=self.server.reality_state_path,
                     users_index_path=self.server.users_index_path,
+                    protocol_state_paths=getattr(
+                        self.server, "protocol_state_paths", None
+                    ),
                 ).encode("utf-8")
             except Exception as exc:   # noqa: BLE001 — last-resort barrier
                 log.exception("render_metrics failed")
@@ -268,6 +326,7 @@ def make_server(
     *,
     reality_state_path: str = _DEFAULT_REALITY_STATE_PATH,
     users_index_path: str | None = None,
+    protocol_state_paths: dict[str, str] | None = None,
     log_requests: bool = False,
 ) -> HTTPServer:
     """Return a configured HTTPServer. The caller decides whether to
@@ -275,10 +334,15 @@ def make_server(
 
     We attach the path overrides to the server instance because
     BaseHTTPRequestHandler's API gives handlers a self.server attribute;
-    that's the cleanest stdlib-only injection point."""
+    that's the cleanest stdlib-only injection point.
+
+    `protocol_state_paths` (v0.11.0+) is None in the systemd flow → the
+    handler passes None → render_metrics uses the canonical paths.
+    Tests inject tmp paths."""
     server = HTTPServer((bind_addr, bind_port), _MetricsHandler)
     server.reality_state_path = reality_state_path        # type: ignore[attr-defined]
     server.users_index_path = users_index_path            # type: ignore[attr-defined]
+    server.protocol_state_paths = protocol_state_paths    # type: ignore[attr-defined]
     server.log_requests = log_requests                    # type: ignore[attr-defined]
     return server
 

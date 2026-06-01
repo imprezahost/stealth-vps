@@ -104,6 +104,46 @@
     mode: '0755'
   tags: [subscription, caddy]
 
+# v0.11.0+: when XHTTP / VMess+WS are enabled, the Caddy public-TLS site
+# reverse-proxies their CDN-fronted path to the loopback Xray inbound.
+# We read the loopback ports straight from the state files here (rather
+# than relying on facts set by xray.yml) so `--tags subscription,caddy`
+# alone still renders a correct Caddyfile. Best-effort: a missing state
+# file leaves the fact undefined and the Caddyfile template skips the
+# reverse-proxy block for that protocol.
+
+- name: Read XHTTP state for the Caddy reverse-proxy port
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/xhttp.state.yml"
+  register: stealth_vps_xhttp_state_for_caddy
+  when: stealth_vps_xhttp_enabled | default(false) | bool
+  failed_when: false
+  tags: [subscription, caddy]
+
+- name: Set XHTTP state fact for Caddy (best-effort)
+  ansible.builtin.set_fact:
+    stealth_vps_xhttp_state: "{{ stealth_vps_xhttp_state_for_caddy.content | b64decode | from_yaml }}"
+  when:
+    - stealth_vps_xhttp_enabled | default(false) | bool
+    - stealth_vps_xhttp_state_for_caddy.content is defined
+  tags: [subscription, caddy]
+
+- name: Read VMess+WS state for the Caddy reverse-proxy port
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/vmess_ws.state.yml"
+  register: stealth_vps_vmess_ws_state_for_caddy
+  when: stealth_vps_vmess_ws_enabled | default(false) | bool
+  failed_when: false
+  tags: [subscription, caddy]
+
+- name: Set VMess+WS state fact for Caddy (best-effort)
+  ansible.builtin.set_fact:
+    stealth_vps_vmess_ws_state: "{{ stealth_vps_vmess_ws_state_for_caddy.content | b64decode | from_yaml }}"
+  when:
+    - stealth_vps_vmess_ws_enabled | default(false) | bool
+    - stealth_vps_vmess_ws_state_for_caddy.content is defined
+  tags: [subscription, caddy]
+
 - name: Render /etc/caddy/Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2
