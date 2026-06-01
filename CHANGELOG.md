@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned (v0.12.0)
-- **Subscription bridge web UI** — `/.well-known/stealth-vps-onboard/<token>` detects user-agent and shows QR + deep-link for Hiddify Next / V2Box / NekoBox.
-
 ### Planned (v0.13.0 / v0.14.0)
 - **Native Android client** (Kotlin, NetworkExtension equivalent + Xray/Hysteria via NDK) then **iOS** (Swift, NetworkExtension). Caminho C from the strategic plan — build from scratch, no fork. Long horizon (~6-9 months per platform solo).
 
@@ -22,6 +19,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pen-test of remaining clients (Shadowrocket / Streisand / V2Box / NekoBox).
 - Signed releases (cosign + GPG).
 - External security audit.
+
+## [0.12.0] - 2026-05-20
+
+Thirty-second tagged release. **Onboarding bridge.** A static web page at `/.well-known/stealth-vps-onboard/<token>` turns a subscription token into a one-tap client import — detects the visitor's OS, shows deep-link buttons (Hiddify Next / V2Box / NekoBox / sing-box / Streisand), renders a QR of the subscription URL, and falls back to copy-URL. The operator hands the user one link instead of a raw base64 blob. Off by default; single-node v0.11 → v0.12 is a no-op.
+
+No backend, no per-user file — the page is the same static bundle for everyone; the token lives in the URL. Zero third-party requests (no CDN, no web fonts, no analytics); the QR encoder is vendored in-tree.
+
+Design doc: [`docs/internal/roadmap-v0.12-onboard-bridge.md`](docs/internal/roadmap-v0.12-onboard-bridge.md). Operator runbook: [`docs/onboarding.md`](docs/onboarding.md).
+
+### Added
+
+- **Onboarding bridge** (`stealth_vps_onboard_enabled`, off by default). Static bundle (`files/onboard/`: index.html + onboard.js + onboard.css + vendored qrcode.min.js) served by Caddy at `<onboard_path>/*` with an SPA-style `try_files` (any token path → index.html, no token oracle) + strict CSP / `X-Frame-Options: DENY` / nosniff / no-referrer headers. Requires `subscription_expose` + a domain (converge-time assert).
+- **`onboard.js`** — reads the token from `location.pathname`, derives the sub URL, detects platform (incl. iPadOS-as-Mac disambiguation), renders platform-ordered deep-link buttons + QR + copy-URL + a lazy "show server details" bundle fetch (the only network call). Deep-link schemes verified against current client releases.
+- **`stealth_vps.onboard`** module — `onboard_url_for` / `sub_url_for` / `deeplink_for` (pure stdlib). `DEEPLINK_TEMPLATES` is the single source of truth, mirrored in onboard.js; a pytest parity test asserts the two never drift.
+- **Vendored QR encoder** — a compact in-tree QR Code generator (byte-mode, ECC L/M/Q/H, versions 1-40), faithful to the spec / nayuki structure. No CDN, no build step (ADR O1 deviation, operator-approved). Graceful degradation: if it ever fails, the page shows a "QR unavailable" note and import-by-button still works.
+- **`s-vps user onboard-url LABEL`** — print a user's onboarding link. `s-vps user add` + `user show` print it alongside the sub URL.
+- **Bot `/onboard LABEL`** — DM the onboarding link + a QR image (via qrencode when present; link-only fallback). `/sub` appends the onboarding link.
+- **`docs/onboarding.md`** — operator + end-user runbook.
+
+### Test counts
+
+517 (v0.11.0) → **540 pytest** (+21: onboard URL/deeplink builders, special-char encoding, JS↔Python deep-link parity + token-path anchor, vendored-QR API-surface + brace-balance smoke, CLI onboard-url derived/explicit/no-base/unknown-user, user-show onboard link). Suite total: **559 automated tests** (540 pytest + 9 Python builder + 10 Go builder).
+
+### Known limitation
+
+The vendored QR encoder is structurally tested in CI but not scan-validated there (no JS runtime in the repo). Operators relying on QR import should scan it once in a browser; import-by-button is unaffected. See `files/onboard/vendor/README.md`.
 
 ## [0.11.0] - 2026-05-20
 

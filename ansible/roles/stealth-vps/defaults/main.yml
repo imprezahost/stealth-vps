@@ -284,6 +284,17 @@ stealth_vps_subscription_enabled: false
 stealth_vps_subscription_expose: false
 stealth_vps_subscription_path: /.well-known/stealth-vps-sub
 
+# ---- v0.12.0: Onboarding bridge web UI ----
+# A static page served by Caddy at <onboard_path>/<token> that turns a
+# subscription token into a one-tap client import (UA detection +
+# deep-link buttons + QR). No backend, no per-user file — the page is
+# the same static bundle for everyone; the token lives in the URL.
+# Off by default. Requires subscription_expose=true + a domain (the
+# deep-links embed a public sub URL — a loopback-only sub endpoint
+# makes them useless; the role asserts this at converge time).
+stealth_vps_onboard_enabled: false
+stealth_vps_onboard_path: /.well-known/stealth-vps-onboard
+
 # ---- v0.9.0: Health-check Prometheus exporter ----
 # Tiny HTTP server on :9102 exposing /metrics + /healthz. Off by default
 # because operators on the v0.6.0 textfile-collector flow already have

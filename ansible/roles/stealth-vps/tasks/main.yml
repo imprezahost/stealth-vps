@@ -168,6 +168,14 @@
   when: stealth_vps_subscription_enabled | bool
   tags: [subscription, caddy]
 
+# Onboarding bridge (v0.12.0). Install-or-remove based on
+# stealth_vps_onboard_enabled; the static bundle rides on the Caddy
+# install from subscription.yml above (the Caddyfile route is rendered
+# there). The expose-required assert lives inside onboard.yml.
+- name: Install (or remove) onboarding bridge web UI
+  ansible.builtin.include_tasks: onboard.yml
+  tags: [onboard, caddy]
+
 - name: Install /usr/local/bin/s-vps operator CLI wrapper
   ansible.builtin.include_tasks: cli_wrapper.yml
   when: stealth_vps_cli_install | bool

@@ -1,0 +1,61 @@
+---
+# v0.12.0 — Onboarding bridge web UI.
+#
+# Installs the static bundle to /var/lib/stealth-vps/onboard/. Caddy
+# (subscription.yml) serves it at <onboard_path>/* with a CSP +
+# X-Frame-Options header and an SPA-style try_files so any token path
+# renders index.html. No per-user state, no backend — the page reads
+# the token from its own URL client-side.
+#
+# Gated on stealth_vps_onboard_enabled (+ the expose assert below).
+# Runs as part of subscription.yml's flow because it rides on the same
+# Caddy install; the Caddyfile route is rendered there.
+
+- name: Refuse onboard bridge without a public subscription endpoint
+  ansible.builtin.assert:
+    that:
+      - not (stealth_vps_onboard_enabled | bool) or
+        ((stealth_vps_subscription_enabled | bool)
+         and (stealth_vps_subscription_expose | bool)
+         and (stealth_vps_domain | default('', true) | length > 0))
+    fail_msg: >-
+      stealth_vps_onboard_enabled=true requires the subscription endpoint
+      to be publicly reachable: set stealth_vps_subscription_enabled=true,
+      stealth_vps_subscription_expose=true, and a stealth_vps_domain. The
+      onboarding deep-links embed a public subscription URL — a loopback-
+      only sub endpoint makes them useless.
+  tags: [onboard, caddy]
+
+- name: Ensure onboard bundle directory exists
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps/onboard
+    state: directory
+    owner: root
+    group: caddy
+    mode: '0755'
+  when: stealth_vps_onboard_enabled | bool
+  tags: [onboard, caddy]
+
+- name: Sync onboard static bundle
+  # `copy` of the whole files/onboard/ tree (index.html + onboard.js +
+  # onboard.css + vendor/). Adding an asset later just drops a file in
+  # files/onboard/. World-readable (Caddy serves it publicly anyway).
+  ansible.builtin.copy:
+    src: onboard/
+    dest: /var/lib/stealth-vps/onboard/
+    owner: root
+    group: caddy
+    mode: '0644'
+    directory_mode: '0755'
+  when: stealth_vps_onboard_enabled | bool
+  notify: Reload caddy
+  tags: [onboard, caddy]
+
+# --- Disable path: remove the bundle when the flag is off -------------
+
+- name: Remove onboard bundle when disabled
+  ansible.builtin.file:
+    path: /var/lib/stealth-vps/onboard
+    state: absent
+  when: not (stealth_vps_onboard_enabled | bool)
+  tags: [onboard, caddy]
