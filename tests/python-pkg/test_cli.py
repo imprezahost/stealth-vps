@@ -1202,6 +1202,75 @@ def test_user_add_no_trojan_state_leaves_password_null(
     assert rec["trojan_password"] is None
 
 
+def test_control_mode_autogens_ss2022_psk_when_fleet_node_runs_it(
+    users_index_path: str, control_mode: pathlib.Path
+) -> None:
+    """v0.11 Block C: on a control box, `s-vps user add` mints an
+    ss2022_psk when a registered fleet node terminates SS-2022 — even
+    though the control itself has no ss2022.state.yml."""
+    import base64
+    from stealth_vps import fleet as _fleet
+    _fleet.save_node(
+        _fleet.FleetNode(
+            node_id="tokyo-1", ssh_host="h", ssh_key_path="/k",
+            ss2022_port=8543, ss2022_method="2022-blake3-aes-128-gcm",
+            ss2022_server_psk="SRV",
+        ),
+        fleet_dir=str(control_mode),
+    )
+    # No SS-2022 sync push to assert here — patch sync_all to a no-op.
+    with patch("stealth_vps.fleet.load_fleet",
+               return_value=[_fleet.FleetNode(
+                   node_id="tokyo-1", ssh_host="h", ssh_key_path="/k",
+                   ss2022_port=8543, ss2022_method="2022-blake3-aes-128-gcm",
+                   ss2022_server_psk="SRV")]), \
+         patch("stealth_vps.fleet.sync_all", return_value=[]), \
+         patch("stealth_vps.fleet.update_sync_status"):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is not None
+    assert len(base64.b64decode(rec["ss2022_psk"])) == 16   # aes-128 → 16 bytes
+
+
+def test_control_mode_autogens_trojan_password_when_fleet_node_runs_it(
+    users_index_path: str, control_mode: pathlib.Path
+) -> None:
+    from stealth_vps import fleet as _fleet
+    node = _fleet.FleetNode(
+        node_id="tokyo-1", ssh_host="h", ssh_key_path="/k", trojan_port=4443,
+    )
+    _fleet.save_node(node, fleet_dir=str(control_mode))
+    with patch("stealth_vps.fleet.load_fleet", return_value=[node]), \
+         patch("stealth_vps.fleet.sync_all", return_value=[]), \
+         patch("stealth_vps.fleet.update_sync_status"):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["trojan_password"] is not None
+
+
+def test_control_mode_no_protocol_node_leaves_creds_null(
+    users_index_path: str, control_mode: pathlib.Path
+) -> None:
+    """Control box whose fleet nodes run only Reality+Hysteria → no
+    ss2022/trojan creds minted (no node serves them)."""
+    from stealth_vps import fleet as _fleet
+    node = _fleet.FleetNode(
+        node_id="tokyo-1", ssh_host="h", ssh_key_path="/k",
+        reality_port=43338, hysteria_port=49440,
+    )
+    _fleet.save_node(node, fleet_dir=str(control_mode))
+    with patch("stealth_vps.fleet.load_fleet", return_value=[node]), \
+         patch("stealth_vps.fleet.sync_all", return_value=[]), \
+         patch("stealth_vps.fleet.update_sync_status"):
+        rc = cli.main(["user", "add", "bob", "--no-sync"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["ss2022_psk"] is None
+    assert rec["trojan_password"] is None
+
+
 def test_data_node_mode_unchanged_by_step6(
     users_index_path: str, reloader_args_json: str, capsys
 ) -> None:

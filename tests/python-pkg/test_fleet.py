@@ -129,6 +129,51 @@ def test_yaml_round_trip_full_node() -> None:
     assert rebuilt == node
 
 
+def test_yaml_round_trip_v011_protocol_fields() -> None:
+    """v0.11.0+ per-protocol fields (ss2022/xhttp/vmess_ws/trojan)
+    round-trip through save → parse → reload. A node discovered with
+    these fields must persist them so the bundle keeps emitting the
+    per-protocol URIs across control-box restarts."""
+    node = fleet.FleetNode(
+        node_id="tokyo-1",
+        ssh_host="10.0.0.1",
+        reality_port=43338,
+        ss2022_port=8543,
+        ss2022_method="2022-blake3-aes-256-gcm",
+        ss2022_server_psk="SRV_PSK_B64",
+        xhttp_port=18543,
+        xhttp_path="/.well-known/xhttp-stream",
+        vmess_ws_port=19543,
+        vmess_ws_path="/.well-known/vmess-ws",
+        trojan_port=4443,
+    )
+    text = fleet._emit_node_yaml(node.to_dict())
+    rebuilt = fleet.FleetNode.from_dict(fleet._parse_node_yaml(text))
+    assert rebuilt == node
+    assert rebuilt.ss2022_port == 8543
+    assert rebuilt.ss2022_method == "2022-blake3-aes-256-gcm"
+    assert rebuilt.xhttp_path == "/.well-known/xhttp-stream"
+    assert rebuilt.trojan_port == 4443
+
+
+def test_from_dict_v010_node_file_loads_with_zero_protocol_ports() -> None:
+    """A fleet/<id>.yml written by v0.10 (no v0.11 protocol fields)
+    loads cleanly — the new fields default to 0/empty, so the node
+    contributes only Reality+Hysteria to the bundle until a re-`fleet
+    add` discovers the new protocols."""
+    v010_data = {
+        "node_id": "legacy",
+        "ssh_host": "10.0.0.9",
+        "reality_port": 43338,
+        "hysteria_port": 49440,
+    }
+    node = fleet.FleetNode.from_dict(v010_data)
+    assert node.ss2022_port == 0
+    assert node.xhttp_port == 0
+    assert node.vmess_ws_port == 0
+    assert node.trojan_port == 0
+
+
 def test_yaml_round_trip_with_null_public_host() -> None:
     """When `public_host` is None the YAML must encode it as `null` so
     the parser can distinguish "operator didn't set it" (None) from

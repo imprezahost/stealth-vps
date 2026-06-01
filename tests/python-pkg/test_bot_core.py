@@ -433,6 +433,96 @@ def test_uri_config_from_node_falls_back_to_endpoint_for_sni() -> None:
     assert cfg.reality_sni == node.public_endpoint
 
 
+# ---------------------------------------------------------------------------
+# v0.11.0 Block C — per-protocol multi-node discovery
+# ---------------------------------------------------------------------------
+
+
+def test_uri_config_from_node_enables_protocols_with_ports() -> None:
+    """A node carrying v0.11 protocol ports → the config enables each
+    one. Ports at 0 (default) stay disabled."""
+    from stealth_vps import bot_core
+    node = _make_node(
+        "full",
+        ss2022_port=8543, ss2022_method="2022-blake3-aes-128-gcm",
+        ss2022_server_psk="SP",
+        xhttp_port=18543, xhttp_path="/x",
+        vmess_ws_port=19543, vmess_ws_path="/v",
+        trojan_port=4443,
+    )
+    cfg = bot_core.uri_config_from_node(node)
+    assert cfg.ss2022_enabled and cfg.ss2022_port == 8543
+    assert cfg.ss2022_server_psk == "SP"
+    assert cfg.xhttp_enabled and cfg.xhttp_path == "/x"
+    assert cfg.vmess_ws_enabled and cfg.vmess_ws_path == "/v"
+    assert cfg.trojan_enabled and cfg.trojan_port == 4443
+
+
+def test_uri_config_from_node_disables_protocols_without_ports() -> None:
+    """A Reality-only node (no v0.11 protocol ports) → all new
+    protocols disabled in the config."""
+    from stealth_vps import bot_core
+    node = _make_node("reality-only")   # no ss2022/xhttp/vmess/trojan ports
+    cfg = bot_core.uri_config_from_node(node)
+    assert not cfg.ss2022_enabled
+    assert not cfg.xhttp_enabled
+    assert not cfg.vmess_ws_enabled
+    assert not cfg.trojan_enabled
+
+
+def test_build_uris_multinode_heterogeneous_fleet() -> None:
+    """The v0.11 design's headline scenario: tokyo-1 runs
+    Reality+Hysteria+SS-2022, cdn-1 runs only XHTTP. A user's bundle
+    has exactly the URIs each node actually serves — 3 from tokyo
+    (reality+hysteria+ss) + 1 from cdn (xhttp) = 4."""
+    from stealth_vps import bot_core
+    tokyo = _make_node(
+        "tokyo-1",
+        ss2022_port=8543, ss2022_method="2022-blake3-aes-128-gcm",
+        ss2022_server_psk="SP",
+    )
+    # cdn-1: XHTTP only — no Reality, no Hysteria, no SS.
+    cdn = _make_node(
+        "cdn-1",
+        reality_port=0, reality_public_key="", reality_short_id="",
+        hysteria_port=0,
+        xhttp_port=18543, xhttp_path="/x",
+    )
+    rec = {
+        "reality_uuid": "00000000-0000-0000-0000-000000000001",
+        "hysteria_password": "hy2-pw",
+        "ss2022_psk": "USER_PSK",
+        "trojan_password": "tpw",
+    }
+    uris = bot_core.build_uris_for_user_multinode(rec, [cdn, tokyo], label="alice")
+    schemes = sorted(u.split("://", 1)[0] for u in uris)
+    # cdn: 1 vless(xhttp). tokyo: vless(reality) + hysteria2 + ss.
+    # Two vless entries (xhttp on cdn, reality on tokyo).
+    assert schemes == ["hysteria2", "ss", "vless", "vless"]
+    # Per-node remarks present.
+    joined = "\n".join(uris)
+    assert "stealth-vps-xhttp-alice-cdn-1" in joined
+    assert "stealth-vps-ss2022-alice-tokyo-1" in joined
+    assert "stealth-vps-reality-alice-tokyo-1" in joined
+
+
+def test_build_uris_multinode_ss2022_uses_per_node_server_psk() -> None:
+    """Each node has its OWN ss2022 server PSK (per-node keys, ADR).
+    The bundle's ss:// for a node must pre-concatenate THAT node's
+    server PSK with the user's PSK — not some other node's."""
+    from stealth_vps import bot_core
+    import base64
+    n1 = _make_node("n1", ss2022_port=8543, ss2022_server_psk="SERVER_PSK_N1")
+    rec = {"reality_uuid": "u", "hysteria_password": "h", "ss2022_psk": "USER_PSK"}
+    uris = bot_core.build_uris_for_user_multinode(rec, [n1])
+    ss = [u for u in uris if u.startswith("ss://")][0]
+    # Decode the userinfo, confirm n1's server PSK is in the creds.
+    import urllib.parse
+    encoded = urllib.parse.urlparse(ss).netloc.split("@")[0]
+    auth = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+    assert "SERVER_PSK_N1:USER_PSK" in auth
+
+
 def test_build_uris_for_user_multinode_emits_per_node_uris() -> None:
     """2 nodes × 2 protocols = 4 URIs, per-node Reality keys baked in."""
     from stealth_vps import bot_core

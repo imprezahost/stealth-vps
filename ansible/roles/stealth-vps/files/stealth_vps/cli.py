@@ -467,6 +467,44 @@ def _maybe_autogen_ss2022_psk(
     return _autogen_ss2022_psk_for_method(method)
 
 
+def _fleet_runs_protocol(port_field: str) -> bool:
+    """True iff this is a control box AND at least one registered fleet
+    node terminates the protocol identified by `port_field` (a FleetNode
+    attribute name like 'ss2022_port' / 'trojan_port' — non-zero means
+    enabled on that node). Used so `s-vps user add` on a control mints
+    the per-user credential for protocols its DATA NODES run, even
+    though the control itself doesn't.
+
+    Returns False (no fleet introspection) on single-node / data-node
+    hosts so their autogen stays driven purely by local state files."""
+    if not _is_control_box():
+        return False
+    try:
+        from . import fleet as _fleet
+        nodes = _fleet.load_fleet()
+    except Exception:  # noqa: BLE001 — fleet dir missing / unreadable
+        return False
+    return any(int(getattr(n, port_field, 0) or 0) > 0 for n in nodes)
+
+
+def _fleet_ss2022_method() -> str | None:
+    """Return the SS-2022 cipher method of the first fleet node that
+    runs SS-2022, so the control mints a PSK of the right byte length.
+    None when no node runs it. If nodes disagree on the method (unusual)
+    the first wins — the PSK length only differs aes-128 (16) vs the
+    others (32), and a 32-byte PSK is accepted by every cipher anyway."""
+    if not _is_control_box():
+        return None
+    try:
+        from . import fleet as _fleet
+        for n in _fleet.load_fleet():
+            if int(getattr(n, "ss2022_port", 0) or 0) > 0 and n.ss2022_method:
+                return n.ss2022_method
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def _maybe_autogen_trojan_password(
     trojan_state_path: str | None = None,
 ) -> str | None:
@@ -503,30 +541,40 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             print(f"s-vps: ttl `{args.ttl}` invalid: {exc}", file=sys.stderr)
             return 1
 
-    # v0.11.0+: SS-2022 per-user PSK. Operator override via `--ss2022-psk`
-    # takes precedence; otherwise auto-gen when SS-2022 is enabled on
-    # this host (detected via state file presence). When neither
-    # condition holds, the user's `ss2022_psk` stays None — they have
-    # no SS-2022 URI in their bundle, no exposure.
+    # v0.11.0+: SS-2022 per-user PSK. Resolution order:
+    #   1. explicit --ss2022-psk → use it.
+    #   2. local SS-2022 enabled (ss2022.state.yml present) → auto-gen.
+    #   3. CONTROL box with a fleet node running SS-2022 → auto-gen.
+    #      (The control doesn't run SS-2022 itself, so its state file is
+    #      absent — but the user still needs a PSK for the per-node
+    #      ss:// URIs. The server PSK is per-node; the user PSK is
+    #      shared across nodes, so one autogen covers the whole fleet.)
+    # Otherwise None → no SS-2022 URI, no exposure.
     ss2022_psk: str | None = None
     if getattr(args, "ss2022_psk", ""):
         ss2022_psk = args.ss2022_psk
     else:
         ss2022_psk = _maybe_autogen_ss2022_psk()
+        if ss2022_psk is None and _fleet_runs_protocol("ss2022_port"):
+            ss2022_psk = _autogen_ss2022_psk_for_method(
+                _fleet_ss2022_method() or "2022-blake3-aes-128-gcm"
+            )
     if ss2022_psk is not None:
         state.update_user(
             args.label, ss2022_psk=ss2022_psk, path=state.USERS_INDEX_PATH,
         )
         rec["ss2022_psk"] = ss2022_psk
 
-    # v0.11.0+ Block B: Trojan-Go per-user password. Same opt-in shape
-    # as SS-2022 — explicit `--trojan-password` wins; else auto-gen when
-    # trojan_go.state.yml exists; else stays None (no trojan:// URI).
+    # v0.11.0+ Block B: Trojan-Go per-user password. Same resolution
+    # order as SS-2022: explicit flag → local state → control-with-fleet.
     trojan_password: str | None = None
     if getattr(args, "trojan_password", ""):
         trojan_password = args.trojan_password
     else:
         trojan_password = _maybe_autogen_trojan_password()
+        if trojan_password is None and _fleet_runs_protocol("trojan_port"):
+            import secrets
+            trojan_password = secrets.token_urlsafe(24).rstrip("=")
     if trojan_password is not None:
         state.update_user(
             args.label, trojan_password=trojan_password, path=state.USERS_INDEX_PATH,
@@ -1082,6 +1130,19 @@ def _slurp_remote_yaml(node, remote_path: str) -> dict:
     return _parse_node_yaml(result.stdout.decode("utf-8", errors="replace"))
 
 
+def _slurp_optional_remote_yaml(node, remote_path: str) -> dict:
+    """Like `_slurp_remote_yaml` but soft-fails to `{}` when the file is
+    absent or unreadable. Used by `fleet add` to discover the v0.11
+    optional protocol states (ss2022/xhttp/vmess_ws/trojan) — a node
+    that doesn't run a protocol simply has no state file, which is not
+    an error: the FleetNode's port for it stays 0 and the subscription
+    bundle skips it."""
+    try:
+        return _slurp_remote_yaml(node, remote_path)
+    except SystemExit:
+        return {}
+
+
 def _install_restricted_authorized_keys(node, pubkey_text: str) -> None:
     """SSH into `node` and replace any line containing our pubkey body
     with a restricted entry that forces `s-vps fleet-receive` as the
@@ -1275,6 +1336,15 @@ def cmd_fleet_add(args: argparse.Namespace) -> int:
         # Hysteria might be disabled on this node — soft-fail.
         hysteria = {}
 
+    # v0.11.0+ — discover the optional protocol states. Each is a
+    # soft-fail: a node not running that protocol simply has no state
+    # file, so the FleetNode's port stays 0 and the bundle skips it.
+    print("  discovering v0.11 protocols (ss2022/xhttp/vmess_ws/trojan)...")
+    ss2022 = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/ss2022.state.yml")
+    xhttp = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/xhttp.state.yml")
+    vmess_ws = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/vmess_ws.state.yml")
+    trojan = _slurp_optional_remote_yaml(probe_node, "/etc/stealth-vps/trojan_go.state.yml")
+
     # Compose the FleetNode with discovered fields.
     node = _fleet.FleetNode(
         node_id=args.label,
@@ -1288,6 +1358,14 @@ def cmd_fleet_add(args: argparse.Namespace) -> int:
         reality_servernames=_servernames_from_state(reality),
         hysteria_port=int(hysteria.get("port", 0) or 0),
         hysteria_obfs_password=str(hysteria.get("obfs_password", "")),
+        ss2022_port=int(ss2022.get("port", 0) or 0),
+        ss2022_method=str(ss2022.get("method", "")),
+        ss2022_server_psk=str(ss2022.get("server_psk", "")),
+        xhttp_port=int(xhttp.get("port", 0) or 0),
+        xhttp_path=str(xhttp.get("path", "")),
+        vmess_ws_port=int(vmess_ws.get("port", 0) or 0),
+        vmess_ws_path=str(vmess_ws.get("path", "")),
+        trojan_port=int(trojan.get("port", 0) or 0),
         public_host=args.public_host or None,
         domain=args.domain or "",
         added_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

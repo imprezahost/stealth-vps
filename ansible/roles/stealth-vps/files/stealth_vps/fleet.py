@@ -119,6 +119,25 @@ class FleetNode:
     hysteria_port: int = 0
     hysteria_obfs_password: str = ""
 
+    # v0.11.0+ per-protocol blocks. All default to "disabled" (port 0 /
+    # empty) — a node that doesn't terminate a protocol contributes no
+    # URI for it to the subscription bundle. `fleet add` discovers these
+    # by slurping the node's <proto>.state.yml; a node running only
+    # Reality+Hysteria leaves them all zero, and the bundle skips them.
+    #
+    # WireGuard is deliberately ABSENT here: it has no URI form and each
+    # node needs a distinct per-client keypair, so multi-node WG would
+    # require per-node client identities — out of scope for v0.11. WG
+    # stays single-node (operators hand out per-node .conf manually).
+    ss2022_port: int = 0
+    ss2022_method: str = ""
+    ss2022_server_psk: str = ""
+    xhttp_port: int = 0
+    xhttp_path: str = ""
+    vmess_ws_port: int = 0
+    vmess_ws_path: str = ""
+    trojan_port: int = 0
+
     # Public host for client URIs. When unset, falls back to `ssh_host`
     # (typical when SSH and client traffic share an IP). Operators with
     # bastion + DNS split set both — SSH hits the bastion, clients hit
@@ -158,6 +177,14 @@ class FleetNode:
             "reality_servernames": list(self.reality_servernames),
             "hysteria_port": self.hysteria_port,
             "hysteria_obfs_password": self.hysteria_obfs_password,
+            "ss2022_port": self.ss2022_port,
+            "ss2022_method": self.ss2022_method,
+            "ss2022_server_psk": self.ss2022_server_psk,
+            "xhttp_port": self.xhttp_port,
+            "xhttp_path": self.xhttp_path,
+            "vmess_ws_port": self.vmess_ws_port,
+            "vmess_ws_path": self.vmess_ws_path,
+            "trojan_port": self.trojan_port,
             "public_host": self.public_host,
             "domain": self.domain,
             "added_at": self.added_at,

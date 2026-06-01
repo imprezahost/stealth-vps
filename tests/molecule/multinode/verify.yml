@@ -124,6 +124,32 @@
           - "'data-1' in fleet_list.stdout"
           - "'data-2' in fleet_list.stdout"
 
+    # v0.11 Block C: fleet add must have DISCOVERED SS-2022 on data-1
+    # (host_vars enabled it) and NOT on data-2. Assert the per-node
+    # fleet file records a non-zero ss2022_port for data-1 only.
+    - name: Read data-1's fleet file
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/fleet/data-1.yml
+      register: fleet_data1_raw
+    - name: Read data-2's fleet file
+      ansible.builtin.slurp:
+        src: /etc/stealth-vps/fleet/data-2.yml
+      register: fleet_data2_raw
+    - name: Assert SS-2022 discovered on data-1, absent on data-2
+      vars:
+        d1: "{{ fleet_data1_raw.content | b64decode }}"
+        d2: "{{ fleet_data2_raw.content | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          # data-1 carries a non-zero ss2022_port line; data-2 has it at 0.
+          - "'ss2022_port: 0' not in d1"
+          - "'ss2022_port' in d1"
+          - "'ss2022_port: 0' in d2"
+        fail_msg: >-
+          SS-2022 discovery mismatch.
+          data-1: {{ d1 }}
+          data-2: {{ d2 }}
+
 # --- Add alice on the control + verify propagation --------------------------
 
 - name: Add alice on the control + verify propagation
@@ -151,6 +177,18 @@
     - ansible.builtin.set_fact:
         control_alice: >-
           {{ (control_idx_after.content | b64decode | from_json).users.alice }}
+
+    # v0.11 Block C: the control mints alice a per-user ss2022_psk
+    # because a fleet node (data-1) runs SS-2022 — even though the
+    # control itself doesn't terminate it.
+    - name: Assert control minted alice an ss2022_psk (fleet-aware autogen)
+      ansible.builtin.assert:
+        that:
+          - control_alice.ss2022_psk is not none
+          - control_alice.ss2022_psk | length > 0
+        fail_msg: >-
+          control did not mint an ss2022_psk for alice despite data-1
+          running SS-2022: {{ control_alice }}
 
 - name: Confirm alice landed on data-1 with the same UUID + Hysteria pw
   hosts: data
