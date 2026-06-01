@@ -231,6 +231,9 @@ def render_xray_config(
     reality_dest: str = "www.cloudflare.com:443",
     reality_servernames: Iterable[str] = ("www.cloudflare.com",),
     reality_flow: str = "xtls-rprx-vision",
+    ss2022_state: Mapping[str, Any] | None = None,
+    xhttp_state: Mapping[str, Any] | None = None,
+    vmess_ws_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Xray `config.json` dict from reality state + the user
     list. The shape matches templates/xray-config.json.j2 byte-for-byte
@@ -242,20 +245,40 @@ def render_xray_config(
     Empty `users` list raises ReloadError: Xray will fail to start with
     `clients: []`, so we'd rather get a Python exception we can log
     than a service crash-loop.
+
+    v0.11.0+ optional state args. When None, the matching inbound is
+    NOT emitted — output is byte-identical to v0.10 in the all-None
+    case. When non-None, the inbound is appended to `inbounds[]`:
+
+      `ss2022_state` shape: {port: int, method: str, server_psk: str}
+      `xhttp_state`   shape: {port: int, path: str}
+      `vmess_ws_state` shape: {port: int, path: str}
+
+    Per Open Question A1, XHTTP + VMess+WS reuse the per-user
+    reality_uuid — no new per-user field on the user record. SS-2022
+    needs `ss2022_psk` per user; users with `ss2022_psk = None` are
+    skipped from the SS-2022 clients list (no error — operator can
+    backfill them via `update_user`).
     """
-    clients: list[dict[str, Any]] = []
-    for label, rec in users:
+    # Materialise users once — we may walk the list 4× (Reality + XHTTP
+    # + VMess+WS + SS-2022) so an iterator would exhaust after the
+    # first pass. tuple() also stabilises ordering across protocol
+    # inbounds so the rendered config is deterministic.
+    users_list = list(users)
+
+    reality_clients: list[dict[str, Any]] = []
+    for label, rec in users_list:
         uuid = rec.get("reality_uuid")
         if not uuid:
             raise ReloadError(f"user {label!r} missing reality_uuid in index")
-        clients.append(
+        reality_clients.append(
             {
                 "id": uuid,
                 "email": label,
                 "flow": reality_flow,
             }
         )
-    if not clients:
+    if not reality_clients:
         raise ReloadError(
             "render_xray_config got an empty user list — Xray won't start with no clients. "
             "Check that the index has at least one enabled user."
@@ -268,38 +291,57 @@ def render_xray_config(
     except (KeyError, TypeError, ValueError) as exc:
         raise ReloadError(f"reality state missing required fields: {exc}") from exc
 
+    inbounds: list[dict[str, Any]] = [
+        {
+            "tag": "reality-in",
+            "listen": "0.0.0.0",
+            "port": port,
+            "protocol": "vless",
+            "settings": {
+                "clients": reality_clients,
+                "decryption": "none",
+            },
+            "streamSettings": {
+                "network": "tcp",
+                "security": "reality",
+                "realitySettings": {
+                    "show": False,
+                    "xver": 0,
+                    "dest": reality_dest,
+                    "serverNames": list(reality_servernames),
+                    "privateKey": private_key,
+                    "shortIds": [short_id],
+                },
+            },
+            "sniffing": {
+                "enabled": True,
+                "destOverride": ["http", "tls", "quic"],
+                "metadataOnly": False,
+                "routeOnly": False,
+            },
+        }
+    ]
+
+    # v0.11.0+ inbounds (append in a fixed order: xhttp, vmess_ws,
+    # ss2022 — alphabetic on tag for output stability).
+
+    if ss2022_state is not None:
+        inbounds.append(_render_ss2022_inbound(ss2022_state, users_list))
+
+    if vmess_ws_state is not None:
+        inbounds.append(_render_vmess_ws_inbound(vmess_ws_state, users_list))
+
+    if xhttp_state is not None:
+        inbounds.append(_render_xhttp_inbound(xhttp_state, users_list))
+
+    # Sort inbounds by tag — molecule's idempotence test relies on
+    # repeated runs producing identical bytes regardless of which
+    # protocols are enabled in which order.
+    inbounds.sort(key=lambda i: i["tag"])
+
     return {
         "log": {"loglevel": "warning"},
-        "inbounds": [
-            {
-                "tag": "reality-in",
-                "listen": "0.0.0.0",
-                "port": port,
-                "protocol": "vless",
-                "settings": {
-                    "clients": clients,
-                    "decryption": "none",
-                },
-                "streamSettings": {
-                    "network": "tcp",
-                    "security": "reality",
-                    "realitySettings": {
-                        "show": False,
-                        "xver": 0,
-                        "dest": reality_dest,
-                        "serverNames": list(reality_servernames),
-                        "privateKey": private_key,
-                        "shortIds": [short_id],
-                    },
-                },
-                "sniffing": {
-                    "enabled": True,
-                    "destOverride": ["http", "tls", "quic"],
-                    "metadataOnly": False,
-                    "routeOnly": False,
-                },
-            }
-        ],
+        "inbounds": inbounds,
         "outbounds": [
             {"protocol": "freedom", "tag": "direct"},
             {"protocol": "blackhole", "tag": "blocked"},
@@ -313,6 +355,152 @@ def render_xray_config(
                     "outboundTag": "blocked",
                 }
             ],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# v0.11.0+ inbound renderers
+# ---------------------------------------------------------------------------
+#
+# Each takes the protocol's state dict (loaded from /etc/stealth-vps/
+# <proto>.state.yml) + the same users_list as the Reality renderer.
+# Output: one inbound dict the parent `render_xray_config` appends to
+# the inbounds[] list.
+#
+# Listen address: loopback for XHTTP + VMess+WS (Caddy fronts), 0.0.0.0
+# for SS-2022 (no fronting — direct UDP/TCP).
+
+
+def _render_xhttp_inbound(
+    xhttp_state: Mapping[str, Any],
+    users_list: list[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """VLESS-over-XHTTP inbound. Reuses Reality UUIDs per Open Question
+    A1; no `flow` (XHTTP doesn't carry XTLS Vision). TLS is terminated
+    by Caddy in front, so this inbound's `security` is "none"."""
+    try:
+        port = int(xhttp_state["port"])
+        path = str(xhttp_state["path"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"xhttp state missing required fields: {exc}") from exc
+
+    clients = [
+        {"id": str(rec["reality_uuid"]), "email": label}
+        for label, rec in users_list
+        if rec.get("reality_uuid")
+    ]
+    return {
+        "tag": "xhttp-in",
+        "listen": "127.0.0.1",
+        "port": port,
+        "protocol": "vless",
+        "settings": {
+            "clients": clients,
+            "decryption": "none",
+        },
+        "streamSettings": {
+            "network": "xhttp",
+            "security": "none",
+            "xhttpSettings": {
+                "path": path,
+                "host": "",
+                "mode": "auto",
+            },
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls"],
+            "metadataOnly": False,
+            "routeOnly": False,
+        },
+    }
+
+
+def _render_vmess_ws_inbound(
+    vmess_ws_state: Mapping[str, Any],
+    users_list: list[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """VMess-over-WebSocket inbound. Reuses Reality UUIDs (Open Q A1).
+    TLS at Caddy; this inbound is `security: none`. alterId=0 is the
+    modern default (pre-2022 setups used 64)."""
+    try:
+        port = int(vmess_ws_state["port"])
+        path = str(vmess_ws_state["path"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"vmess_ws state missing required fields: {exc}") from exc
+
+    clients = [
+        {"id": str(rec["reality_uuid"]), "email": label, "alterId": 0}
+        for label, rec in users_list
+        if rec.get("reality_uuid")
+    ]
+    return {
+        "tag": "vmess-ws-in",
+        "listen": "127.0.0.1",
+        "port": port,
+        "protocol": "vmess",
+        "settings": {
+            "clients": clients,
+        },
+        "streamSettings": {
+            "network": "ws",
+            "security": "none",
+            "wsSettings": {
+                "path": path,
+                "headers": {"Host": ""},
+            },
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls"],
+            "metadataOnly": False,
+            "routeOnly": False,
+        },
+    }
+
+
+def _render_ss2022_inbound(
+    ss2022_state: Mapping[str, Any],
+    users_list: list[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Shadowsocks-2022 (SIP022) inbound. Multi-user via clients[];
+    server PSK is the inbound-level secret, per-user PSK is each
+    client's secret. Users with `ss2022_psk = None` are skipped —
+    they get no SS-2022 access (operator backfills later)."""
+    try:
+        port = int(ss2022_state["port"])
+        method = str(ss2022_state["method"])
+        server_psk = str(ss2022_state["server_psk"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"ss2022 state missing required fields: {exc}") from exc
+
+    clients = [
+        {"password": str(rec["ss2022_psk"]), "email": label}
+        for label, rec in users_list
+        if rec.get("ss2022_psk")
+    ]
+    # Empty clients[] is allowed by Xray's shadowsocks-2022 inbound —
+    # only the server PSK is required for the listener to start. But
+    # the inbound becomes useless (no per-user auth). Operator added
+    # the protocol but no user yet has a PSK; render anyway so the
+    # listener is up; URIs simply won't be generated.
+    return {
+        "tag": "ss2022-in",
+        "listen": "0.0.0.0",
+        "port": port,
+        "protocol": "shadowsocks",
+        "settings": {
+            "method": method,
+            "password": server_psk,
+            "clients": clients,
+            "network": "tcp,udp",
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": False,
+            "routeOnly": False,
         },
     }
 
@@ -525,6 +713,13 @@ class Reloader:
         reality_dest: str = "www.cloudflare.com:443",
         reality_servernames: Iterable[str] = ("www.cloudflare.com",),
         reality_flow: str = "xtls-rprx-vision",
+        # v0.11.0+ — optional per-protocol state file paths. When None,
+        # the matching inbound is not emitted (single-protocol Reality
+        # behaviour preserved). When set, the file must exist on disk
+        # or `reload_all` raises ReloadError before any write.
+        ss2022_state_path: str | None = None,
+        xhttp_state_path: str | None = None,
+        vmess_ws_state_path: str | None = None,
         # hysteria
         hysteria_enabled: bool = False,
         hysteria_state_path: str = HYSTERIA_STATE_PATH,
@@ -552,6 +747,10 @@ class Reloader:
         self.reality_dest = reality_dest
         self.reality_servernames = tuple(reality_servernames)
         self.reality_flow = reality_flow
+        # v0.11.0+
+        self.ss2022_state_path = ss2022_state_path
+        self.xhttp_state_path = xhttp_state_path
+        self.vmess_ws_state_path = vmess_ws_state_path
         # hysteria
         self.hysteria_enabled = hysteria_enabled
         self.hysteria_state_path = hysteria_state_path
@@ -587,12 +786,37 @@ class Reloader:
         xray_text: str | None = None
         if self.reality_enabled:
             reality_state = load_state_file(self.reality_state_path)
+            # v0.11.0+ — load optional per-protocol states. Each is
+            # `None` when the operator hasn't enabled that protocol, so
+            # render_xray_config skips its inbound entirely. Loading
+            # eagerly here (vs lazily inside render_xray_config) keeps
+            # the "fail before any write" property — a corrupt
+            # ss2022.state.yml aborts the whole reload, doesn't leave
+            # us with a half-rendered Xray config.
+            ss2022_state = (
+                load_state_file(self.ss2022_state_path)
+                if self.ss2022_state_path
+                else None
+            )
+            xhttp_state = (
+                load_state_file(self.xhttp_state_path)
+                if self.xhttp_state_path
+                else None
+            )
+            vmess_ws_state = (
+                load_state_file(self.vmess_ws_state_path)
+                if self.vmess_ws_state_path
+                else None
+            )
             xray_text = render_xray_config_text(
                 reality_state,
                 users,
                 reality_dest=self.reality_dest,
                 reality_servernames=self.reality_servernames,
                 reality_flow=self.reality_flow,
+                ss2022_state=ss2022_state,
+                xhttp_state=xhttp_state,
+                vmess_ws_state=vmess_ws_state,
             )
 
         # --- hysteria ---------------------------------------------------
@@ -723,6 +947,13 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
     p.add_argument("--hysteria-bandwidth-up", default="100 mbps")
     p.add_argument("--hysteria-bandwidth-down", default="100 mbps")
     p.add_argument("--hysteria-metrics-enabled", type=_bool_flag, default=False)
+    # v0.11.0+ — optional per-protocol state paths. Empty string =
+    # protocol not enabled on this host → inbound NOT emitted. Path =
+    # state file location, loaded eagerly so corrupt files fail-fast
+    # before we touch any on-disk config.
+    p.add_argument("--ss2022-state-path", default="")
+    p.add_argument("--xhttp-state-path", default="")
+    p.add_argument("--vmess-ws-state-path", default="")
     # control
     p.add_argument(
         "--dry-run",
@@ -768,6 +999,9 @@ def main(argv: list[str] | None = None) -> int:
         hysteria_bandwidth_up=args.hysteria_bandwidth_up,
         hysteria_bandwidth_down=args.hysteria_bandwidth_down,
         hysteria_metrics_enabled=args.hysteria_metrics_enabled,
+        ss2022_state_path=(args.ss2022_state_path or None),
+        xhttp_state_path=(args.xhttp_state_path or None),
+        vmess_ws_state_path=(args.vmess_ws_state_path or None),
         dry_run=args.dry_run,
         use_sudo=args.use_sudo,
     )

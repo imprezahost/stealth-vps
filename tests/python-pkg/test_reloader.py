@@ -224,6 +224,168 @@ def test_render_xray_config_text_matches_ansible_template_keys() -> None:
 
 
 # ---------------------------------------------------------------------------
+# v0.11.0+ — XHTTP / VMess+WS / SS-2022 inbounds
+# ---------------------------------------------------------------------------
+
+
+def test_render_xray_config_omits_new_inbounds_when_states_none() -> None:
+    """v0.10 backwards-compat: all-None state args → byte-identical to
+    v0.10 single-Reality output. Single inbound, tag `reality-in`."""
+    users = [("alice", {"reality_uuid": "u1"})]
+    cfg = reloader.render_xray_config(_REALITY_STATE, users)
+    assert len(cfg["inbounds"]) == 1
+    assert cfg["inbounds"][0]["tag"] == "reality-in"
+
+
+def test_render_xray_config_with_ss2022_appends_inbound() -> None:
+    users = [
+        ("alice", {"reality_uuid": "ua", "ss2022_psk": "AlicePSK"}),
+        ("bob", {"reality_uuid": "ub", "ss2022_psk": "BobPSK"}),
+    ]
+    cfg = reloader.render_xray_config(
+        _REALITY_STATE, users,
+        ss2022_state={
+            "port": 8543,
+            "method": "2022-blake3-aes-128-gcm",
+            "server_psk": "SERVER_PSK",
+        },
+    )
+    tags = [i["tag"] for i in cfg["inbounds"]]
+    assert "ss2022-in" in tags
+    ss = next(i for i in cfg["inbounds"] if i["tag"] == "ss2022-in")
+    assert ss["protocol"] == "shadowsocks"
+    assert ss["port"] == 8543
+    assert ss["listen"] == "0.0.0.0"
+    assert ss["settings"]["method"] == "2022-blake3-aes-128-gcm"
+    assert ss["settings"]["password"] == "SERVER_PSK"
+    assert ss["settings"]["network"] == "tcp,udp"
+    # Per-user PSKs in clients[].
+    psks = [(c["email"], c["password"]) for c in ss["settings"]["clients"]]
+    assert psks == [("alice", "AlicePSK"), ("bob", "BobPSK")]
+
+
+def test_render_xray_config_ss2022_skips_users_without_psk() -> None:
+    """A user without an `ss2022_psk` (migrated pre-v0.11 user) is
+    skipped from the SS-2022 clients[] silently — operator can fill
+    the PSK later. No error; the user still has Reality access."""
+    users = [
+        ("alice", {"reality_uuid": "ua", "ss2022_psk": "AlicePSK"}),
+        ("bob_legacy", {"reality_uuid": "ub", "ss2022_psk": None}),
+    ]
+    cfg = reloader.render_xray_config(
+        _REALITY_STATE, users,
+        ss2022_state={"port": 8543, "method": "2022-blake3-aes-128-gcm",
+                      "server_psk": "SP"},
+    )
+    ss = next(i for i in cfg["inbounds"] if i["tag"] == "ss2022-in")
+    assert [c["email"] for c in ss["settings"]["clients"]] == ["alice"]
+
+
+def test_render_xray_config_with_xhttp_appends_inbound() -> None:
+    users = [("alice", {"reality_uuid": "ua"})]
+    cfg = reloader.render_xray_config(
+        _REALITY_STATE, users,
+        xhttp_state={"port": 18543, "path": "/.well-known/xhttp-stream"},
+    )
+    xh = next(i for i in cfg["inbounds"] if i["tag"] == "xhttp-in")
+    assert xh["protocol"] == "vless"
+    assert xh["listen"] == "127.0.0.1"           # CDN-fronted via Caddy
+    assert xh["port"] == 18543
+    assert xh["streamSettings"]["network"] == "xhttp"
+    assert xh["streamSettings"]["security"] == "none"     # TLS at Caddy
+    assert xh["streamSettings"]["xhttpSettings"]["path"] == "/.well-known/xhttp-stream"
+    # XHTTP clients reuse Reality UUID, no `flow` (no XTLS Vision).
+    assert xh["settings"]["clients"] == [
+        {"id": "ua", "email": "alice"}
+    ]
+
+
+def test_render_xray_config_with_vmess_ws_appends_inbound() -> None:
+    users = [("alice", {"reality_uuid": "ua"})]
+    cfg = reloader.render_xray_config(
+        _REALITY_STATE, users,
+        vmess_ws_state={"port": 19543, "path": "/.well-known/vmess-ws"},
+    )
+    vm = next(i for i in cfg["inbounds"] if i["tag"] == "vmess-ws-in")
+    assert vm["protocol"] == "vmess"
+    assert vm["listen"] == "127.0.0.1"
+    assert vm["port"] == 19543
+    assert vm["streamSettings"]["network"] == "ws"
+    assert vm["streamSettings"]["security"] == "none"
+    assert vm["streamSettings"]["wsSettings"]["path"] == "/.well-known/vmess-ws"
+    # VMess clients reuse Reality UUID; alterId=0 modern default.
+    assert vm["settings"]["clients"] == [
+        {"id": "ua", "email": "alice", "alterId": 0}
+    ]
+
+
+def test_render_xray_config_all_protocols_inbounds_sorted_by_tag() -> None:
+    """Molecule's idempotence test fails if the same inputs produce
+    different bytes across runs. Inbound order in the rendered JSON
+    must be deterministic — we sort by tag. Tags alphabetically:
+    reality-in < ss2022-in < vmess-ws-in < xhttp-in."""
+    users = [("alice", {"reality_uuid": "ua", "ss2022_psk": "P"})]
+    cfg = reloader.render_xray_config(
+        _REALITY_STATE, users,
+        ss2022_state={"port": 8543, "method": "2022-blake3-aes-128-gcm",
+                      "server_psk": "SP"},
+        xhttp_state={"port": 18543, "path": "/x"},
+        vmess_ws_state={"port": 19543, "path": "/v"},
+    )
+    tags = [i["tag"] for i in cfg["inbounds"]]
+    assert tags == ["reality-in", "ss2022-in", "vmess-ws-in", "xhttp-in"]
+
+
+def test_render_xray_config_text_byte_identical_across_runs_with_all_protocols() -> None:
+    """Same inputs + sort_keys → same bytes. Asserts the determinism
+    guarantee carries through to multi-inbound configs."""
+    users = [
+        ("alice", {"reality_uuid": "ua", "ss2022_psk": "PA"}),
+        ("bob", {"reality_uuid": "ub", "ss2022_psk": "PB"}),
+    ]
+    kw = dict(
+        ss2022_state={"port": 8543, "method": "2022-blake3-aes-128-gcm",
+                      "server_psk": "SP"},
+        xhttp_state={"port": 18543, "path": "/x"},
+        vmess_ws_state={"port": 19543, "path": "/v"},
+    )
+    t1 = reloader.render_xray_config_text(_REALITY_STATE, users, **kw)
+    t2 = reloader.render_xray_config_text(_REALITY_STATE, users, **kw)
+    assert t1 == t2
+    json.loads(t1)
+
+
+def test_render_xray_config_ss2022_missing_state_field_raises() -> None:
+    """Operator-edited ss2022.state.yml that drops `method` or
+    `server_psk` should produce a clear ReloadError, NOT an empty
+    inbound."""
+    users = [("alice", {"reality_uuid": "ua", "ss2022_psk": "P"})]
+    with pytest.raises(reloader.ReloadError, match="ss2022 state missing"):
+        reloader.render_xray_config(
+            _REALITY_STATE, users,
+            ss2022_state={"port": 8543},   # no method/server_psk
+        )
+
+
+def test_render_xray_config_xhttp_missing_state_field_raises() -> None:
+    users = [("alice", {"reality_uuid": "ua"})]
+    with pytest.raises(reloader.ReloadError, match="xhttp state missing"):
+        reloader.render_xray_config(
+            _REALITY_STATE, users,
+            xhttp_state={"port": 18543},   # no path
+        )
+
+
+def test_render_xray_config_vmess_ws_missing_state_field_raises() -> None:
+    users = [("alice", {"reality_uuid": "ua"})]
+    with pytest.raises(reloader.ReloadError, match="vmess_ws state missing"):
+        reloader.render_xray_config(
+            _REALITY_STATE, users,
+            vmess_ws_state={"port": 19543},   # no path
+        )
+
+
+# ---------------------------------------------------------------------------
 # render_hysteria_config
 # ---------------------------------------------------------------------------
 
@@ -705,6 +867,61 @@ def test_cli_main_renders_xray_with_minimal_flags(
     cfg = json.loads(pathlib.Path(reloader_paths["xray_config_path"]).read_text())
     assert cfg["inbounds"][0]["settings"]["clients"][0]["email"] == "alice"
     mock_run.assert_called_once()
+
+
+def test_cli_main_renders_xray_with_ss2022_via_cli_flag(
+    reloader_paths: dict[str, str], tmp_path: pathlib.Path,
+) -> None:
+    """`--ss2022-state-path PATH` enables the SS-2022 inbound. Empty
+    string (the Ansible default when ss2022_enabled=false) means
+    "not enabled" and the inbound is omitted."""
+    ss_state = tmp_path / "ss2022.state.yml"
+    ss_state.write_text(
+        "port: 8543\nmethod: 2022-blake3-aes-128-gcm\nserver_psk: SERVER_PSK\n",
+        encoding="utf-8",
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        rc = reloader.main([
+            "--users-index-path", reloader_paths["users_index_path"],
+            "--reality-enabled", "true",
+            "--reality-state-path", reloader_paths["reality_state_path"],
+            "--xray-config-path", reloader_paths["xray_config_path"],
+            "--xray-group", "",
+            "--hysteria-enabled", "false",
+            "--ss2022-state-path", str(ss_state),
+        ])
+    assert rc == 0
+    cfg = json.loads(pathlib.Path(reloader_paths["xray_config_path"]).read_text())
+    tags = [i["tag"] for i in cfg["inbounds"]]
+    assert "ss2022-in" in tags
+    ss = next(i for i in cfg["inbounds"] if i["tag"] == "ss2022-in")
+    assert ss["settings"]["password"] == "SERVER_PSK"
+
+
+def test_cli_main_empty_protocol_state_paths_skip_inbounds(
+    reloader_paths: dict[str, str],
+) -> None:
+    """The Ansible-side argv passes empty strings for the protocol
+    state paths when the protocol isn't enabled. The CLI must treat
+    empty as 'not enabled' (don't try to load a nonexistent path)."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        rc = reloader.main([
+            "--users-index-path", reloader_paths["users_index_path"],
+            "--reality-enabled", "true",
+            "--reality-state-path", reloader_paths["reality_state_path"],
+            "--xray-config-path", reloader_paths["xray_config_path"],
+            "--xray-group", "",
+            "--hysteria-enabled", "false",
+            "--ss2022-state-path", "",
+            "--xhttp-state-path", "",
+            "--vmess-ws-state-path", "",
+        ])
+    assert rc == 0
+    cfg = json.loads(pathlib.Path(reloader_paths["xray_config_path"]).read_text())
+    # Only Reality inbound. No SS-2022 / XHTTP / VMess+WS.
+    assert [i["tag"] for i in cfg["inbounds"]] == ["reality-in"]
 
 
 def test_cli_main_dry_run_skips_systemctl(reloader_paths: dict[str, str]) -> None:

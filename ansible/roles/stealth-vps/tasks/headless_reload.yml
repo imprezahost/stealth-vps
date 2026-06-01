@@ -57,6 +57,12 @@
       'hysteria_bandwidth_up': stealth_vps_hysteria_bandwidth_up,
       'hysteria_bandwidth_down': stealth_vps_hysteria_bandwidth_down,
       'hysteria_metrics_enabled': stealth_vps_metrics_enabled | bool,
+      'ss2022_state_path': (stealth_vps_panel_state_dir + '/ss2022.state.yml'
+        if (stealth_vps_ss2022_enabled | default(false) | bool) else None),
+      'xhttp_state_path': (stealth_vps_panel_state_dir + '/xhttp.state.yml'
+        if (stealth_vps_xhttp_enabled | default(false) | bool) else None),
+      'vmess_ws_state_path': (stealth_vps_panel_state_dir + '/vmess_ws.state.yml'
+        if (stealth_vps_vmess_ws_enabled | default(false) | bool) else None),
     } | to_nice_json(sort_keys=true, indent=2) }}"
     dest: /etc/stealth-vps/reloader-args.json
     owner: root
@@ -117,6 +123,20 @@
       - "{{ stealth_vps_hysteria_bandwidth_down }}"
       - --hysteria-metrics-enabled
       - "{{ stealth_vps_metrics_enabled | string | lower }}"
+      # v0.11.0+ — empty string when the protocol isn't enabled; the
+      # reloader's argparse maps empty → None internally, suppressing
+      # the matching inbound. When enabled the path resolves to the
+      # state file written by ss2022_state.yml / xhttp_state.yml /
+      # vmess_ws_state.yml earlier in the converge.
+      - --ss2022-state-path
+      - "{{ stealth_vps_panel_state_dir + '/ss2022.state.yml'
+            if (stealth_vps_ss2022_enabled | default(false) | bool) else '' }}"
+      - --xhttp-state-path
+      - "{{ stealth_vps_panel_state_dir + '/xhttp.state.yml'
+            if (stealth_vps_xhttp_enabled | default(false) | bool) else '' }}"
+      - --vmess-ws-state-path
+      - "{{ stealth_vps_panel_state_dir + '/vmess_ws.state.yml'
+            if (stealth_vps_vmess_ws_enabled | default(false) | bool) else '' }}"
   tags: [users, index, headless]
 
 - name: Append --dry-run inside docker (molecule)
