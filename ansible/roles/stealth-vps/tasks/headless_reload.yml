@@ -63,6 +63,18 @@
         if (stealth_vps_xhttp_enabled | default(false) | bool) else None),
       'vmess_ws_state_path': (stealth_vps_panel_state_dir + '/vmess_ws.state.yml'
         if (stealth_vps_vmess_ws_enabled | default(false) | bool) else None),
+      'trojan_enabled': stealth_vps_trojan_go_enabled | default(false) | bool,
+      'trojan_state_path': stealth_vps_panel_state_dir + '/trojan_go.state.yml',
+      'trojan_config_path': stealth_vps_trojan_go_config_dir + '/config.json',
+      'trojan_service': 'trojan-go.service',
+      'trojan_tls_cert': (stealth_vps_trojan_go_effective_cert | default('', true)),
+      'trojan_tls_key': (stealth_vps_trojan_go_effective_key | default('', true)),
+      'trojan_sni': (stealth_vps_domain | default('', true)),
+      'wireguard_enabled': stealth_vps_wireguard_enabled | default(false) | bool,
+      'wireguard_state_path': stealth_vps_panel_state_dir + '/wireguard.state.yml',
+      'wireguard_conf_path': '/etc/wireguard/stealth.conf',
+      'wireguard_service': 'wg-quick@stealth.service',
+      'wireguard_subnet': stealth_vps_wg_subnet | default('10.99.0.0/24', true),
     } | to_nice_json(sort_keys=true, indent=2) }}"
     dest: /etc/stealth-vps/reloader-args.json
     owner: root
@@ -137,6 +149,27 @@
       - --vmess-ws-state-path
       - "{{ stealth_vps_panel_state_dir + '/vmess_ws.state.yml'
             if (stealth_vps_vmess_ws_enabled | default(false) | bool) else '' }}"
+      # v0.11.0+ Block B — Trojan-Go + WireGuard.
+      - --trojan-enabled
+      - "{{ stealth_vps_trojan_go_enabled | default(false) | string | lower }}"
+      - --trojan-state-path
+      - "{{ stealth_vps_panel_state_dir }}/trojan_go.state.yml"
+      - --trojan-config-path
+      - "{{ stealth_vps_trojan_go_config_dir }}/config.json"
+      - --trojan-tls-cert
+      - "{{ stealth_vps_trojan_go_effective_cert | default('', true) }}"
+      - --trojan-tls-key
+      - "{{ stealth_vps_trojan_go_effective_key | default('', true) }}"
+      - --trojan-sni
+      - "{{ stealth_vps_domain | default('', true) }}"
+      - --wireguard-enabled
+      - "{{ stealth_vps_wireguard_enabled | default(false) | string | lower }}"
+      - --wireguard-state-path
+      - "{{ stealth_vps_panel_state_dir }}/wireguard.state.yml"
+      - --wireguard-conf-path
+      - /etc/wireguard/stealth.conf
+      - --wireguard-subnet
+      - "{{ stealth_vps_wg_subnet | default('10.99.0.0/24', true) }}"
   tags: [users, index, headless]
 
 - name: Append --dry-run inside docker (molecule)

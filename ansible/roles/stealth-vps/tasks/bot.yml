@@ -232,6 +232,13 @@
   when: stealth_vps_vmess_ws_enabled | default(false) | bool
   tags: [bot]
 
+- name: Load Trojan-Go state for bot.env
+  ansible.builtin.include_vars:
+    file: "{{ stealth_vps_panel_state_dir }}/trojan_go.state.yml"
+    name: stealth_vps_trojan_go_state
+  when: stealth_vps_trojan_go_enabled | default(false) | bool
+  tags: [bot]
+
 - name: Render bot.env
   ansible.builtin.template:
     src: stealth-vps-bot.env.j2

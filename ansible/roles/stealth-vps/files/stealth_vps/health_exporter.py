@@ -75,6 +75,10 @@ _PROTOCOL_STATE_PATHS = {
     "ss2022": "/etc/stealth-vps/ss2022.state.yml",
     "xhttp": "/etc/stealth-vps/xhttp.state.yml",
     "vmess_ws": "/etc/stealth-vps/vmess_ws.state.yml",
+    # Trojan-Go is TCP — probeable. WireGuard is UDP (no TCP-connect
+    # probe), so it gets no port gauge; the wg-quick@stealth unit-active
+    # gauge covers "is it up".
+    "trojan_go": "/etc/stealth-vps/trojan_go.state.yml",
 }
 
 

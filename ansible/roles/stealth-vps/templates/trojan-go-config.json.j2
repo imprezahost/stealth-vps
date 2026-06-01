@@ -1,0 +1,40 @@
+{#- Trojan-Go server config.json (v0.11.0+).
+
+   Rendered by tasks/trojan_go.yml on first install with the seed
+   password list (operators issue per-user passwords via
+   `s-vps user add`, so a fresh install starts empty). In headless mode
+   tasks/headless_reload.yml re-renders this from users.index.json via
+   stealth_vps.reloader.render_trojan_go_config_text.
+
+   Byte-parity contract: both renderers MUST emit identical output for
+   the molecule idempotence test. We build a Jinja dict literal +
+   to_nice_json(sort_keys=true, indent=2); the reloader uses
+   json.dumps(..., sort_keys=True, indent=2). Same shape → same bytes.
+
+   `password` is the seed list: every existing user's trojan_password.
+   On a clean install the default client has none, so it's empty —
+   matching what the reloader produces before any `s-vps user add`.
+-#}
+{%- set _passwords = [] -%}
+{%- for label, rec in (stealth_vps_users_index.users | default({})).items() -%}
+{%- if rec.trojan_password -%}
+{%- set _ = _passwords.append(rec.trojan_password) -%}
+{%- endif -%}
+{%- endfor -%}
+{%- set _config = {
+  "run_type": "server",
+  "local_addr": "0.0.0.0",
+  "local_port": stealth_vps_trojan_go_state.port,
+  "remote_addr": "127.0.0.1",
+  "remote_port": 80,
+  "password": _passwords,
+  "ssl": {
+    "cert": stealth_vps_trojan_go_effective_cert,
+    "key": stealth_vps_trojan_go_effective_key,
+    "sni": (stealth_vps_domain | default("", true)),
+    "fallback_addr": "127.0.0.1",
+    "fallback_port": 80,
+  },
+} -%}
+{# noqa: jinja[spacing] #}
+{{ _config | to_nice_json(sort_keys=true, indent=2) }}

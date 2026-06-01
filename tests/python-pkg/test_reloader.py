@@ -386,6 +386,66 @@ def test_render_xray_config_vmess_ws_missing_state_field_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# v0.11.0+ Block B — render_trojan_go_config
+# ---------------------------------------------------------------------------
+
+
+def test_render_trojan_go_config_collects_passwords() -> None:
+    users = [
+        ("alice", {"trojan_password": "alice-pw"}),
+        ("bob", {"trojan_password": "bob-pw"}),
+    ]
+    cfg = reloader.render_trojan_go_config(
+        {"port": 4443}, users,
+        tls_cert="/tls/fullchain.pem", tls_key="/tls/privkey.pem",
+        sni="vpn.example.com",
+    )
+    assert cfg["run_type"] == "server"
+    assert cfg["local_port"] == 4443
+    assert cfg["password"] == ["alice-pw", "bob-pw"]
+    assert cfg["ssl"]["cert"] == "/tls/fullchain.pem"
+    assert cfg["ssl"]["sni"] == "vpn.example.com"
+
+
+def test_render_trojan_go_config_skips_users_without_password() -> None:
+    users = [
+        ("alice", {"trojan_password": "alice-pw"}),
+        ("bob_legacy", {"trojan_password": None}),
+    ]
+    cfg = reloader.render_trojan_go_config(
+        {"port": 4443}, users, tls_cert="c", tls_key="k",
+    )
+    assert cfg["password"] == ["alice-pw"]
+
+
+def test_render_trojan_go_config_empty_passwords_ok() -> None:
+    """No user has a trojan password yet — listener starts, rejects
+    everyone. Same tolerance as the SS-2022 empty-clients case."""
+    cfg = reloader.render_trojan_go_config(
+        {"port": 4443}, [("alice", {"trojan_password": None})],
+        tls_cert="c", tls_key="k",
+    )
+    assert cfg["password"] == []
+
+
+def test_render_trojan_go_config_missing_port_raises() -> None:
+    with pytest.raises(reloader.ReloadError, match="trojan_go state missing"):
+        reloader.render_trojan_go_config(
+            {}, [("alice", {"trojan_password": "p"})],
+            tls_cert="c", tls_key="k",
+        )
+
+
+def test_render_trojan_go_config_text_deterministic() -> None:
+    users = [("alice", {"trojan_password": "p"})]
+    kw = dict(tls_cert="c", tls_key="k", sni="s")
+    t1 = reloader.render_trojan_go_config_text({"port": 4443}, users, **kw)
+    t2 = reloader.render_trojan_go_config_text({"port": 4443}, users, **kw)
+    assert t1 == t2
+    json.loads(t1)
+
+
+# ---------------------------------------------------------------------------
 # render_hysteria_config
 # ---------------------------------------------------------------------------
 
@@ -897,6 +957,101 @@ def test_cli_main_renders_xray_with_ss2022_via_cli_flag(
     assert "ss2022-in" in tags
     ss = next(i for i in cfg["inbounds"] if i["tag"] == "ss2022-in")
     assert ss["settings"]["password"] == "SERVER_PSK"
+
+
+def test_cli_main_renders_trojan_config(
+    reloader_paths: dict[str, str], tmp_path: pathlib.Path,
+) -> None:
+    """`--trojan-enabled true --trojan-state-path PATH` renders the
+    Trojan-Go config.json from the index + restarts trojan-go.service."""
+    trojan_state = tmp_path / "trojan_go.state.yml"
+    trojan_state.write_text("port: 4443\n", encoding="utf-8")
+    trojan_cfg = tmp_path / "trojan-config.json"
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        rc = reloader.main([
+            "--users-index-path", reloader_paths["users_index_path"],
+            "--reality-enabled", "false",
+            "--hysteria-enabled", "false",
+            "--trojan-enabled", "true",
+            "--trojan-state-path", str(trojan_state),
+            "--trojan-config-path", str(trojan_cfg),
+            "--trojan-group", "",
+            "--trojan-tls-cert", "/tls/c.pem",
+            "--trojan-tls-key", "/tls/k.pem",
+        ])
+    assert rc == 0
+    cfg = json.loads(trojan_cfg.read_text())
+    assert cfg["run_type"] == "server"
+    assert cfg["local_port"] == 4443
+    # The seed index fixture has one user (alice) — but she has no
+    # trojan_password (schema-v3 default None), so the password list is
+    # empty. The config still renders + the service still restarts.
+    assert cfg["password"] == []
+    mock_run.assert_called_once()   # trojan-go.service restart
+
+
+def test_cli_main_renders_wireguard_conf(
+    reloader_paths: dict[str, str], tmp_path: pathlib.Path,
+) -> None:
+    """`--wireguard-enabled true` renders the server conf from the index
+    (peers = users with wireguard_pubkey + wireguard_client_ip) and
+    restarts wg-quick@stealth."""
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SERVER_PRIV\npublic_key: SERVER_PUB\n",
+        encoding="utf-8",
+    )
+    wg_conf = tmp_path / "stealth.conf"
+
+    # Seed a user WITH wireguard creds so a [Peer] block renders. The
+    # fixture index has alice without WG fields; add them via state.
+    from stealth_vps import state as _state
+    _state.update_user(
+        "alice",
+        wireguard_pubkey="ALICE_WG_PUB",
+        wireguard_client_ip="10.99.0.2",
+        path=reloader_paths["users_index_path"],
+    )
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        rc = reloader.main([
+            "--users-index-path", reloader_paths["users_index_path"],
+            "--reality-enabled", "false",
+            "--hysteria-enabled", "false",
+            "--wireguard-enabled", "true",
+            "--wireguard-state-path", str(wg_state),
+            "--wireguard-conf-path", str(wg_conf),
+            "--wireguard-subnet", "10.99.0.0/24",
+        ])
+    assert rc == 0
+    conf = wg_conf.read_text()
+    assert "[Interface]" in conf
+    assert "PrivateKey = SERVER_PRIV" in conf
+    assert "ListenPort = 51820" in conf
+    # alice's peer block.
+    assert "# alice" in conf
+    assert "PublicKey = ALICE_WG_PUB" in conf
+    assert "AllowedIPs = 10.99.0.2/32" in conf
+    mock_run.assert_called_once()   # wg-quick@stealth restart
+
+
+def test_cli_main_wireguard_missing_state_field_raises(
+    reloader_paths: dict[str, str], tmp_path: pathlib.Path,
+) -> None:
+    """wireguard.state.yml without private_key → ReloadError, exit 1."""
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text("port: 51820\n", encoding="utf-8")   # no private_key
+    rc = reloader.main([
+        "--users-index-path", reloader_paths["users_index_path"],
+        "--reality-enabled", "false",
+        "--hysteria-enabled", "false",
+        "--wireguard-enabled", "true",
+        "--wireguard-state-path", str(wg_state),
+        "--wireguard-conf-path", str(tmp_path / "out.conf"),
+    ])
+    assert rc == 1
 
 
 def test_cli_main_empty_protocol_state_paths_skip_inbounds(

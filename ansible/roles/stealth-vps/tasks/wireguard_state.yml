@@ -1,0 +1,80 @@
+---
+# WireGuard server state generation (v0.11.0+). Generates the server
+# X25519 keypair via `wg`, picks a UDP port, records the client subnet.
+# Idempotent: slurps the existing file on subsequent runs.
+#
+# Persisted shape:
+#   port: 51820
+#   private_key: <base64>
+#   public_key: <base64>
+#   subnet: 10.99.0.0/24
+#
+# The private key lives ONLY in this 0600 state file + the rendered
+# /etc/wireguard/stealth.conf. The public key is what clients point at
+# (rendered into each client's .conf by the wireguard module).
+
+- name: Ensure wireguard-tools is installed (provides `wg`)
+  ansible.builtin.apt:
+    name: wireguard-tools
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [wireguard, wg]
+
+- name: Probe existing wireguard state
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/wireguard.state.yml"
+  register: stealth_vps_wireguard_state_stat
+  tags: [wireguard, wg]
+
+- name: Read existing wireguard state from the remote
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/wireguard.state.yml"
+  register: stealth_vps_wireguard_state_raw
+  when: stealth_vps_wireguard_state_stat.stat.exists
+  tags: [wireguard, wg]
+
+- name: Set wireguard state fact from slurped YAML
+  ansible.builtin.set_fact:
+    stealth_vps_wireguard_state: "{{ stealth_vps_wireguard_state_raw.content | b64decode | from_yaml }}"
+  when: stealth_vps_wireguard_state_stat.stat.exists
+  tags: [wireguard, wg]
+
+- name: Generate WireGuard server state (first run only)
+  when: not stealth_vps_wireguard_state_stat.stat.exists
+  tags: [wireguard, wg]
+  block:
+
+    - name: Generate server private key
+      ansible.builtin.command:
+        cmd: wg genkey
+      register: stealth_vps_wg_privkey_raw
+      changed_when: false
+      no_log: true
+
+    - name: Derive server public key
+      ansible.builtin.command:
+        cmd: wg pubkey
+        stdin: "{{ stealth_vps_wg_privkey_raw.stdout }}"
+      register: stealth_vps_wg_pubkey_raw
+      changed_when: false
+      no_log: true
+
+    - name: Compose new wireguard state  # noqa: jinja[spacing]
+      ansible.builtin.set_fact:
+        stealth_vps_wireguard_state: "{{ {
+          'port': (range(stealth_vps_wg_port_min, stealth_vps_wg_port_max + 1) | random),
+          'private_key': (stealth_vps_wg_privkey_raw.stdout | trim),
+          'public_key': (stealth_vps_wg_pubkey_raw.stdout | trim),
+          'subnet': stealth_vps_wg_subnet,
+        } }}"
+      no_log: true
+
+    - name: Persist wireguard state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_wireguard_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/wireguard.state.yml"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true

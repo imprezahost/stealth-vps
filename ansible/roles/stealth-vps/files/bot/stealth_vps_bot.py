@@ -147,6 +147,12 @@ SS2022_PORT = int(_env("STEALTH_VPS_BOT_SS2022_PORT", "0") or "0")
 SS2022_METHOD = _env("STEALTH_VPS_BOT_SS2022_METHOD", "2022-blake3-aes-128-gcm")
 SS2022_SERVER_PSK = _env("STEALTH_VPS_BOT_SS2022_SERVER_PSK")
 
+# v0.11.0+ Block B — Trojan-Go.
+TROJAN_ENABLED = _env_bool("STEALTH_VPS_BOT_TROJAN_ENABLED")
+TROJAN_PORT = int(_env("STEALTH_VPS_BOT_TROJAN_PORT", "0") or "0")
+TROJAN_SNI = _env("STEALTH_VPS_BOT_TROJAN_SNI")
+TROJAN_INSECURE = _env_bool("STEALTH_VPS_BOT_TROJAN_INSECURE")
+
 SUBSCRIPTION_PUBLIC_URL = _env("STEALTH_VPS_BOT_SUBSCRIPTION_PUBLIC_URL")
 
 # --- Headless-mode config -------------------------------------------------
@@ -273,6 +279,10 @@ def _uri_render_config() -> UriRenderConfig:
         ss2022_port=SS2022_PORT,
         ss2022_method=SS2022_METHOD,
         ss2022_server_psk=SS2022_SERVER_PSK,
+        trojan_enabled=TROJAN_ENABLED,
+        trojan_port=TROJAN_PORT,
+        trojan_sni=TROJAN_SNI,
+        trojan_insecure=TROJAN_INSECURE,
     )
 
 

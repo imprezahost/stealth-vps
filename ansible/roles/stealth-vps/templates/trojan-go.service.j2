@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+# stealth-vps Trojan-Go server (v0.11.0+). Legacy-compat protocol;
+# upstream p4gefau1t/trojan-go is in maintenance mode (deprecated-by-2027
+# per the v0.11 design doc). Prefer SS-2022 / XHTTP for new deployments.
+
+[Unit]
+Description=stealth-vps Trojan-Go server
+Documentation=https://github.com/imprezahost/stealth-vps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Trojan-Go has no real hot reload — the reloader uses `restart` on
+# user mutations. Restart=on-failure recovers from transient bind
+# failures (e.g. cert not yet present at first boot).
+Restart=on-failure
+RestartSec=5s
+ExecStart={{ stealth_vps_trojan_go_bin }} -config {{ stealth_vps_trojan_go_config_dir }}/config.json
+StandardOutput=journal
+StandardError=journal
+# Hardening — Trojan-Go reads its config + the TLS cert, binds one TCP
+# port, proxies out. Lock the FS down; it needs read of the cert dir.
+ProtectSystem=strict
+ReadOnlyPaths={{ stealth_vps_trojan_go_config_dir }} {{ stealth_vps_tls_dir }}
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+# Bind low ports? No — Trojan-Go listens on a high port (4400-4499
+# range). No CAP_NET_BIND_SERVICE needed.
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

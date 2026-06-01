@@ -623,6 +623,71 @@ def render_hysteria_config_text(*args: Any, **kwargs: Any) -> str:
     return json.dumps(cfg, indent=2, sort_keys=True)
 
 
+# --- trojan-go (v0.11.0+) -----------------------------------------------
+
+
+def render_trojan_go_config(
+    trojan_state: Mapping[str, Any],
+    users: Iterable[tuple[str, Mapping[str, Any]]],
+    *,
+    tls_cert: str,
+    tls_key: str,
+    sni: str = "",
+    fallback_addr: str = "127.0.0.1",
+    fallback_port: int = 80,
+) -> dict[str, Any]:
+    """Build the Trojan-Go server config dict (config.json, server mode).
+
+    Trojan-Go's multi-user auth is a flat `password` array — every
+    user's `trojan_password` from the index. Users with a None password
+    (migrated pre-v0.11, or never issued Trojan creds) are skipped.
+
+    `remote_addr`/`remote_port` is the active-probe fallback: a
+    connection that doesn't present a valid password is transparently
+    proxied there, exactly like Reality's `dest`. Defaults to a local
+    web server on :80; operators front it with a real masquerade.
+
+    Empty password list is allowed by Trojan-Go (the listener starts but
+    rejects everyone) — same "enabled but no users yet" tolerance as the
+    SS-2022 inbound. The URI builder simply emits no trojan:// entries
+    until a user gets a password.
+    """
+    try:
+        port = int(trojan_state["port"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReloadError(f"trojan_go state missing required fields: {exc}") from exc
+
+    passwords = [
+        str(rec["trojan_password"])
+        for _label, rec in users
+        if rec.get("trojan_password")
+    ]
+
+    return {
+        "run_type": "server",
+        "local_addr": "0.0.0.0",
+        "local_port": port,
+        "remote_addr": fallback_addr,
+        "remote_port": int(fallback_port),
+        "password": passwords,
+        "ssl": {
+            "cert": tls_cert,
+            "key": tls_key,
+            "sni": sni,
+            # fallback when SNI mismatches — same anti-probe story.
+            "fallback_addr": fallback_addr,
+            "fallback_port": int(fallback_port),
+        },
+    }
+
+
+def render_trojan_go_config_text(*args: Any, **kwargs: Any) -> str:
+    """`render_trojan_go_config` + deterministic JSON dump. Same
+    sort_keys parity contract as the xray + hysteria renderers so the
+    Ansible seed template and the reloader emit byte-identical files."""
+    return json.dumps(render_trojan_go_config(*args, **kwargs), indent=2, sort_keys=True)
+
+
 # --- systemctl wrapper --------------------------------------------------
 
 
@@ -733,6 +798,21 @@ class Reloader:
         hysteria_bandwidth_up: str = "100 mbps",
         hysteria_bandwidth_down: str = "100 mbps",
         hysteria_metrics_enabled: bool = False,
+        # v0.11.0+ Block B — Trojan-Go (separate daemon).
+        trojan_enabled: bool = False,
+        trojan_state_path: str = "/etc/stealth-vps/trojan_go.state.yml",
+        trojan_config_path: str = "/etc/trojan-go/config.json",
+        trojan_service: str = "trojan-go.service",
+        trojan_group: str | None = None,
+        trojan_tls_cert: str = "",
+        trojan_tls_key: str = "",
+        trojan_sni: str = "",
+        # v0.11.0+ Block B — WireGuard (kernel + wg-quick).
+        wireguard_enabled: bool = False,
+        wireguard_state_path: str = "/etc/stealth-vps/wireguard.state.yml",
+        wireguard_conf_path: str = "/etc/wireguard/stealth.conf",
+        wireguard_service: str = "wg-quick@stealth.service",
+        wireguard_subnet: str = "10.99.0.0/24",
         # control
         dry_run: bool = False,
         use_sudo: bool = False,
@@ -764,6 +844,21 @@ class Reloader:
         self.hysteria_bandwidth_up = hysteria_bandwidth_up
         self.hysteria_bandwidth_down = hysteria_bandwidth_down
         self.hysteria_metrics_enabled = hysteria_metrics_enabled
+        # trojan-go (v0.11.0+)
+        self.trojan_enabled = trojan_enabled
+        self.trojan_state_path = trojan_state_path
+        self.trojan_config_path = trojan_config_path
+        self.trojan_service = trojan_service
+        self.trojan_group = trojan_group
+        self.trojan_tls_cert = trojan_tls_cert
+        self.trojan_tls_key = trojan_tls_key
+        self.trojan_sni = trojan_sni
+        # wireguard (v0.11.0+)
+        self.wireguard_enabled = wireguard_enabled
+        self.wireguard_state_path = wireguard_state_path
+        self.wireguard_conf_path = wireguard_conf_path
+        self.wireguard_service = wireguard_service
+        self.wireguard_subnet = wireguard_subnet
         # control
         self.dry_run = dry_run
         self.use_sudo = use_sudo
@@ -835,6 +930,51 @@ class Reloader:
                 metrics_enabled=self.hysteria_metrics_enabled,
             )
 
+        # --- trojan-go (v0.11.0+) ---------------------------------------
+        trojan_text: str | None = None
+        if self.trojan_enabled:
+            trojan_state = load_state_file(self.trojan_state_path)
+            trojan_text = render_trojan_go_config_text(
+                trojan_state,
+                users,
+                tls_cert=self.trojan_tls_cert,
+                tls_key=self.trojan_tls_key,
+                sni=self.trojan_sni,
+            )
+
+        # --- wireguard (v0.11.0+) ---------------------------------------
+        # The server conf is rendered from the index: every user with a
+        # wireguard_pubkey + wireguard_client_ip becomes a [Peer]. Users
+        # without those fields (no WG creds issued) are skipped. The
+        # wireguard module owns the rendering — the reloader just feeds
+        # it the server keypair/port from wireguard.state.yml + the peer
+        # tuples from the index.
+        wg_text: str | None = None
+        if self.wireguard_enabled:
+            from . import wireguard as _wg
+            wg_state = load_state_file(self.wireguard_state_path)
+            try:
+                wg_priv = str(wg_state["private_key"])
+                wg_port = int(wg_state["port"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ReloadError(
+                    f"wireguard state missing required fields: {exc}"
+                ) from exc
+            peers = [
+                (label, str(rec["wireguard_pubkey"]), str(rec["wireguard_client_ip"]))
+                for label, rec in users
+                if rec.get("wireguard_pubkey") and rec.get("wireguard_client_ip")
+            ]
+            try:
+                wg_text = _wg.render_server_conf(
+                    server_private_key=wg_priv,
+                    listen_port=wg_port,
+                    subnet=self.wireguard_subnet,
+                    peers=peers,
+                )
+            except _wg.WireGuardError as exc:
+                raise ReloadError(f"wireguard render failed: {exc}") from exc
+
         # --- writes -----------------------------------------------------
         # All renders succeeded; safe to commit to disk now.
         if xray_text is not None:
@@ -859,6 +999,25 @@ class Reloader:
                 self.hysteria_per_user,
                 len(users),
             )
+
+        if trojan_text is not None:
+            _write_atomic(
+                self.trojan_config_path,
+                trojan_text,
+                mode=0o640,
+                group=self.trojan_group,
+            )
+            log.info("rendered %s (%d users)", self.trojan_config_path, len(users))
+
+        if wg_text is not None:
+            # WG conf holds the server private key — mode 0600, no group.
+            _write_atomic(
+                self.wireguard_conf_path,
+                wg_text,
+                mode=0o600,
+                group=None,
+            )
+            log.info("rendered %s", self.wireguard_conf_path)
 
         # --- reloads ----------------------------------------------------
         # Both services use `restart` (not `reload`) because neither
@@ -887,6 +1046,30 @@ class Reloader:
         if hy_text is not None:
             reload_service(
                 self.hysteria_service,
+                dry_run=self.dry_run,
+                mode="restart",
+                use_sudo=self.use_sudo,
+            )
+        if trojan_text is not None:
+            # Trojan-Go, like Hysteria, treats SIGHUP as graceful-stop
+            # (no real hot reload upstream) — use restart. Sub-second
+            # cutover; clients reconnect on their retry loop.
+            reload_service(
+                self.trojan_service,
+                dry_run=self.dry_run,
+                mode="restart",
+                use_sudo=self.use_sudo,
+            )
+        if wg_text is not None:
+            # WireGuard DOES support hot reload via `wg syncconf`, which
+            # applies peer changes without tearing down live tunnels.
+            # The Ansible-side reload uses a `wg syncconf` pipeline;
+            # here in the Python reloader we restart wg-quick@stealth
+            # (simpler + correct — a brief tunnel blip vs. the syncconf
+            # shell gymnastics). A future optimisation can wire the
+            # syncconf path through reload_service with mode="reload".
+            reload_service(
+                self.wireguard_service,
                 dry_run=self.dry_run,
                 mode="restart",
                 use_sudo=self.use_sudo,
@@ -954,6 +1137,21 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
     p.add_argument("--ss2022-state-path", default="")
     p.add_argument("--xhttp-state-path", default="")
     p.add_argument("--vmess-ws-state-path", default="")
+    # v0.11.0+ Block B — Trojan-Go (separate daemon).
+    p.add_argument("--trojan-enabled", type=_bool_flag, default=False)
+    p.add_argument("--trojan-state-path", default="/etc/stealth-vps/trojan_go.state.yml")
+    p.add_argument("--trojan-config-path", default="/etc/trojan-go/config.json")
+    p.add_argument("--trojan-service", default="trojan-go.service")
+    p.add_argument("--trojan-group", default="")
+    p.add_argument("--trojan-tls-cert", default="")
+    p.add_argument("--trojan-tls-key", default="")
+    p.add_argument("--trojan-sni", default="")
+    # v0.11.0+ Block B — WireGuard (kernel + wg-quick).
+    p.add_argument("--wireguard-enabled", type=_bool_flag, default=False)
+    p.add_argument("--wireguard-state-path", default="/etc/stealth-vps/wireguard.state.yml")
+    p.add_argument("--wireguard-conf-path", default="/etc/wireguard/stealth.conf")
+    p.add_argument("--wireguard-service", default="wg-quick@stealth.service")
+    p.add_argument("--wireguard-subnet", default="10.99.0.0/24")
     # control
     p.add_argument(
         "--dry-run",
@@ -1002,6 +1200,19 @@ def main(argv: list[str] | None = None) -> int:
         ss2022_state_path=(args.ss2022_state_path or None),
         xhttp_state_path=(args.xhttp_state_path or None),
         vmess_ws_state_path=(args.vmess_ws_state_path or None),
+        trojan_enabled=args.trojan_enabled,
+        trojan_state_path=args.trojan_state_path,
+        trojan_config_path=args.trojan_config_path,
+        trojan_service=args.trojan_service,
+        trojan_group=(args.trojan_group or None),
+        trojan_tls_cert=args.trojan_tls_cert,
+        trojan_tls_key=args.trojan_tls_key,
+        trojan_sni=args.trojan_sni,
+        wireguard_enabled=args.wireguard_enabled,
+        wireguard_state_path=args.wireguard_state_path,
+        wireguard_conf_path=args.wireguard_conf_path,
+        wireguard_service=args.wireguard_service,
+        wireguard_subnet=args.wireguard_subnet,
         dry_run=args.dry_run,
         use_sudo=args.use_sudo,
     )

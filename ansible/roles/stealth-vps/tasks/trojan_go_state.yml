@@ -1,0 +1,46 @@
+---
+# Trojan-Go state generation (v0.11.0+). Picks a listen port on first
+# run; slurps the existing file thereafter. No crypto material — per-user
+# passwords live in users.index.json (trojan_password), the server cert
+# is the shared TLS cert.
+#
+# Persisted shape:
+#   port: 4443
+
+- name: Probe existing trojan-go state
+  ansible.builtin.stat:
+    path: "{{ stealth_vps_panel_state_dir }}/trojan_go.state.yml"
+  register: stealth_vps_trojan_go_state_stat
+  tags: [trojan]
+
+- name: Read existing trojan-go state from the remote
+  ansible.builtin.slurp:
+    src: "{{ stealth_vps_panel_state_dir }}/trojan_go.state.yml"
+  register: stealth_vps_trojan_go_state_raw
+  when: stealth_vps_trojan_go_state_stat.stat.exists
+  tags: [trojan]
+
+- name: Set trojan-go state fact from slurped YAML
+  ansible.builtin.set_fact:
+    stealth_vps_trojan_go_state: "{{ stealth_vps_trojan_go_state_raw.content | b64decode | from_yaml }}"
+  when: stealth_vps_trojan_go_state_stat.stat.exists
+  tags: [trojan]
+
+- name: Generate Trojan-Go state (first run only)
+  when: not stealth_vps_trojan_go_state_stat.stat.exists
+  tags: [trojan]
+  block:
+
+    - name: Compose new trojan-go state  # noqa: jinja[spacing]
+      ansible.builtin.set_fact:
+        stealth_vps_trojan_go_state: "{{ {
+          'port': (range(stealth_vps_trojan_go_port_min, stealth_vps_trojan_go_port_max + 1) | random),
+        } }}"
+
+    - name: Persist trojan-go state to disk
+      ansible.builtin.copy:
+        content: "{{ stealth_vps_trojan_go_state | to_nice_yaml(indent=2, sort_keys=true) }}"
+        dest: "{{ stealth_vps_panel_state_dir }}/trojan_go.state.yml"
+        owner: root
+        group: root
+        mode: '0600'
