@@ -1271,6 +1271,118 @@ def test_control_mode_no_protocol_node_leaves_creds_null(
     assert rec["trojan_password"] is None
 
 
+# ---------------------------------------------------------------------------
+# v0.11.0 Block D — WireGuard per-user setup + wg-config
+# ---------------------------------------------------------------------------
+
+
+def _fake_wg_keygen():
+    """Patch target: stealth_vps.wireguard.generate_keypair → fixed pair."""
+    return ("CLIENT_PRIV_B64", "CLIENT_PUB_B64")
+
+
+def test_user_add_sets_up_wireguard_when_enabled(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """wireguard.state.yml present → user add mints a keypair, allocates
+    an IP, stores pubkey + client_ip in the index, stashes the privkey."""
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SRV_PRIV\npublic_key: SRV_PUB\nsubnet: 10.99.0.0/24\n",
+        encoding="utf-8",
+    )
+    keys_dir = tmp_path / "wg-keys"
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "WIREGUARD_STATE_PATH", str(wg_state)), \
+         patch.object(cli, "WIREGUARD_CLIENT_KEYS_DIR", str(keys_dir)), \
+         patch("stealth_vps.wireguard.generate_keypair", side_effect=_fake_wg_keygen):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["wireguard_pubkey"] == "CLIENT_PUB_B64"
+    assert rec["wireguard_client_ip"] == "10.99.0.2"   # first free in /24
+    priv = keys_dir / "bob.privkey"
+    assert priv.read_text().strip() == "CLIENT_PRIV_B64"
+
+
+def test_user_add_no_wireguard_state_leaves_wg_fields_null(
+    users_index_path: str, reloader_args_json: str
+) -> None:
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader):
+        rc = cli.main(["user", "add", "bob"])
+    assert rc == 0
+    rec = state.load_users_index(users_index_path)["users"]["bob"]
+    assert rec["wireguard_pubkey"] is None
+    assert rec["wireguard_client_ip"] is None
+
+
+def test_user_add_wireguard_allocates_sequential_ips(
+    users_index_path: str, reloader_args_json: str, tmp_path: pathlib.Path
+) -> None:
+    """Two WG users get .2 and .3 (alice from the fixture has no WG IP)."""
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SRV\npublic_key: SRVP\nsubnet: 10.99.0.0/24\n",
+        encoding="utf-8",
+    )
+    keys_dir = tmp_path / "wg-keys"
+    fake_reloader = MagicMock()
+    with patch.object(cli, "_build_reloader", return_value=fake_reloader), \
+         patch.object(cli, "WIREGUARD_STATE_PATH", str(wg_state)), \
+         patch.object(cli, "WIREGUARD_CLIENT_KEYS_DIR", str(keys_dir)), \
+         patch("stealth_vps.wireguard.generate_keypair", side_effect=_fake_wg_keygen):
+        cli.main(["user", "add", "bob"])
+        cli.main(["user", "add", "carol"])
+    idx = state.load_users_index(users_index_path)["users"]
+    ips = {idx["bob"]["wireguard_client_ip"], idx["carol"]["wireguard_client_ip"]}
+    assert ips == {"10.99.0.2", "10.99.0.3"}
+
+
+def test_wg_config_renders_client_conf(
+    users_index_path: str, tmp_path: pathlib.Path, capsys
+) -> None:
+    state.update_user(
+        "alice", wireguard_pubkey="ALICE_PUB", wireguard_client_ip="10.99.0.2",
+        path=users_index_path,
+    )
+    wg_state = tmp_path / "wireguard.state.yml"
+    wg_state.write_text(
+        "port: 51820\nprivate_key: SRV\npublic_key: SERVER_PUB_B64\nsubnet: 10.99.0.0/24\n",
+        encoding="utf-8",
+    )
+    keys_dir = tmp_path / "wg-keys"
+    keys_dir.mkdir()
+    (keys_dir / "alice.privkey").write_text("ALICE_PRIV_B64\n", encoding="utf-8")
+    (tmp_path / "installer.env").write_text('STEALTH_DOMAIN="vpn.example.com"\n', encoding="utf-8")
+
+    with patch.object(cli, "WIREGUARD_STATE_PATH", str(wg_state)), \
+         patch.object(cli, "WIREGUARD_CLIENT_KEYS_DIR", str(keys_dir)):
+        rc = cli.main(["user", "wg-config", "alice"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "[Interface]" in out
+    assert "PrivateKey = ALICE_PRIV_B64" in out
+    assert "Address = 10.99.0.2/32" in out
+    assert "PublicKey = SERVER_PUB_B64" in out
+    assert "Endpoint = vpn.example.com:51820" in out
+
+
+def test_wg_config_unknown_user_errors(users_index_path: str, capsys) -> None:
+    rc = cli.main(["user", "wg-config", "ghost"])
+    assert rc == 1
+    assert "no user labelled 'ghost'" in capsys.readouterr().err
+
+
+def test_wg_config_user_without_wg_identity_errors(
+    users_index_path: str, capsys
+) -> None:
+    rc = cli.main(["user", "wg-config", "alice"])
+    assert rc == 1
+    assert "no WireGuard identity" in capsys.readouterr().err
+
+
 def test_data_node_mode_unchanged_by_step6(
     users_index_path: str, reloader_args_json: str, capsys
 ) -> None:

@@ -505,6 +505,65 @@ def _fleet_ss2022_method() -> str | None:
     return None
 
 
+WIREGUARD_CLIENT_KEYS_DIR = "/var/lib/stealth-vps/wireguard"
+
+
+def _maybe_setup_wireguard_for_user(
+    label: str,
+    *,
+    wireguard_state_path: str | None = None,
+    client_keys_dir: str | None = None,
+) -> tuple[str, str] | None:
+    """When this host runs WireGuard (wireguard.state.yml present),
+    mint a client keypair, allocate the next-free /24 IP, stash the
+    private key for later `wg-config` rendering, and return
+    (client_pubkey, client_ip). Returns None when WG isn't enabled here.
+
+    Server-gen flow (ADR B4): the server holds the client privkey at
+    `<client_keys_dir>/<label>.privkey` (0600) so `s-vps user wg-config`
+    can render the importable .conf on demand. Only the pubkey + IP go
+    into the index — the privkey never leaves the box except in the
+    rendered client config the operator hands to the user.
+    """
+    from . import wireguard as _wg
+    state_path = wireguard_state_path or WIREGUARD_STATE_PATH
+    keys_dir = client_keys_dir or WIREGUARD_CLIENT_KEYS_DIR
+    if not os.path.exists(state_path):
+        return None
+    try:
+        wg_state = load_state_file(state_path)
+    except ReloadError:
+        return None
+    subnet = str(wg_state.get("subnet", _wg.DEFAULT_SUBNET))
+
+    # Collect already-assigned client IPs from the index so the
+    # allocator skips them.
+    used_ips: list[str] = []
+    try:
+        idx = state.load_users_index(state.USERS_INDEX_PATH)
+        for _lbl, urec in idx.get("users", {}).items():
+            ip = urec.get("wireguard_client_ip")
+            if ip:
+                used_ips.append(ip)
+    except state.StateError:
+        pass
+
+    try:
+        priv, pub = _wg.generate_keypair()
+        client_ip = _wg.allocate_client_ip(subnet, used_ips)
+    except _wg.WireGuardError as exc:
+        print(f"s-vps: WireGuard setup for {label!r} failed: {exc}", file=sys.stderr)
+        return None
+
+    # Stash the client privkey 0600 so wg-config can render later.
+    os.makedirs(keys_dir, mode=0o700, exist_ok=True)
+    priv_path = os.path.join(keys_dir, f"{label}.privkey")
+    with open(priv_path, "w", encoding="utf-8") as f:
+        f.write(priv + "\n")
+    os.chmod(priv_path, 0o600)
+    return pub, client_ip
+
+
 def _maybe_autogen_trojan_password(
     trojan_state_path: str | None = None,
 ) -> str | None:
@@ -580,6 +639,25 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             args.label, trojan_password=trojan_password, path=state.USERS_INDEX_PATH,
         )
         rec["trojan_password"] = trojan_password
+
+    # v0.11.0+ Block B: WireGuard per-user identity. WG is single-node
+    # (excluded from the multi-node bundle — see Block C), so there's no
+    # fleet-aware branch: we only act when this host runs WG locally
+    # (wireguard.state.yml present). The server mints the client keypair
+    # (ADR B4 default), allocates the next-free /24 IP, stores pubkey +
+    # IP in the index, and stashes the privkey for `s-vps user wg-config`
+    # to render the client .conf later.
+    wg_setup = _maybe_setup_wireguard_for_user(args.label)
+    if wg_setup is not None:
+        pubkey, client_ip = wg_setup
+        state.update_user(
+            args.label,
+            wireguard_pubkey=pubkey,
+            wireguard_client_ip=client_ip,
+            path=state.USERS_INDEX_PATH,
+        )
+        rec["wireguard_pubkey"] = pubkey
+        rec["wireguard_client_ip"] = client_ip
 
     print(f"✓ added user {args.label!r}")
     print(f"  reality_uuid     : {rec['reality_uuid']}")
@@ -844,6 +922,69 @@ def cmd_user_show(args: argparse.Namespace) -> int:
             except subprocess.CalledProcessError:
                 pass
 
+    return 0
+
+
+def cmd_user_wg_config(args: argparse.Namespace) -> int:
+    """Print a user's WireGuard client .conf (v0.11.0+).
+
+    WireGuard has no URI form — the client imports a multi-line config.
+    The server stashed the user's private key at
+    /var/lib/stealth-vps/wireguard/<label>.privkey when `user add`
+    generated their identity; this command pairs it with the server's
+    public key + endpoint to render the importable .conf.
+
+    Operator hands the output to the user (paste into the WG app, or
+    `qrencode` it). The private key is the user's secret — the operator
+    delivers it once and shouldn't retain copies beyond the stash.
+    """
+    from . import wireguard as _wg
+
+    rec = state.get_user(args.label, state.USERS_INDEX_PATH)
+    if rec is None:
+        print(f"s-vps: no user labelled {args.label!r} in the index", file=sys.stderr)
+        return 1
+    if not rec.get("wireguard_pubkey") or not rec.get("wireguard_client_ip"):
+        print(
+            f"s-vps: {args.label!r} has no WireGuard identity. WireGuard "
+            f"isn't enabled on this host, or the user predates it. Re-run "
+            f"`s-vps user rotate {args.label}` on a WG-enabled host to issue one.",
+            file=sys.stderr,
+        )
+        return 1
+
+    priv_path = os.path.join(WIREGUARD_CLIENT_KEYS_DIR, f"{args.label}.privkey")
+    try:
+        client_priv = pathlib.Path(priv_path).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        print(
+            f"s-vps: client private key for {args.label!r} not found at "
+            f"{priv_path}. It's generated at `user add` time on a WG-enabled "
+            f"host; if this user was added elsewhere, the key isn't on this box.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        wg_state = load_state_file(WIREGUARD_STATE_PATH)
+    except ReloadError as exc:
+        print(f"s-vps: can't read wireguard.state.yml ({exc})", file=sys.stderr)
+        return 1
+
+    env = _load_installer_env()
+    endpoint_host = (
+        env.get("STEALTH_DOMAIN")
+        or env.get("STEALTH_VPS_PUBLIC_HOST")
+        or "your.vps.example"
+    )
+    conf = _wg.render_client_conf(
+        client_private_key=client_priv,
+        client_ip=rec["wireguard_client_ip"],
+        server_public_key=str(wg_state.get("public_key", "")),
+        endpoint_host=endpoint_host,
+        endpoint_port=int(wg_state.get("port", 51820)),
+    )
+    print(conf, end="")
     return 0
 
 
@@ -1901,6 +2042,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--qr", action="store_true",
                    help="render terminal QR codes for the URIs (needs qrencode).")
     p.set_defaults(func=cmd_user_show)
+
+    p = user_sub.add_parser(
+        "wg-config",
+        help="print a user's WireGuard client .conf (v0.11+)",
+        description=cmd_user_wg_config.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("label")
+    p.set_defaults(func=cmd_user_wg_config)
 
     # --- reload -------------------------------------------------------
     p = sub.add_parser("reload", help="re-render configs + SIGHUP services (headless only)")
