@@ -1,10 +1,10 @@
 # stealth-vps
 
-> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x 起新增的功能尚未完整同步到中文版。安装命令链接已更新到当前 release(v0.11.0),但功能描述、roadmap 表格等仍停留在较早时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
+> ⚠️ **翻译版本滞后于英文版多个 release。** 本中文文档由维护者从早期版本(v0.4.3)的英文 [README.md](README.md) 机器辅助翻译,自 v0.5.x 起新增的功能尚未完整同步到中文版。安装命令链接已更新到当前 release(v0.12.0),但功能描述、roadmap 表格等仍停留在较早时期。**功能清单与最新变更请参阅英文 [README.md](../README.md) 与 [CHANGELOG.md](CHANGELOG.md)。** zh-CN 完整重审已列入 v1.0 计划。
 
 ---
 
-> **状态: v0.11.0(alpha)。** 在 v0.10 多节点的基础上,**v0.11 新增五个可选协议**:默认仍是 Reality + Hysteria2,另加 **XHTTP**、**VMess+WS**(经 Caddy + CDN 前置)、**Shadowsocks-2022**(密码族多样性)、**Trojan-Go**(遗留客户端,2027 弃用)、**WireGuard**(硬 DPI 网络的"普通 VPN"回退)。每个协议默认关闭,按主机或按 fleet 节点开启。`users.index.json` schema v2 → v3(载入时自动升级)新增四个可空的每用户凭据字段;`s-vps user add` 在协议启用时自动签发。新增 `stealth_vps.wireguard` 模块(密钥生成 + /24 顺序 IP 分配 + 客户端/服务端 .conf 渲染);`s-vps user wg-config LABEL` 打印可导入的 WG 配置。多节点 Block C:`FleetNode` 携带每节点协议块,`s-vps fleet add` 自动发现,订阅 bundle 为每个节点精确生成其所运行协议的 URI(异构 fleet 一等公民)。**工具链共 536 个自动化测试**(517 pytest + 9 Python + 10 Go)。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/protocols.md](docs/protocols.md)。
+> **状态: v0.12.0(alpha)。** 在 v0.11 五协议的基础上,**v0.12 引入一键 onboarding 网桥**:一个静态网页 `/.well-known/stealth-vps-onboard/<token>` 把订阅 token 变成一键客户端导入 —— 检测访客 OS,显示深链导入按钮(Hiddify / V2Box / NekoBox / sing-box / Streisand),渲染订阅 URL 的二维码,并提供复制 URL 兜底。无后端、无每用户文件 —— 所有人共用同一静态 bundle,token 在 URL 里。零第三方请求(无 CDN / web 字体 / 分析),二维码编码器内置仓库。`s-vps user onboard-url LABEL` + `user show` / 机器人 `/sub` 打印该链接;机器人 `/onboard LABEL` 私信链接 + 二维码图片。严格 CSP + `X-Frame-Options: DENY`;SPA try_files 无 token oracle。默认关闭;需 `subscription_expose` + 域名。**工具链共 559 个自动化测试**(540 pytest + 9 Python + 10 Go)。详见英文 [CHANGELOG.md](CHANGELOG.md) 与 [docs/onboarding.md](docs/onboarding.md)。
 
 一个可复用的工具集,用于在受限网络环境中搭建注重隐私的 VPS。在 3X-UI 面板背后部署 VLESS-Reality + Hysteria2,带合理的安全加固、真正可用的 fail2ban 配置,以及内置的可观测性方案。
 
@@ -51,14 +51,14 @@
 适合一台刚开通、只想跑起来的 VPS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.11.0/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.12.0/scripts/install.sh | bash
 ```
 
 这是一层轻量的封装脚本,它启动 Ansible 并对本仓库运行 `ansible-pull`。URL 锁定到 v0.6.4 发布标签,因此你部署的就是本 changelog 所对应的代码。若想安装其他版本,把 URL 中的 tag 换掉,**并且**传入对应的 `STEALTH_VERSION`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.11.0/scripts/install.sh \
-  | STEALTH_VERSION=v0.11.0 bash
+curl -sSL https://raw.githubusercontent.com/imprezahost/stealth-vps/v0.12.0/scripts/install.sh \
+  | STEALTH_VERSION=v0.12.0 bash
 ```
 
 ### 2. Ansible(推荐用于可重复部署)
@@ -81,9 +81,9 @@ Provider-agnostic —— 从类型化的 HCL 输入(SSH 公钥、域名、版本
 
 ```hcl
 module "stealth_vps_bootstrap" {
-  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.11.0"
+  source = "github.com/imprezahost/stealth-vps//terraform/modules/stealth-vps?ref=v0.12.0"
 
-  stealth_version = "v0.11.0"
+  stealth_version = "v0.12.0"
   ssh_public_key  = file("~/.ssh/id_ed25519.pub")
   domain          = "vpn.example.com"
   letsencrypt_email = "ops@example.com"
@@ -142,9 +142,8 @@ Hetzner Cloud 的端到端示例位于 [`terraform/examples/hetzner/`](terraform
 | v0.8.1 | **CI 与生产环境对齐 + 机器人重构**:新增 `molecule-newer` 任务(`ansible-core>=2.19,<3.0`,与东京 VPS 一致)与现有 `2.14-2.17` 任务并行运行,在同一个 MR 中就捕获了 7 处 `when:` 条件的 NoneType 问题。从机器人模块抽出 `stealth_vps/bot_core.py`(295 LOC)使派发逻辑可在没有 `python-telegram-bot` 的测试环境中运行;新增 20 个 pytest 用例(共 214 个)。`docs/operations.md` 新增 arm64 烟雾测试 runbook;zh-CN 文档同步到 v0.8.0+。工具链共 233 个自动化测试。 | 已发布 2026-05-19 |
 | v0.9.0 | **订阅 TTL + 自动更新 + age 加密备份 + 健康检查 exporter — 一次发布四个运维特性。**`users.index.json` schema v1 → v2 新增 `sub_expires_at`(载入时自动升级);`s-vps user add --ttl 30d` / `s-vps sub renew` / `s-vps sub prune` + 每日 systemd 定时器。可选的 `stealth_vps.auto_update` 轮询 GitHub Releases 并按策略(`patch-only` / `minor-patch` / `disabled`)滚动更新,支持 GitHub token 突破匿名 60/小时限速。`s-vps backup` + `s-vps restore` 使用 `age` 加密运维状态(`/etc/stealth-vps` + `/var/lib/stealth-vps`)— 主机只持有公钥,恢复时由运维提供身份文件;解 tar 时拒绝 `..` 和绝对路径。`:9102` 上新增 Prometheus 健康探测端点(`http.server` 标准库,默认绑环回)。**工具链共 332 个自动化测试**(313 pytest + 9 Python + 10 Go)。 | 已发布 2026-05-20 |
 | v0.10.0 | **多节点 fleet 模式。**新的 role 模式(`stealth_vps_control_enabled=true`)把一台小 VPS 变成 CONTROL 控制面,持有 `users.index.json` + 机器人 + 订阅端点。控制节点通过 SSH 注册每台数据节点(`s-vps fleet add LABEL --ssh-host X`),锁定其 `authorized_keys` 只能运行 `s-vps fleet-receive`,然后在每次用户变更后自动 push 索引。订阅 bundle 内嵌每节点的 Reality 公钥;`s-vps fleet rotate-key` 零停机轮换密钥。新增 `stealth_vps.fleet` 模块(纯标准库)。单节点不受影响。**工具链共 443 个自动化测试**。 | 已发布 2026-05-20 |
-| **v0.11.0** | **五个可选协议。**默认仍是 Reality + Hysteria2,v0.11 新增 **XHTTP** + **VMess+WS**(经 Caddy + CDN 前置)、**Shadowsocks-2022**(密码族多样性)、**Trojan-Go**(遗留客户端,2027 弃用)、**WireGuard**(硬 DPI 回退)。每个默认关闭,按主机或 fleet 节点开启。`users.index.json` schema v2 → v3(自动升级)新增四个可空的每用户凭据字段;`s-vps user add` 在协议启用时自动签发。新增 `stealth_vps.wireguard` 模块(密钥生成 + /24 顺序 IP 分配 + .conf 渲染);`s-vps user wg-config LABEL` 打印可导入的 WG 配置。多节点 Block C:`FleetNode` 携带每节点协议块,`s-vps fleet add` 自动发现,bundle 为每个节点精确生成其协议 URI(异构 fleet 一等公民)。**工具链共 536 个自动化测试**(517 pytest + 9 Python + 10 Go);93 个新 pytest 用例。 | **已发布 2026-05-20** |
-| v0.11.0 | WireGuard 回退 + Xray 协议扩展(XHTTP、VMess+WS、Trojan-Go、SS-2022) | 计划中 |
-| v0.12.0 | 订阅 bridge 网页 UI(检测客户端 + 显示 QR + 深链 Hiddify Next / V2Box / NekoBox) | 计划中 |
+| **v0.11.0** | **五个可选协议。**默认仍是 Reality + Hysteria2,v0.11 新增 **XHTTP** + **VMess+WS**(经 Caddy + CDN 前置)、**Shadowsocks-2022**(密码族多样性)、**Trojan-Go**(遗留客户端,2027 弃用)、**WireGuard**(硬 DPI 回退)。每个默认关闭,按主机或 fleet 节点开启。`users.index.json` schema v2 → v3(自动升级)新增四个可空的每用户凭据字段;`s-vps user add` 在协议启用时自动签发。新增 `stealth_vps.wireguard` 模块(密钥生成 + /24 顺序 IP 分配 + .conf 渲染);`s-vps user wg-config LABEL` 打印可导入的 WG 配置。多节点 Block C:`FleetNode` 携带每节点协议块,`s-vps fleet add` 自动发现,bundle 为每个节点精确生成其协议 URI(异构 fleet 一等公民)。**工具链共 536 个自动化测试**(517 pytest + 9 Python + 10 Go);93 个新 pytest 用例。 | 已发布 2026-05-20 |
+| **v0.12.0** | **一键 onboarding 网桥。**静态网页 `/.well-known/stealth-vps-onboard/<token>` 把订阅 token 变成一键导入:检测 OS、显示深链按钮(Hiddify / V2Box / NekoBox / sing-box / Streisand)、渲染订阅 URL 二维码、复制 URL 兜底。无后端、无每用户文件 —— 共用同一静态 bundle,token 在 URL。零第三方请求,二维码编码器内置仓库。`s-vps user onboard-url` + 机器人 `/onboard`。严格 CSP + `X-Frame-Options: DENY`;SPA try_files 无 token oracle。默认关闭;需 expose + 域名。**工具链共 559 个自动化测试**(540 pytest + 9 Python + 10 Go)。 | **已发布 2026-05-20** |
 | v0.13.0 / v0.14.0 | **原生 Android 客户端**(Kotlin),然后 **iOS**(Swift)。从零构建,不依赖第三方 fork | 远期 |
 | v1.0.0 | 完整的 probe-resistance CI 套件(JA4 + JA4S + 黄金快照)、签名发布(cosign + GPG)、外部安全审计、zh-CN 母语审校 | 远期 |
 

@@ -1,34 +1,41 @@
-# Vendored third-party assets
+# Vendored assets
 
 ## qrcode.min.js — QR encoder
 
-**Provenance (ADR O1):** [`nayuki/QR-Code-generator`](https://github.com/nayuki/QR-Code-generator), TypeScript/JavaScript build, MIT license. Dependency-free, no DOM assumptions, exposes the global `qrcodegen` (the API `onboard.js` calls: `qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.MEDIUM)`).
+**What it is (v0.12.0):** a compact, self-contained QR Code generator
+written in-tree — a faithful reimplementation of the QR spec
+(ISO/IEC 18004), structured after [`nayuki/QR-Code-generator`](https://github.com/nayuki/QR-Code-generator)
+(MIT). Byte-mode only (the onboarding page always encodes a URL),
+ECC levels L/M/Q/H, versions 1-40. Exposes the global `qrcodegen` with
+the surface `onboard.js` calls:
 
-**Why vendored, not CDN:** a censored-network user loading the onboarding page must not trigger any third-party request — it would leak that they're configuring a circumvention tool, and a CDN block would break the page. The whole bundle is self-contained + servable offline (ADR: "vendor the QR lib, no CDN").
-
-### Vendoring procedure
-
-The minified `qrcode.min.js` in this directory is fetched + pinned at build/release time, NOT hand-edited:
-
-```bash
-# Pin a release tag, fetch the JS build, minify, record the hash.
-VER=v1.8.0
-curl -fsSL -o /tmp/qrcodegen.js \
-  "https://raw.githubusercontent.com/nayuki/QR-Code-generator/$VER/javascript/qrcodegen.js"
-# Minify with any deterministic minifier (esbuild / terser), or ship
-# the unminified file as qrcode.min.js (it's ~40KB unminified — fine).
-esbuild /tmp/qrcodegen.js --minify --outfile=qrcode.min.js
-sha256sum qrcode.min.js > qrcode.min.js.sha256
+```js
+qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.MEDIUM)  // → { size, getModule(x,y) }
 ```
 
-Record the version + SHA-256 here on each bump:
+**Why in-tree instead of a vendored upstream build (ADR O1 deviation,
+operator-approved):** the build/release environment has no network
+fetch + no JS toolchain to pin + minify an upstream artifact. Writing a
+small, auditable encoder in the repo keeps the bundle self-contained
+with zero external fetch + no build step — which was the whole point of
+"no CDN" (censorship-resilience, no third-party leak). The trade-off is
+we own the code instead of tracking upstream; it's ~400 lines of
+well-specified algorithm, no dependencies.
 
-| Version | SHA-256 | Date |
-|---------|---------|------|
-| _pending vendor drop_ | _—_ | _—_ |
+**Validation status:** structurally tested in CI (API-surface presence
++ brace balance — see `tests/python-pkg/test_onboard.py`). The repo has
+no JS runtime, so the rendered QR is **not** scan-validated in unit
+tests. **Release/operator gate:** open the onboarding page in a real
+browser and scan the QR with a client app before relying on QR import.
+If the encoder ever throws, `onboard.js` degrades gracefully to the
+"QR unavailable — use a button or copy the URL" note, so import-by-
+button always works regardless.
 
-### Graceful degradation
+**If you'd rather track upstream:** drop the minified
+`nayuki/QR-Code-generator` JS build here (same `qrcodegen` global) and
+record its version + SHA-256 below; `onboard.js` calls the identical
+API either way.
 
-`onboard.js` checks `typeof window.qrcodegen === "undefined"` before rendering the QR. If the real library hasn't been dropped in (this placeholder still present), the page renders everything else — platform detection, deep-link import buttons, copy-URL fallback, server-details expander — and shows a short "QR unavailable — use a button above or copy the URL below" note in place of the QR. The page is fully functional for import-by-button without the QR; the QR is a convenience for camera-scan import.
-
-**Release gate:** the v0.12.0 cut MUST replace the placeholder with the real pinned `qrcode.min.js` (+ its recorded SHA) before tagging. The Tokyo smoke asserts the QR canvas renders.
+| Source | Version | SHA-256 | Date |
+|--------|---------|---------|------|
+| in-tree reimpl | v0.12.0 | (tracked in git) | 2026-06-01 |

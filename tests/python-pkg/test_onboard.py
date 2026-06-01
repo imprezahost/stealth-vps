@@ -136,6 +136,47 @@ def test_onboard_js_deeplink_table_matches_python() -> None:
         )
 
 
+def _vendor_qr_path() -> pathlib.Path:
+    here = pathlib.Path(__file__).resolve()
+    root = here.parents[2]
+    return (root / "ansible" / "roles" / "stealth-vps" / "files"
+            / "onboard" / "vendor" / "qrcode.min.js")
+
+
+def test_vendored_qr_exposes_expected_api_surface() -> None:
+    """onboard.js calls `qrcodegen.QrCode.encodeText(text,
+    qrcodegen.QrCode.Ecc.MEDIUM)` then `.size` / `.getModule(x, y)`.
+    The vendored encoder must define exactly that surface — a missing
+    symbol means the QR silently falls back to the text note. (We can't
+    execute JS here to scan-validate the output; a real-browser check is
+    the release gate. This guards the API contract structurally.)"""
+    js = _vendor_qr_path().read_text(encoding="utf-8")
+    assert "PLACEHOLDER" not in js, "vendored QR is still the placeholder stub"
+    for needle in [
+        "var qrcodegen",
+        "QrCode.encodeText",
+        "QrCode.Ecc",
+        "Ecc.MEDIUM",
+        "getModule",
+        ".size",
+        "window.qrcodegen",
+    ]:
+        assert needle in js, f"vendored qrcode.min.js missing API symbol: {needle}"
+
+
+def test_vendored_qr_is_brace_balanced() -> None:
+    """Cheap syntax canary — balanced braces/parens/brackets. Catches a
+    truncated or mis-edited vendor file in CI (no JS engine to lint
+    with). Counts outside string/comment context is overkill; a raw
+    balance check is a useful smoke for gross corruption."""
+    js = _vendor_qr_path().read_text(encoding="utf-8")
+    for open_c, close_c in [("{", "}"), ("(", ")"), ("[", "]")]:
+        assert js.count(open_c) == js.count(close_c), (
+            f"unbalanced {open_c}{close_c} in qrcode.min.js "
+            f"({js.count(open_c)} vs {js.count(close_c)})"
+        )
+
+
 def test_onboard_js_extracts_token_from_role_path() -> None:
     """onboard.js reads the token from location.pathname. Assert its
     extraction handles the role's actual onboard path — a regex/split

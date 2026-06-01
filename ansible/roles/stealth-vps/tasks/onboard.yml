@@ -51,31 +51,6 @@
   notify: Reload caddy
   tags: [onboard, caddy]
 
-- name: Warn when the QR library is still the placeholder
-  # The vendored nayuki build must replace the placeholder before a
-  # real release (see files/onboard/vendor/README.md). Surface it as a
-  # converge-time warning rather than a silent half-feature — the page
-  # still works (deep-links + copy URL), just without the scan QR.
-  ansible.builtin.command:
-    cmd: grep -q "PLACEHOLDER" /var/lib/stealth-vps/onboard/vendor/qrcode.min.js
-  register: stealth_vps_onboard_qr_placeholder
-  changed_when: false
-  failed_when: false
-  when: stealth_vps_onboard_enabled | bool
-  tags: [onboard, caddy]
-
-- name: Notify operator about the QR placeholder
-  ansible.builtin.debug:
-    msg: >-
-      onboard bridge: vendor/qrcode.min.js is still the PLACEHOLDER —
-      the page works (import buttons + copy URL) but won't render a
-      scan QR. Drop the real nayuki build in before relying on QR
-      import. See files/onboard/vendor/README.md.
-  when:
-    - stealth_vps_onboard_enabled | bool
-    - stealth_vps_onboard_qr_placeholder.rc == 0
-  tags: [onboard, caddy]
-
 # --- Disable path: remove the bundle when the flag is off -------------
 
 - name: Remove onboard bundle when disabled
