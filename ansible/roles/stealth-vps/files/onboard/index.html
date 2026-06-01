@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>stealth-vps — Connect</title>
+  <!-- Self-contained: no web fonts, no CDN, no external anything. The
+       CSP header (set by Caddy) enforces this; the page is also written
+       to honour it (external scripts only, no inline JS). -->
+  <link rel="stylesheet" href="/.well-known/stealth-vps-onboard/onboard.css">
+</head>
+<body>
+  <main id="app" class="card">
+    <noscript>
+      This onboarding page needs JavaScript to render the import buttons
+      and QR code. Your subscription URL is the page URL with
+      <code>/stealth-vps-onboard/</code> replaced by
+      <code>/stealth-vps-sub/</code> — paste it into your VPN client.
+    </noscript>
+  </main>
+  <!-- Vendored QR generator (nayuki/QR-Code-generator, MIT). Loaded
+       before onboard.js so window.qrcodegen is available. -->
+  <script src="/.well-known/stealth-vps-onboard/vendor/qrcode.min.js"></script>
+  <script src="/.well-known/stealth-vps-onboard/onboard.js"></script>
+</body>
+</html>

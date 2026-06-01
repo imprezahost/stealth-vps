@@ -64,6 +64,31 @@
         reverse_proxy 127.0.0.1:{{ stealth_vps_vmess_ws_state.port }}
     }
 {% endif %}
+{% if stealth_vps_onboard_enabled | default(false) | bool %}
+
+    # v0.12.0+ — onboarding bridge. Static bundle, SPA-style: any token
+    # path under <onboard_path>/ serves index.html (try_files), so the
+    # JS reads the token from location.pathname. handle_path strips the
+    # prefix; the static assets (index.html, onboard.js, onboard.css,
+    # vendor/) live at the root of the bundle dir.
+    #
+    # Hardening headers: a strict CSP (everything same-origin, `data:`
+    # only for the QR canvas, no inline scripts) + X-Frame-Options DENY
+    # so the page can't be iframed into a phishing wrapper. No token
+    # oracle — every path renders index.html; only the in-app sub fetch
+    # distinguishes a valid token.
+    handle_path {{ stealth_vps_onboard_path }}/* {
+        root * /var/lib/stealth-vps/onboard
+        header {
+            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'"
+            X-Frame-Options "DENY"
+            X-Content-Type-Options "nosniff"
+            Referrer-Policy "no-referrer"
+        }
+        try_files {path} /index.html
+        file_server
+    }
+{% endif %}
 
     # Fall-through: anything else gets a 404, no directory listing.
     respond 404

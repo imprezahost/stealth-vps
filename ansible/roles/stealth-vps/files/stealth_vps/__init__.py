@@ -64,6 +64,15 @@ from .wireguard import (  # noqa: F401
     DEFAULT_SUBNET,
 )
 
+# v0.12.0+ — subscription-bridge onboarding URL helpers.
+from .onboard import (  # noqa: F401
+    OnboardError,
+    onboard_url_for,
+    deeplink_for,
+    DEEPLINK_TEMPLATES,
+    DEFAULT_ONBOARD_PATH,
+)
+
 # v0.10.0+: multi-node fleet management. Re-exported here so callers
 # (bot, CLI) can `from stealth_vps import FleetNode, load_fleet`. Only
 # meaningful on a control box (data nodes never call into fleet.*).
